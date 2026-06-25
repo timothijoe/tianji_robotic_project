@@ -1,0 +1,53 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: Base_L
+    - Class: rviz_default_plugins/RobotModel
+      Description Topic:
+        Value: /robot_description
+      Enabled: true
+      Name: RobotModel
+      TF Prefix: ""
+      Update Interval: 0
+      Visual Enabled: true
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+    - Class: rviz_default_plugins/Path
+      Color: 0; 180; 255
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.03
+      Name: TCP Actual Path
+      Topic:
+        Value: /tcp/actual_path
+    - Class: rviz_default_plugins/Path
+      Color: 255; 190; 0
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.02
+      Name: TCP Predicted Path
+      Topic:
+        Value: /tcp/predicted_path
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: Base_L
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Value: true
+Window Geometry:
+  Height: 900
+  Width: 1200
