@@ -101,7 +101,7 @@
                     <site name="right_flange_z_arrow" type="box" pos="0 0 0.05" size="0.006 0.006 0.05" rgba="1 0 0 1" />
                     <site name="right_flange_x_arrow" type="box" pos="0.05 0 0" size="0.05 0.006 0.006" rgba="0 1 0 1" />
                     <site name="right_flange_y_arrow" type="box" pos="0 0.05 0" size="0.006 0.05 0.006" rgba="0 0 1 1" />
-                    <body name="right_force_sensor_body" pos="0.00459284 0.00046698 0.06349902" quat="-0.69194667 -0.1455686 0.15981368 0.68882449">
+                    <body name="right_force_sensor_body" pos="0 0 0.095" quat="1 0 0 0">
                       <geom name="right_force_sensor_adapter" type="cylinder" pos="0 0 -0.018" size="0.014 0.018" rgba="0.28 0.28 0.3 1" contype="0" conaffinity="0" />
                       <geom name="right_force_sensor_housing" type="cylinder" pos="0 0 -0.0105" size="0.026 0.0105" rgba="0.18 0.18 0.2 1" contype="0" conaffinity="0" />
                       <site name="right_force_sensor_site" size="0.012" rgba="1 0.7 0 1" />
