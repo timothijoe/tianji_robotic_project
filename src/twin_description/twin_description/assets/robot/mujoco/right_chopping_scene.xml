@@ -114,10 +114,10 @@
                         <!-- 碰撞体: 不可见 (rgba alpha=0) -->
                         <geom name="right_knife_handle" type="box" pos="0 0 0.04" size="0.012 0.02 0.04" rgba="0.06 0.06 0.065 0" contype="0" conaffinity="0" />
                         <geom name="right_knife_blade" type="box" pos="0 -0.02 0.18" size="0.006 0.05 0.10" rgba="0.72 0.74 0.76 0" friction="0.9 0.02 0.002" solref="0.04 1" solimp="0.85 0.95 0.005" />
-                        <!-- 刀刃两端标记: 在刀尖 Z=0.28, 刀刃 Y=-0.07, 刀背 Y=0.03 -->
-                        <site name="right_blade_edge_top" type="sphere" pos="0  0.03 0.28" size="0.008" rgba="0 1 1 0.9" />
-                        <site name="right_blade_edge_bot" type="sphere" pos="0 -0.07 0.28" size="0.008" rgba="0 1 1 0.9" />
-                        <site name="right_tool_tip_site" pos="0 -0.02 0.28" size="0.009" rgba="0 1 1 0.7" />
+                        <!-- 刀刃分布标记: 都在刀刃 Y=-0.07, 沿 Z 方向均匀分布 -->
+                        <site name="right_blade_edge_top" type="sphere" pos="0 -0.07 0.10" size="0.008" rgba="0 1 1 0.9" />
+                        <site name="right_blade_edge_bot" type="sphere" pos="0 -0.07 0.19" size="0.008" rgba="0 1 1 0.9" />
+                        <site name="right_tool_tip_site" pos="0 -0.07 0.28" size="0.009" rgba="0 1 1 0.7" />
                       </body>
                     </body>
                   </body>
