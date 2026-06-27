@@ -20,11 +20,12 @@ from typing import Callable, Sequence
 
 import numpy as np
 
-# Ensure twin_control is importable
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "twin_control"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "twin_core"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "twin_description"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "twin_mujoco"))
+# Ensure source packages are importable when the demo is run from a checkout.
+_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT / "src"))
+sys.path.insert(0, str(_ROOT / "src" / "twin_core"))
+sys.path.insert(0, str(_ROOT / "src" / "twin_description"))
+sys.path.insert(0, str(_ROOT / "src" / "twin_mujoco"))
 
 from twin_control.controller import (
     CartesianImpedanceParams,

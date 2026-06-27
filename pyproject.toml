@@ -22,8 +22,8 @@ twin-chop = "twin_mujoco.cli:main"
 twin-trajectory = "twin_control.trajectory_demo:main"
 
 [tool.setuptools.packages.find]
-where = ["src/twin_core", "src/twin_description", "src/twin_mujoco", "src/twin_control"]
+where = ["src", "src/twin_core", "src/twin_description", "src/twin_mujoco"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src/twin_core", "src/twin_description", "src/twin_mujoco", "src/twin_control"]
+pythonpath = ["src", "src/twin_core", "src/twin_description", "src/twin_mujoco"]

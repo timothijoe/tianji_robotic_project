@@ -15,11 +15,13 @@ and delegates torque computation to ``UnifiedController``.
 from __future__ import annotations
 
 import csv
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Sequence
 
 import mujoco
+import mujoco.viewer
 import numpy as np
 
 from twin_control.controller import (
@@ -110,7 +112,7 @@ class TwinRobot:
         self._arm: ArmView | None = None
         self._kinematics: MarvinKinematics | None = None
         self._controller: UnifiedController | None = None
-        self._viewer: mujoco.MjViewer | None = None
+        self._viewer = None
         self._state = RobotState.IDLE
         self._samples: list[dict] = []
         self._wrench_bias = np.zeros(6)
@@ -157,9 +159,9 @@ class TwinRobot:
         )
 
         if viewer:
-            self._viewer = mujoco.MjViewer(self.runtime.model, self.runtime.data)
-            if realtime:
-                self._viewer._render_every_frame = True
+            self._viewer = mujoco.viewer.launch_passive(
+                self.runtime.model, self.runtime.data,
+            )
 
         self._state = RobotState.IDLE
         self._samples.clear()
@@ -169,6 +171,7 @@ class TwinRobot:
         """Release resources."""
         if self._viewer is not None:
             self._viewer.close()
+            time.sleep(0.5)
             self._viewer = None
         self.runtime = None
         self._arm = None
