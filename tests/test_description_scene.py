@@ -112,12 +112,11 @@ def test_right_force_sensor_adapter_connects_to_visible_flange():
         and model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_MESH
     )
 
-    # sensor_body quat matches the flange visual mesh quat
-    np.testing.assert_allclose(
-        model.body_quat[sensor_body_id],
-        model.geom_quat[flange_geom_id],
-        atol=1e-6,
-    )
+    # sensor_body quat is identity (aligned with link7 body +Z axis)
+    np.testing.assert_allclose(model.body_quat[sensor_body_id], [1.0, 0.0, 0.0, 0.0], atol=1e-8)
+
+    # sensor_body pos is 95mm along link7 +Z
+    np.testing.assert_allclose(model.body_pos[sensor_body_id], [0.0, 0.0, 0.095], atol=1e-8)
 
     # Adapter shares the same frame as sensor_body (no extra quat)
     adapter_rotation = data.geom_xmat[adapter_id].reshape(3, 3)

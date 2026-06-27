@@ -111,6 +111,9 @@
                         <geom name="right_cleaver_handle_visual" type="mesh" mesh="right_cleaver_handle_mesh" rgba="0.035 0.032 0.03 1" contype="0" conaffinity="0" />
                         <geom name="right_knife_handle" type="box" pos="0 0 -0.04" size="0.012 0.04 0.04" rgba="0.06 0.06 0.065 0" contype="0" conaffinity="0" />
                         <geom name="right_knife_blade" type="box" pos="0 0 -0.18" size="0.006 0.08 0.10" rgba="0.72 0.74 0.76 0" friction="0.9 0.02 0.002" solref="0.04 1" solimp="0.85 0.95 0.005" />
+                        <!-- 刀刃两端标记: 两个青色小球, 沿 body ±Y 方向各 40mm -->
+                        <site name="right_blade_edge_top" type="sphere" pos="0  0.04 -0.18" size="0.008" rgba="0 1 1 0.9" />
+                        <site name="right_blade_edge_bot" type="sphere" pos="0 -0.04 -0.18" size="0.008" rgba="0 1 1 0.9" />
                         <site name="right_tool_tip_site" pos="0 0 -0.28" size="0.009" rgba="0 1 1 0.7" />
                       </body>
                     </body>
