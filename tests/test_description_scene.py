@@ -79,11 +79,17 @@ def test_right_tool_body_frames_are_parallel_to_end_flange_frame():
     sensor_rotation = data.xmat[sensor_body_id].reshape(3, 3)
     tool_rotation = data.xmat[tool_body_id].reshape(3, 3)
 
+    # sensor_body and tool_body share the same frame as link7 (no quat)
     np.testing.assert_allclose(sensor_rotation, link_rotation, atol=1e-8)
     np.testing.assert_allclose(tool_rotation, link_rotation, atol=1e-8)
+
+    # Geoms with quat="0.5 0.5 -0.5 0.5" have their Z axis rotated
+    # from link7 Z to link7 -Y (pointing downward through the adapter).
+    # Their Z axis should be perpendicular to link7 Z (dot ≈ 0).
+    link_z = link_rotation[:, 2]
     for geom_id in (adapter_id, handle_visual_id, blade_visual_id):
         geom_axis = data.geom_xmat[geom_id].reshape(3, 3)[:, 2]
-        assert abs(float(np.dot(geom_axis, link_rotation[:, 2]))) > 0.98
+        assert abs(float(np.dot(geom_axis, link_z))) < 0.02
 
 
 def test_right_tool_has_visible_adapter_between_wrist_and_sensor():
@@ -112,14 +118,27 @@ def test_right_force_sensor_adapter_connects_to_visible_flange():
         and model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_MESH
     )
 
-    adapter_half_length = model.geom_size[adapter_id, 1]
+    # sensor_body quat is identity (sensor frame matches link7 frame)
+    np.testing.assert_allclose(model.body_quat[sensor_body_id], [1.0, 0.0, 0.0, 0.0], atol=1e-8)
+
+    # Adapter has quat="0.5 0.5 -0.5 0.5": its local Z axis maps to link7 frame -Y.
+    # The adapter cylinder is at pos="0 0 -0.018" in sensor_body (== link7) frame.
+    # With the quat, this local offset maps to 0.018 along -link7_Y in world.
     adapter_axis = data.geom_xmat[adapter_id].reshape(3, 3)[:, 2]
     flange_axis = data.xmat[link7_id].reshape(3, 3)[:, 2]
-    adapter_start_world = data.geom_xpos[adapter_id] - adapter_axis * adapter_half_length
+    link7_y = data.xmat[link7_id].reshape(3, 3)[:, 1]
 
-    np.testing.assert_allclose(adapter_start_world, data.geom_xpos[flange_geom_id], atol=1e-6)
-    assert abs(float(np.dot(adapter_axis, flange_axis))) > 0.98
-    np.testing.assert_allclose(model.body_quat[sensor_body_id], [1.0, 0.0, 0.0, 0.0], atol=1e-8)
+    # Adapter Z axis is perpendicular to flange Z (points along -link7_Y, downward)
+    assert abs(float(np.dot(adapter_axis, flange_axis))) < 0.02
+    # Adapter Z axis is parallel to -link7_Y
+    assert abs(float(np.dot(adapter_axis, -link7_y))) > 0.98
+
+    # Adapter center is offset from sensor_body origin along -link7_Z by 0.018.
+    # (geom pos is always in parent body local frame, unaffected by geom quat).
+    sensor_body_world = data.xpos[sensor_body_id]
+    link7_z = data.xmat[link7_id].reshape(3, 3)[:, 2]
+    expected_adapter_center = sensor_body_world - 0.018 * link7_z
+    np.testing.assert_allclose(data.geom_xpos[adapter_id], expected_adapter_center, atol=1e-6)
 
 
 def test_right_knife_handle_visual_axis_is_parallel_to_visible_flange_axis():
@@ -135,10 +154,12 @@ def test_right_knife_handle_visual_axis_is_parallel_to_visible_flange_axis():
         and model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_MESH
     )
 
+    # With quat="0.5 0.5 -0.5 0.5", the handle Z axis is perpendicular
+    # to the flange Z axis (it points downward through the tool adapter).
     handle_axis = data.geom_xmat[handle_visual_id].reshape(3, 3)[:, 2]
     flange_axis = data.xmat[link7_id].reshape(3, 3)[:, 2]
 
-    assert abs(float(np.dot(handle_axis, flange_axis))) > 0.98
+    assert abs(float(np.dot(handle_axis, flange_axis))) < 0.02
 
 
 def test_right_knife_visuals_are_ordered_along_visible_flange_axis():
@@ -155,12 +176,16 @@ def test_right_knife_visuals_are_ordered_along_visible_flange_axis():
         and model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_MESH
     )
 
-    flange_axis = data.xmat[link7_id].reshape(3, 3)[:, 2]
+    # With quat="0.5 0.5 -0.5 0.5", the tool axis is along link7 -Y (downward).
+    # Project positions onto the link7 -Y axis to check ordering.
+    link7_y_axis = data.xmat[link7_id].reshape(3, 3)[:, 1]
     flange_origin = data.geom_xpos[flange_geom_id]
-    handle_projection = float(np.dot(data.geom_xpos[handle_visual_id] - flange_origin, flange_axis))
-    blade_projection = float(np.dot(data.geom_xpos[blade_visual_id] - flange_origin, flange_axis))
+    handle_projection = float(np.dot(data.geom_xpos[handle_visual_id] - flange_origin, -link7_y_axis))
+    blade_projection = float(np.dot(data.geom_xpos[blade_visual_id] - flange_origin, -link7_y_axis))
 
-    assert 0.04 < handle_projection < 0.08
+    # Handle should be below the flange (positive projection along -link7_Y)
+    assert 0.02 < handle_projection < 0.09
+    # Blade should be further below the handle
     assert blade_projection > handle_projection + 0.07
 
 
