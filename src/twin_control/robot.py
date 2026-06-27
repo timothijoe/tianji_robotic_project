@@ -21,8 +21,14 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 import mujoco
-import mujoco.viewer
+import mujoco.viewer  # loads lazy submodule (needed in MuJoCo 3.9)
 import numpy as np
+
+# MuJoCo viewer API changed in 3.10; fall back for 3.9.
+try:
+    from mujoco.viewer import launch_passive as _mj_launch_passive
+except ImportError:
+    _mj_launch_passive = None
 
 from twin_control.controller import (
     CartesianImpedanceParams,
