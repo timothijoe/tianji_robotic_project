@@ -51,6 +51,8 @@ class ForceControlSample:
     joint_torques: tuple[float, ...]
     contact: bool
     fault: str = ""
+    blade_edge_positions: tuple[tuple[float, float, float], ...] = ()
+    target_blade_edge_positions: tuple[tuple[float, float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -138,12 +140,12 @@ class RightArmChopper:
         self.samples.clear()
         self.controller = CartesianForceController(self.right)
 
-        position, rotation = self.right.site_pose("right_tool_tip_site")
+        position, _ = self.right.site_pose("right_tool_tip_site")
         board_top = self._board_top()
-        safe = position.copy()
-        safe[2] = max(float(safe[2]), board_top + cfg.safe_height_m)
-        descend = safe.copy()
-        descend[2] = board_top + 0.02
+        geometry = self._blade_geometry()
+        rotation = self._horizontal_blade_rotation(geometry)
+        safe = self._tip_target_for_blade_clearance(position, rotation, geometry, board_top, cfg.safe_height_m)
+        descend = self._tip_target_for_blade_on_board(position, rotation, geometry, board_top)
         control_dt = _control_interval(cfg.control_hz, self.runtime.timestep)
         substeps = _substeps_per_control(cfg.control_hz, self.runtime.timestep)
 
@@ -155,6 +157,8 @@ class RightArmChopper:
             shifted_safe[0] += cycle * cfg.spacing_m
             shifted_descend = descend.copy()
             shifted_descend[0] += cycle * cfg.spacing_m
+            shifted_safe_edges = self._predict_blade_edge_positions(shifted_safe, rotation, geometry)
+            shifted_descend_edges = self._predict_blade_edge_positions(shifted_descend, rotation, geometry)
 
             phase = ChoppingPhase.APPROACH if cycle == 0 else ChoppingPhase.SHIFT
             elapsed, torque = self._record_phase(
@@ -168,6 +172,7 @@ class RightArmChopper:
                 torque,
                 control_dt,
                 substeps,
+                shifted_safe_edges,
                 viewer_sync,
             )
             descend_steps = _motion_steps(shifted_safe, shifted_descend, cfg.descent_speed_m_s, control_dt)
@@ -182,6 +187,7 @@ class RightArmChopper:
                 torque,
                 control_dt,
                 substeps,
+                shifted_descend_edges,
                 viewer_sync,
             )
             self.controller.enable_force(True, target_force_n=cfg.target_force_n)
@@ -196,6 +202,7 @@ class RightArmChopper:
                 torque,
                 control_dt,
                 substeps,
+                shifted_descend_edges,
                 viewer_sync,
             )
             self.controller.enable_force(False)
@@ -211,12 +218,22 @@ class RightArmChopper:
                 torque,
                 control_dt,
                 substeps,
+                shifted_safe_edges,
                 viewer_sync,
             )
             final_target = shifted_safe
 
         self.samples.append(
-            self._sample(self.runtime.data.time, ChoppingPhase.COMPLETE, "IDLE", final_target, 0.0, np.zeros(7), "")
+            self._sample(
+                self.runtime.data.time,
+                ChoppingPhase.COMPLETE,
+                "IDLE",
+                final_target,
+                0.0,
+                np.zeros(7),
+                "",
+                target_blade_edge_positions=self._predict_blade_edge_positions(final_target, rotation, geometry),
+            )
         )
         if viewer_sync is not None:
             viewer_sync()
@@ -245,6 +262,7 @@ class RightArmChopper:
         torque: np.ndarray,
         control_dt: float,
         substeps: int,
+        target_blade_edge_positions: tuple[tuple[float, float, float], ...],
         viewer_sync: Callable[[], None] | None,
     ) -> tuple[float, np.ndarray]:
         mode = "FORCE" if phase == ChoppingPhase.FORCE_HOLD else "POSITION"
@@ -272,6 +290,7 @@ class RightArmChopper:
                     "",
                     raw_wrench=raw_wrench,
                     compensated_wrench=compensated_wrench,
+                    target_blade_edge_positions=target_blade_edge_positions,
                 )
             )
             if viewer_sync is not None:
@@ -369,8 +388,13 @@ class RightArmChopper:
         *,
         raw_wrench: Sequence[float] | None = None,
         compensated_wrench: Sequence[float] | None = None,
+        target_blade_edge_positions: tuple[tuple[float, float, float], ...] | None = None,
     ) -> ForceControlSample:
-        actual_position, _ = self.right.site_pose("right_tool_tip_site")
+        actual_position, actual_rotation = self.right.site_pose("right_tool_tip_site")
+        blade_geometry = self._blade_geometry()
+        target_edges = target_blade_edge_positions
+        if target_edges is None:
+            target_edges = self._predict_blade_edge_positions(target_position, actual_rotation, blade_geometry)
         raw = np.zeros(6) if raw_wrench is None else np.asarray(raw_wrench, dtype=float).reshape(6)
         wrench = np.zeros(6) if compensated_wrench is None else np.asarray(compensated_wrench, dtype=float).reshape(6)
         tau = np.asarray(torque, dtype=float).reshape(7)
@@ -389,6 +413,8 @@ class RightArmChopper:
             joint_torques=tuple(float(value) for value in tau),
             contact=bool(abs(wrench[2]) > 1e-6),
             fault=fault,
+            blade_edge_positions=blade_geometry.edge_positions,
+            target_blade_edge_positions=target_edges,
         )
 
     def _measured_wrench(self) -> np.ndarray:

@@ -282,16 +282,15 @@ def test_chopper_keeps_left_arm_near_home_pose():
     assert np.linalg.norm(left.joint_positions - LEFT_HOME_Q) < 0.01
 
 
-def test_chopper_initializes_safe_right_home_before_logging_samples():
+def test_chopper_initializes_safe_blade_edge_before_logging_samples():
     chopper = RightArmChopper()
 
     samples = chopper.run(ChoppingConfig(cycles=1, control_hz=20.0, force_hold_s=0.01))
 
     assert samples
-    runtime = TwinMujocoRuntime.load(right_chopping_scene_path())
-    board_id = runtime._id(__import__("mujoco").mjtObj.mjOBJ_GEOM, "chopping_board")
-    board_top = runtime.model.geom_pos[board_id, 2] + runtime.model.geom_size[board_id, 2]
-    assert samples[0].actual_position[2] > board_top + 0.05
+    board_top = chopper._board_top()
+    for position in samples[0].blade_edge_positions:
+        assert position[2] > board_top + 0.05
 
 
 def test_blade_geometry_reads_two_finite_edge_positions_and_tip_pose():
@@ -362,3 +361,42 @@ def test_two_point_descend_target_predicts_both_blade_edges_on_board():
 
     for position in predicted:
         assert abs(position[2] - board_top) <= 1e-9
+
+
+def test_chopping_samples_include_two_actual_and_target_blade_edge_positions():
+    samples = RightArmChopper().run(ChoppingConfig(cycles=1, control_hz=20.0, force_hold_s=0.01))
+
+    active = [sample for sample in samples if sample.phase != ChoppingPhase.COMPLETE]
+
+    assert active
+    assert all(len(sample.blade_edge_positions) == 2 for sample in active)
+    assert all(len(sample.target_blade_edge_positions) == 2 for sample in active)
+    for sample in active:
+        for position in sample.blade_edge_positions + sample.target_blade_edge_positions:
+            assert len(position) == 3
+            assert np.all(np.isfinite(position))
+
+
+def test_force_hold_targets_both_blade_edges_at_board_top():
+    chopper = RightArmChopper()
+    samples = chopper.run(ChoppingConfig(cycles=1, control_hz=20.0, force_hold_s=0.01))
+    board_top = chopper._board_top()
+
+    force_samples = [sample for sample in samples if sample.phase == ChoppingPhase.FORCE_HOLD]
+
+    assert force_samples
+    for sample in force_samples:
+        assert abs(sample.target_blade_edge_positions[0][2] - sample.target_blade_edge_positions[1][2]) <= 1e-9
+        for position in sample.target_blade_edge_positions:
+            assert abs(position[2] - board_top) <= 1e-9
+
+
+def test_first_safe_target_keeps_both_blade_edges_above_board():
+    chopper = RightArmChopper()
+    samples = chopper.run(ChoppingConfig(cycles=1, control_hz=20.0, force_hold_s=0.01))
+    board_top = chopper._board_top()
+
+    first = next(sample for sample in samples if sample.phase == ChoppingPhase.APPROACH)
+
+    for position in first.target_blade_edge_positions:
+        assert position[2] >= board_top + 0.08 - 1e-9

@@ -85,20 +85,14 @@ def test_safe_home_geometry_is_valid_for_right_chopping():
     runtime.set_arm_positions("left", LEFT_HOME_Q)
     runtime.set_arm_positions("right", RIGHT_CHOPPING_HOME_Q)
     right = runtime.arm_view("right")
-    tool_position, tool_rotation = right.site_pose("right_tool_tip_site")
-    sensor_position, _ = right.site_pose("right_force_sensor_site")
+    top_position, _ = right.site_pose("right_blade_edge_top")
+    bot_position, _ = right.site_pose("right_blade_edge_bot")
     board_id = runtime._id(__import__("mujoco").mjtObj.mjOBJ_GEOM, "chopping_board")
     board_center = runtime.model.geom_pos[board_id]
     board_top = runtime.model.geom_pos[board_id, 2] + runtime.model.geom_size[board_id, 2]
-    link7_id = runtime._id(__import__("mujoco").mjtObj.mjOBJ_BODY, "right_link7")
-    link7_position = runtime.data.xpos[link7_id]
 
     board_half_size = runtime.model.geom_size[board_id, :2]
-    board_offset = np.abs(tool_position[:2] - board_center[:2])
-
-    assert np.all(board_offset < board_half_size - 0.04)
-    # Tool tip should be safely above the board (>= 0.05 m clearance)
-    assert tool_position[2] > board_top + 0.05
-    # Tool -Z axis (knife direction) should point substantially downward
-    assert abs(np.dot(tool_rotation[:, 2], [0, 0, -1])) > 0.85
-    assert sensor_position[2] > tool_position[2]
+    for position in (top_position, bot_position):
+        board_offset = np.abs(position[:2] - board_center[:2])
+        assert np.all(board_offset < board_half_size - 0.04)
+        assert position[2] > board_top + 0.05
