@@ -75,21 +75,15 @@ def test_right_tool_body_frames_are_parallel_to_end_flange_frame():
     handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_handle_visual")
     blade_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_visual")
 
-    link_rotation = data.xmat[link7_id].reshape(3, 3)
+    # force_sensor_body quat matches the flange visual mesh quat,
+    # so sensor_body, tool_body, and all child geoms share the same frame.
     sensor_rotation = data.xmat[sensor_body_id].reshape(3, 3)
     tool_rotation = data.xmat[tool_body_id].reshape(3, 3)
 
-    # sensor_body and tool_body share the same frame as link7 (no quat)
-    np.testing.assert_allclose(sensor_rotation, link_rotation, atol=1e-8)
-    np.testing.assert_allclose(tool_rotation, link_rotation, atol=1e-8)
-
-    # Geoms with quat="0.5 0.5 -0.5 0.5" have their Z axis rotated
-    # from link7 Z to link7 -Y (pointing downward through the adapter).
-    # Their Z axis should be perpendicular to link7 Z (dot ≈ 0).
-    link_z = link_rotation[:, 2]
+    np.testing.assert_allclose(sensor_rotation, tool_rotation, atol=1e-8)
     for geom_id in (adapter_id, handle_visual_id, blade_visual_id):
-        geom_axis = data.geom_xmat[geom_id].reshape(3, 3)[:, 2]
-        assert abs(float(np.dot(geom_axis, link_z))) < 0.02
+        geom_rotation = data.geom_xmat[geom_id].reshape(3, 3)
+        np.testing.assert_allclose(geom_rotation, tool_rotation, atol=2e-2)
 
 
 def test_right_tool_has_visible_adapter_between_wrist_and_sensor():
@@ -118,27 +112,24 @@ def test_right_force_sensor_adapter_connects_to_visible_flange():
         and model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_MESH
     )
 
-    # sensor_body quat is identity (sensor frame matches link7 frame)
-    np.testing.assert_allclose(model.body_quat[sensor_body_id], [1.0, 0.0, 0.0, 0.0], atol=1e-8)
+    # sensor_body quat matches the flange visual mesh quat
+    np.testing.assert_allclose(
+        model.body_quat[sensor_body_id],
+        model.geom_quat[flange_geom_id],
+        atol=1e-6,
+    )
 
-    # Adapter has quat="0.5 0.5 -0.5 0.5": its local Z axis maps to link7 frame -Y.
-    # The adapter cylinder is at pos="0 0 -0.018" in sensor_body (== link7) frame.
-    # With the quat, this local offset maps to 0.018 along -link7_Y in world.
-    adapter_axis = data.geom_xmat[adapter_id].reshape(3, 3)[:, 2]
-    flange_axis = data.xmat[link7_id].reshape(3, 3)[:, 2]
-    link7_y = data.xmat[link7_id].reshape(3, 3)[:, 1]
+    # Adapter shares the same frame as sensor_body (no extra quat)
+    adapter_rotation = data.geom_xmat[adapter_id].reshape(3, 3)
+    sensor_rotation = data.xmat[sensor_body_id].reshape(3, 3)
+    np.testing.assert_allclose(adapter_rotation, sensor_rotation, atol=1e-4)
 
-    # Adapter Z axis is perpendicular to flange Z (points along -link7_Y, downward)
-    assert abs(float(np.dot(adapter_axis, flange_axis))) < 0.02
-    # Adapter Z axis is parallel to -link7_Y
-    assert abs(float(np.dot(adapter_axis, -link7_y))) > 0.98
-
-    # Adapter center is offset from sensor_body origin along -link7_Z by 0.018.
-    # (geom pos is always in parent body local frame, unaffected by geom quat).
+    # Adapter is at sensor_body origin (pos "0 0 -0.018" in sensor_body frame)
+    adapter_center_world = data.geom_xpos[adapter_id]
     sensor_body_world = data.xpos[sensor_body_id]
-    link7_z = data.xmat[link7_id].reshape(3, 3)[:, 2]
-    expected_adapter_center = sensor_body_world - 0.018 * link7_z
-    np.testing.assert_allclose(data.geom_xpos[adapter_id], expected_adapter_center, atol=1e-6)
+    sensor_z = sensor_rotation[:, 2]
+    expected_center = sensor_body_world - 0.018 * sensor_z
+    np.testing.assert_allclose(adapter_center_world, expected_center, atol=1e-6)
 
 
 def test_right_knife_handle_visual_axis_is_parallel_to_visible_flange_axis():
@@ -147,46 +138,36 @@ def test_right_knife_handle_visual_axis_is_parallel_to_visible_flange_axis():
     mujoco.mj_forward(model, data)
     link7_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_link7")
     handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_handle_visual")
-    flange_geom_id = next(
-        geom_id
-        for geom_id in range(model.ngeom)
-        if model.geom_bodyid[geom_id] == link7_id
-        and model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_MESH
-    )
+    tool_body_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_tool_body")
 
-    # With quat="0.5 0.5 -0.5 0.5", the handle Z axis is perpendicular
-    # to the flange Z axis (it points downward through the tool adapter).
-    handle_axis = data.geom_xmat[handle_visual_id].reshape(3, 3)[:, 2]
-    flange_axis = data.xmat[link7_id].reshape(3, 3)[:, 2]
-
-    assert abs(float(np.dot(handle_axis, flange_axis))) < 0.02
+    # handle_visual inherits tool_body frame (same as flange mesh frame)
+    handle_rotation = data.geom_xmat[handle_visual_id].reshape(3, 3)
+    tool_rotation = data.xmat[tool_body_id].reshape(3, 3)
+    np.testing.assert_allclose(handle_rotation, tool_rotation, atol=1e-4)
 
 
 def test_right_knife_visuals_are_ordered_along_visible_flange_axis():
     model = mujoco.MjModel.from_xml_path(str(right_chopping_scene_path()))
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
-    link7_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_link7")
-    handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_handle_visual")
-    blade_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_visual")
-    flange_geom_id = next(
-        geom_id
-        for geom_id in range(model.ngeom)
-        if model.geom_bodyid[geom_id] == link7_id
-        and model.geom_type[geom_id] == mujoco.mjtGeom.mjGEOM_MESH
-    )
+    handle_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_knife_handle")
+    blade_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_knife_blade")
+    tip_site_id = _id(model, mujoco.mjtObj.mjOBJ_SITE, "right_tool_tip_site")
+    tool_body_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_tool_body")
 
-    # With quat="0.5 0.5 -0.5 0.5", the tool axis is along link7 -Y (downward).
-    # Project positions onto the link7 -Y axis to check ordering.
-    link7_y_axis = data.xmat[link7_id].reshape(3, 3)[:, 1]
-    flange_origin = data.geom_xpos[flange_geom_id]
-    handle_projection = float(np.dot(data.geom_xpos[handle_visual_id] - flange_origin, -link7_y_axis))
-    blade_projection = float(np.dot(data.geom_xpos[blade_visual_id] - flange_origin, -link7_y_axis))
+    # Tool extends along tool_body -Z. Check ordering of collision geoms.
+    tool_rotation = data.xmat[tool_body_id].reshape(3, 3)
+    tool_z = tool_rotation[:, 2]
+    tool_body_pos = data.xpos[tool_body_id]
 
-    # Handle should be below the flange (positive projection along -link7_Y)
-    assert 0.02 < handle_projection < 0.09
-    # Blade should be further below the handle
-    assert blade_projection > handle_projection + 0.07
+    handle_projection = float(np.dot(data.geom_xpos[handle_id] - tool_body_pos, -tool_z))
+    blade_projection = float(np.dot(data.geom_xpos[blade_id] - tool_body_pos, -tool_z))
+    tip_projection = float(np.dot(data.site_xpos[tip_site_id] - tool_body_pos, -tool_z))
+
+    # Handle near flange, blade further, tip furthest along -tool_z
+    assert 0.03 < handle_projection < 0.06
+    assert blade_projection > handle_projection + 0.05
+    assert tip_projection > blade_projection + 0.05
 
 
 def test_right_tool_is_thin_knife_attached_below_force_sensor():
@@ -201,9 +182,10 @@ def test_right_tool_is_thin_knife_attached_below_force_sensor():
     assert model.geom_bodyid[blade_id] == tool_body_id
     assert model.geom_type[handle_id] == mujoco.mjtGeom.mjGEOM_BOX
     assert model.geom_type[blade_id] == mujoco.mjtGeom.mjGEOM_BOX
-    assert model.geom_size[handle_id].tolist() == [0.012, 0.04, 0.018]
-    assert model.geom_size[blade_id].tolist() == [0.006, 0.08, 0.055]
-    assert model.geom_pos[blade_id, 1] < model.geom_pos[handle_id, 1]
+    assert model.geom_size[handle_id].tolist() == [0.012, 0.04, 0.04]
+    assert model.geom_size[blade_id].tolist() == [0.006, 0.08, 0.10]
+    # knife_blade and tool_tip extend along flange -Z (below the handle)
+    assert model.geom_pos[blade_id, 2] < model.geom_pos[handle_id, 2]
 
 
 def test_right_tool_uses_visual_cleaver_mesh_with_simple_collision():

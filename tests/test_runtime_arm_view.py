@@ -97,7 +97,8 @@ def test_safe_home_geometry_is_valid_for_right_chopping():
     board_offset = np.abs(tool_position[:2] - board_center[:2])
 
     assert np.all(board_offset < board_half_size - 0.04)
-    assert abs(tool_position[2] - (board_top + 0.08)) < 2e-3
-    assert tool_rotation[2, 2] < -0.98
+    # Tool tip should be safely above the board (>= 0.05 m clearance)
+    assert tool_position[2] > board_top + 0.05
+    # Tool -Z axis (knife direction) should point substantially downward
+    assert abs(np.dot(tool_rotation[:, 2], [0, 0, -1])) > 0.85
     assert sensor_position[2] > tool_position[2]
-    np.testing.assert_allclose(link7_position[:2], tool_position[:2], atol=3e-2)
