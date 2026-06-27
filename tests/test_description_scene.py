@@ -179,8 +179,8 @@ def test_right_tool_is_thin_knife_attached_below_force_sensor():
     assert model.geom_bodyid[blade_id] == tool_body_id
     assert model.geom_type[handle_id] == mujoco.mjtGeom.mjGEOM_BOX
     assert model.geom_type[blade_id] == mujoco.mjtGeom.mjGEOM_BOX
-    assert model.geom_size[handle_id].tolist() == [0.012, 0.04, 0.04]
-    assert model.geom_size[blade_id].tolist() == [0.006, 0.08, 0.10]
+    assert model.geom_size[handle_id].tolist() == [0.012, 0.02, 0.04]
+    assert model.geom_size[blade_id].tolist() == [0.006, 0.04, 0.10]
     # knife_blade extends further along body +Z than knife_handle
     assert model.geom_pos[blade_id, 2] > model.geom_pos[handle_id, 2]
 
