@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "twin-joint-ws"
+version = "0.1.0"
+description = "Pure MuJoCo dual-arm chopping MVP for twin_joint_ws"
+requires-python = ">=3.10"
+dependencies = [
+  "mujoco>=3.1",
+  "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=7.4",
+]
+
+[project.scripts]
+twin-chop = "twin_mujoco.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src/twin_core", "src/twin_description", "src/twin_mujoco"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src/twin_core", "src/twin_description", "src/twin_mujoco"]

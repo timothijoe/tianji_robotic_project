@@ -1,0 +1,133 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mujoco model="marvin_robot">
+  <compiler angle="radian" />
+  <asset>
+    <mesh name="Base_Marvin_M6_S" content_type="model/stl" file="meshes/arm_meshes/Base_Marvin_M6_S.STL" />
+    <mesh name="S_Arm_Marvin_M6_S" content_type="model/stl" file="meshes/arm_meshes/S_Arm_Marvin_M6_S.STL" />
+    <mesh name="L_Arm_Marvin_M6_S" content_type="model/stl" file="meshes/arm_meshes/L_Arm_Marvin_M6_S.STL" />
+    <mesh name="E_Arm_Marvin_M6_S_689" content_type="model/stl" file="meshes/arm_meshes/E_Arm_Marvin_M6_S_689.STL" />
+    <mesh name="U_Arm_Marvin_M6_S_CCS" content_type="model/stl" file="meshes/arm_meshes/U_Arm_Marvin_M6_S_CCS.STL" />
+    <mesh name="R_Arm_Marvin_M6_S_CCS" content_type="model/stl" file="meshes/arm_meshes/R_Arm_Marvin_M6_S_CCS.STL" />
+    <mesh name="B_Arm_Marvin_M6_S_CCS" content_type="model/stl" file="meshes/arm_meshes/B_Arm_Marvin_M6_S_CCS.STL" />
+    <mesh name="T_Arm_Marvin_M6_S_R_CCS" content_type="model/stl" file="meshes/arm_meshes/T_Arm_Marvin_M6_S_R_CCS.STL" />
+    <mesh name="BASE" content_type="model/stl" file="meshes/SRS/BASE.STL" />
+  </asset>
+<asset>
+  <!-- 天空盒渐变背景 -->
+  <texture type="skybox" builtin="gradient"
+           rgb1="0.4 0.6 0.9" rgb2="0.15 0.25 0.4"
+           width="512" height="3072"/>
+
+  <!-- 棋盘纹理（蓝色系） -->
+  <texture name="grid" type="2d" builtin="checker"
+           rgb1="0.25 0.4 0.6" rgb2="0.1 0.18 0.3"
+           width="512" height="512" 
+           mark="edge" markrgb="1 1 1"/>
+
+  <!-- 材质：引用棋盘纹理 -->
+  <material name="ground_mat" texture="grid"
+            texrepeat="5 4" texuniform="true"/>
+</asset>
+
+<visual>
+  <!-- 删除background行，确保天空盒生效 -->
+  <rgba haze="0.15 0.25 0.35 1"/>
+  <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+</visual>
+
+  <worldbody>
+    <geom name="ground" type="plane" size="20 20 0.1" material="ground_mat" pos="0 0 0"/>
+    <body name="robot_base" pos="0 0 0.3">
+    <geom type="mesh" rgba="1 1 1 1" mesh="BASE" />
+    <geom pos="0 0.04 0.21895" quat="1.32679e-06 0 1 0.000796327" type="mesh" rgba="0.8 0.8 0.8 1" mesh="Base_Marvin_M6_S" />
+    <geom pos="0 -0.04 0.21895" quat="1.05656e-09 1.32679e-06 0 1" type="mesh" rgba="0.8 0.8 0.8 1" mesh="Base_Marvin_M6_S" />
+    <body name="left_link1" pos="0 0.04 0.21895" quat="0.707388 -0.706825 0 0">
+      <inertial pos="1.875e-05 0.006003 0.1438" mass="2.0926" fullinertia="0.0485 0.048824 0.0020558 2.85e-06 9.42e-06 0.0021904" />
+      <joint name="left_joint1" pos="0 0 0" axis="0 0 1" range="-3.11 3.11" actuatorfrcrange="-108 108" damping="5" frictionloss="3.0" />
+      <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="S_Arm_Marvin_M6_S" />
+      <body name="left_link2" pos="0 0 0.1745">
+        <inertial pos="-7.03e-06 0.05542 0.010995" mass="1.9432" fullinertia="0.016558 0.0033963 0.015504 -6.34e-06 1.91e-06 -6.31e-06" />
+        <joint name="left_joint2" pos="0 0 0" axis="0 -1 0" range="-2.093 2.093" actuatorfrcrange="-108 108" damping="5" frictionloss="3.0" />
+        <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="L_Arm_Marvin_M6_S" />
+        <body name="left_link3">
+          <inertial pos="0.0087411 0.0019043 0.23487" mass="1.6913" fullinertia="0.099807 0.10032 0.0017797 6.153e-05 0.0042654 0.0009332" />
+          <joint name="left_joint3" pos="0 0 0" axis="0 0 1" range="-3.11 3.11" actuatorfrcrange="-66 66" damping="3" frictionloss="2.0" />
+          <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="E_Arm_Marvin_M6_S_689" />
+          <body name="left_link4" pos="0.018 0 0.287">
+            <inertial pos="-0.0086935 0.045984 0.011135" mass="1.5332" fullinertia="0.0087075 0.0023918 0.0082548 -0.0012304 -1.947e-05 9.793e-05" />
+            <joint name="left_joint4" pos="0 0 0" axis="0 -1 0" range="-2.531 1.047" actuatorfrcrange="-66 66" damping="3" frictionloss="2.0" />
+            <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="U_Arm_Marvin_M6_S_CCS" />
+            <body name="left_link5" pos="-0.018 0 0.314">
+              <inertial pos="-0.00036467 0.0001479 0.19902" mass="2.0095" fullinertia="0.08529 0.084873 0.0021133 -3.491e-05 -0.0001918 8.319e-05" />
+              <joint name="left_joint5" pos="0 0 0" axis="0 0 1" range="-3.11 3.11" actuatorfrcrange="-18 18" damping="1" frictionloss="0.5" />
+              <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="R_Arm_Marvin_M6_S_CCS" />
+              <body name="left_link6">
+                <inertial pos="-0.004911 0.00027206 -8.14e-05" mass="0.67002" fullinertia="0.00048938 0.0004162 0.00038542 -2.3e-06 2.16e-06 6.3e-07" />
+                <joint name="left_joint6" pos="0 0 0" axis="0 -1 0" range="-1.0467 1.0467" actuatorfrcrange="-18 18" damping="1" frictionloss="0.5" />
+                <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="B_Arm_Marvin_M6_S_CCS" />
+                <body name="left_link7">
+                  <inertial pos="0.044988 -4.226e-05 0.0055581" mass="0.31658" fullinertia="0.00038289 0.00133 0.0011774 -7.4e-07 -1.403e-05 -6.1e-07" />
+                  <joint name="left_joint7" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" actuatorfrcrange="-18 18" damping="0.5" frictionloss="0.3" />
+                  <geom quat="0.000563312 0.706825 -0.000562864 0.707388" type="mesh" rgba="0.8 0.8 0.8 1" mesh="T_Arm_Marvin_M6_S_R_CCS" />
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+    <body name="right_link1" pos="0 -0.04 0.21895" quat="0.707388 0.706825 0 0">
+      <inertial pos="1.875e-05 0.006003 0.1438" mass="2.0926" fullinertia="0.0485 0.048824 0.0020558 2.85e-06 9.42e-06 0.0021904" />
+      <joint name="right_joint1" pos="0 0 0" axis="0 0 1" range="-3.11 3.11" actuatorfrcrange="-108 108" damping="5" frictionloss="3.0" />
+      <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="S_Arm_Marvin_M6_S" />
+      <body name="right_link2" pos="0 0 0.1745">
+        <inertial pos="-7.03e-06 0.05542 0.010995" mass="1.9432" fullinertia="0.016558 0.0033963 0.015504 -6.34e-06 1.91e-06 -6.31e-06" />
+        <joint name="right_joint2" pos="0 0 0" axis="0 -1 0" range="-2.093 2.093" actuatorfrcrange="-108 108" damping="5" frictionloss="3.0" />
+        <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="L_Arm_Marvin_M6_S" />
+        <body name="right_link3">
+          <inertial pos="0.0087411 0.0019043 0.23487" mass="1.6913" fullinertia="0.099807 0.10032 0.0017797 6.153e-05 0.0042654 0.0009332" />
+          <joint name="right_joint3" pos="0 0 0" axis="0 0 1" range="-3.11 3.11" actuatorfrcrange="-66 66" damping="3" frictionloss="2.0" />
+          <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="E_Arm_Marvin_M6_S_689" />
+          <body name="right_link4" pos="0.018 0 0.287">
+            <inertial pos="-0.0086935 0.045984 0.011135" mass="1.5332" fullinertia="0.0087075 0.0023918 0.0082548 -0.0012304 -1.947e-05 9.793e-05" />
+            <joint name="right_joint4" pos="0 0 0" axis="0 -1 0" range="-2.531 1.047" actuatorfrcrange="-66 66" damping="3" frictionloss="2.0" />
+            <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="U_Arm_Marvin_M6_S_CCS" />
+            <body name="right_link5" pos="-0.018 0 0.314">
+              <inertial pos="-0.00036467 0.0001479 0.19902" mass="2.0095" fullinertia="0.08529 0.084873 0.0021133 -3.491e-05 -0.0001918 8.319e-05" />
+              <joint name="right_joint5" pos="0 0 0" axis="0 0 1" range="-3.11 3.11" actuatorfrcrange="-18 18" damping="1" frictionloss="0.5" />
+              <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="R_Arm_Marvin_M6_S_CCS" />
+              <body name="right_link6">
+                <inertial pos="-0.004911 0.00027206 -8.14e-05" mass="0.67002" fullinertia="0.00048938 0.0004162 0.00038542 -2.3e-06 2.16e-06 6.3e-07" />
+                <joint name="right_joint6" pos="0 0 0" axis="0 -1 0" range="-1.0467 1.0467" actuatorfrcrange="-18 18" damping="1" frictionloss="0.5" />
+                <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="B_Arm_Marvin_M6_S_CCS" />
+                <body name="right_link7">
+                  <inertial pos="0.044988 -4.226e-05 0.0055581" mass="0.31658" fullinertia="0.00038289 0.00133 0.0011774 -7.4e-07 -1.403e-05 -6.1e-07" />
+                  <joint name="right_joint7" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" actuatorfrcrange="-18 18" damping="0.5" frictionloss="0.3" />
+                  <geom quat="0.000563312 0.706825 -0.000562864 0.707388" type="mesh" rgba="0.8 0.8 0.8 1" mesh="T_Arm_Marvin_M6_S_R_CCS" />
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="act_left_joint1" joint="left_joint1" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_left_joint2" joint="left_joint2" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_left_joint3" joint="left_joint3" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_left_joint4" joint="left_joint4" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_left_joint5" joint="left_joint5" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_left_joint6" joint="left_joint6" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_left_joint7" joint="left_joint7" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_right_joint1" joint="right_joint1" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_right_joint2" joint="right_joint2" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_right_joint3" joint="right_joint3" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_right_joint4" joint="right_joint4" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_right_joint5" joint="right_joint5" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_right_joint6" joint="right_joint6" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+    <motor name="act_right_joint7" joint="right_joint7" gear="1" ctrllimited="true" ctrlrange="-200 200" />
+  </actuator>
+</mujoco>
+
