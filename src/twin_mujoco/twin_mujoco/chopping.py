@@ -53,8 +53,35 @@ class ForceControlSample:
     fault: str = ""
 
 
+@dataclass(frozen=True)
+class BladeGeometry:
+    edge_positions: tuple[tuple[float, float, float], ...]
+    tip_position: tuple[float, float, float]
+    tip_rotation: tuple[tuple[float, float, float], ...]
+
+    @property
+    def z_values(self) -> tuple[float, float]:
+        return tuple(float(position[2]) for position in self.edge_positions)
+
+    @property
+    def min_z(self) -> float:
+        return min(self.z_values)
+
+    @property
+    def max_z(self) -> float:
+        return max(self.z_values)
+
+    def clearances(self, board_top: float) -> tuple[float, float]:
+        return tuple(float(z - board_top) for z in self.z_values)
+
+
 LEFT_HOME_Q = np.zeros(7, dtype=float)
 RIGHT_CHOPPING_HOME_Q = np.array((0.4, -1.3, 0.0, -1.606525, 0.057176, 0.79256, 1.5), dtype=float)
+
+BLADE_EDGE_SITE_NAMES = (
+    "right_blade_edge_top",
+    "right_blade_edge_bot",
+)
 
 
 _CSV_FIELDS = (
@@ -251,6 +278,80 @@ class RightArmChopper:
                 viewer_sync()
             elapsed += control_dt
         return elapsed, torque
+
+
+    def _blade_geometry(self) -> BladeGeometry:
+        edge_positions = []
+        for site_name in BLADE_EDGE_SITE_NAMES:
+            position, _ = self.right.site_pose(site_name)
+            edge_positions.append(_triple(position))
+        tip_position, tip_rotation = self.right.site_pose("right_tool_tip_site")
+        rotation_rows = tuple(tuple(float(value) for value in row) for row in tip_rotation)
+        return BladeGeometry(tuple(edge_positions), _triple(tip_position), rotation_rows)
+
+    def _horizontal_blade_rotation(self, geometry: BladeGeometry) -> np.ndarray:
+        current_rotation = np.asarray(geometry.tip_rotation, dtype=float).reshape(3, 3)
+        target_z = current_rotation[:, 2].copy()
+        target_z[2] = 0.0
+        norm = float(np.linalg.norm(target_z))
+        if norm < 1e-9:
+            target_z = np.array((1.0, 0.0, 0.0), dtype=float)
+        else:
+            target_z /= norm
+
+        target_x = current_rotation[:, 0] - target_z * float(np.dot(current_rotation[:, 0], target_z))
+        x_norm = float(np.linalg.norm(target_x))
+        if x_norm < 1e-9:
+            target_x = np.cross((0.0, 0.0, 1.0), target_z)
+            x_norm = float(np.linalg.norm(target_x))
+        target_x /= x_norm
+        target_y = np.cross(target_z, target_x)
+        target_y /= float(np.linalg.norm(target_y))
+        return np.column_stack((target_x, target_y, target_z))
+
+    def _predict_blade_edge_positions(
+        self,
+        tip_target: Sequence[float],
+        target_rotation: np.ndarray,
+        geometry: BladeGeometry,
+    ) -> tuple[tuple[float, float, float], ...]:
+        current_tip = np.asarray(geometry.tip_position, dtype=float).reshape(3)
+        current_rotation = np.asarray(geometry.tip_rotation, dtype=float).reshape(3, 3)
+        target = np.asarray(tip_target, dtype=float).reshape(3)
+        rotation = np.asarray(target_rotation, dtype=float).reshape(3, 3)
+        predicted = []
+        for position in geometry.edge_positions:
+            edge = np.asarray(position, dtype=float).reshape(3)
+            local_offset = current_rotation.T @ (edge - current_tip)
+            predicted.append(_triple(target + rotation @ local_offset))
+        return tuple(predicted)
+
+    def _tip_target_for_blade_clearance(
+        self,
+        tip_position: Sequence[float],
+        target_rotation: np.ndarray,
+        geometry: BladeGeometry,
+        board_top: float,
+        clearance_m: float,
+    ) -> np.ndarray:
+        target = np.asarray(tip_position, dtype=float).reshape(3).copy()
+        predicted = self._predict_blade_edge_positions(target, target_rotation, geometry)
+        min_z = min(float(position[2]) for position in predicted)
+        target[2] += float(board_top) + float(clearance_m) - min_z
+        return target
+
+    def _tip_target_for_blade_on_board(
+        self,
+        tip_position: Sequence[float],
+        target_rotation: np.ndarray,
+        geometry: BladeGeometry,
+        board_top: float,
+    ) -> np.ndarray:
+        target = np.asarray(tip_position, dtype=float).reshape(3).copy()
+        predicted = self._predict_blade_edge_positions(target, target_rotation, geometry)
+        max_z = max(float(position[2]) for position in predicted)
+        target[2] += float(board_top) - max_z
+        return target
 
 
     def _hold_left_arm(self) -> np.ndarray:

@@ -4,7 +4,7 @@ import numpy as np
 
 from twin_description import right_chopping_scene_path
 from twin_mujoco import TwinMujocoRuntime
-from twin_mujoco.chopping import ChoppingConfig, ChoppingPhase, RightArmChopper
+from twin_mujoco.chopping import ChoppingConfig, ChoppingPhase, LEFT_HOME_Q, RIGHT_CHOPPING_HOME_Q, RightArmChopper
 
 
 def test_headless_chopping_completes_three_cycles_and_logs_csv(tmp_path):
@@ -292,3 +292,73 @@ def test_chopper_initializes_safe_right_home_before_logging_samples():
     board_id = runtime._id(__import__("mujoco").mjtObj.mjOBJ_GEOM, "chopping_board")
     board_top = runtime.model.geom_pos[board_id, 2] + runtime.model.geom_size[board_id, 2]
     assert samples[0].actual_position[2] > board_top + 0.05
+
+
+def test_blade_geometry_reads_two_finite_edge_positions_and_tip_pose():
+    chopper = RightArmChopper()
+
+    geometry = chopper._blade_geometry()
+
+    assert len(geometry.edge_positions) == 2
+    assert len(geometry.z_values) == 2
+    assert geometry.min_z <= geometry.max_z
+    assert len(geometry.tip_position) == 3
+    assert np.asarray(geometry.tip_rotation).shape == (3, 3)
+    for position in geometry.edge_positions + (geometry.tip_position,):
+        assert len(position) == 3
+        assert np.all(np.isfinite(position))
+
+
+def test_horizontal_blade_rotation_predicts_edge_points_at_equal_height():
+    chopper = RightArmChopper()
+    chopper.runtime.reset()
+    chopper.runtime.set_arm_positions("left", LEFT_HOME_Q)
+    chopper.runtime.set_arm_positions("right", RIGHT_CHOPPING_HOME_Q)
+    geometry = chopper._blade_geometry()
+
+    rotation = chopper._horizontal_blade_rotation(geometry)
+    predicted = chopper._predict_blade_edge_positions(geometry.tip_position, rotation, geometry)
+
+    assert abs(predicted[0][2] - predicted[1][2]) <= 1e-9
+
+
+def test_two_point_safe_target_keeps_both_blade_edges_above_board():
+    chopper = RightArmChopper()
+    chopper.runtime.reset()
+    chopper.runtime.set_arm_positions("left", LEFT_HOME_Q)
+    chopper.runtime.set_arm_positions("right", RIGHT_CHOPPING_HOME_Q)
+    board_top = chopper._board_top()
+    geometry = chopper._blade_geometry()
+    rotation = chopper._horizontal_blade_rotation(geometry)
+
+    target = chopper._tip_target_for_blade_clearance(
+        np.asarray(geometry.tip_position),
+        rotation,
+        geometry,
+        board_top,
+        clearance_m=0.08,
+    )
+    predicted = chopper._predict_blade_edge_positions(target, rotation, geometry)
+
+    assert all(position[2] >= board_top + 0.08 - 1e-9 for position in predicted)
+
+
+def test_two_point_descend_target_predicts_both_blade_edges_on_board():
+    chopper = RightArmChopper()
+    chopper.runtime.reset()
+    chopper.runtime.set_arm_positions("left", LEFT_HOME_Q)
+    chopper.runtime.set_arm_positions("right", RIGHT_CHOPPING_HOME_Q)
+    board_top = chopper._board_top()
+    geometry = chopper._blade_geometry()
+    rotation = chopper._horizontal_blade_rotation(geometry)
+
+    target = chopper._tip_target_for_blade_on_board(
+        np.asarray(geometry.tip_position),
+        rotation,
+        geometry,
+        board_top,
+    )
+    predicted = chopper._predict_blade_edge_positions(target, rotation, geometry)
+
+    for position in predicted:
+        assert abs(position[2] - board_top) <= 1e-9

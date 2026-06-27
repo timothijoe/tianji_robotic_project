@@ -55,6 +55,14 @@ def test_right_chopping_scene_loads_with_task_objects():
     assert model.site_bodyid[tool_site_id] == tool_body_id
 
 
+def test_right_chopping_scene_exposes_blade_edge_and_control_sites():
+    model = mujoco.MjModel.from_xml_path(str(right_chopping_scene_path()))
+
+    assert _id(model, mujoco.mjtObj.mjOBJ_SITE, "right_blade_edge_top") >= 0
+    assert _id(model, mujoco.mjtObj.mjOBJ_SITE, "right_blade_edge_bot") >= 0
+    assert _id(model, mujoco.mjtObj.mjOBJ_SITE, "right_tool_tip_site") >= 0
+
+
 def test_chopping_board_is_in_front_of_robot_at_work_height():
     model = mujoco.MjModel.from_xml_path(str(right_chopping_scene_path()))
     geom_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "chopping_board")
