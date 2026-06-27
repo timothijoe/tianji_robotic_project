@@ -54,7 +54,7 @@ class ForceControlSample:
 
 
 LEFT_HOME_Q = np.zeros(7, dtype=float)
-RIGHT_CHOPPING_HOME_Q = np.array((0.6, -1.25, 0.052513, -1.606525, 0.057176, 0.79256, -1.4), dtype=float)
+RIGHT_CHOPPING_HOME_Q = np.array((0.3, -0.95, 0.7, -1.606525, 0.057176, 0.79256, 2.0), dtype=float)
 
 
 _CSV_FIELDS = (

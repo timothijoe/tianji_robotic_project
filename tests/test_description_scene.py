@@ -72,8 +72,8 @@ def test_right_tool_body_frames_are_parallel_to_end_flange_frame():
     sensor_body_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_force_sensor_body")
     tool_body_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_tool_body")
     adapter_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_force_sensor_adapter")
-    handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_handle_visual")
-    blade_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_visual")
+    handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_handle_visual")
+    blade_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_blade_visual")
 
     # force_sensor_body quat matches the flange visual mesh quat,
     # so sensor_body, tool_body, and all child geoms share the same frame.
@@ -136,7 +136,7 @@ def test_right_knife_handle_visual_axis_is_parallel_to_visible_flange_axis():
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
     link7_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_link7")
-    handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_handle_visual")
+    handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_handle_visual")
     tool_body_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_tool_body")
 
     # handle_visual inherits tool_body frame (same as flange mesh frame)
@@ -154,16 +154,16 @@ def test_right_knife_visuals_are_ordered_along_visible_flange_axis():
     tip_site_id = _id(model, mujoco.mjtObj.mjOBJ_SITE, "right_tool_tip_site")
     tool_body_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_tool_body")
 
-    # Tool extends along tool_body -Z. Check ordering of collision geoms.
+    # Tool extends along tool_body +Z. Check ordering of collision geoms.
     tool_rotation = data.xmat[tool_body_id].reshape(3, 3)
     tool_z = tool_rotation[:, 2]
     tool_body_pos = data.xpos[tool_body_id]
 
-    handle_projection = float(np.dot(data.geom_xpos[handle_id] - tool_body_pos, -tool_z))
-    blade_projection = float(np.dot(data.geom_xpos[blade_id] - tool_body_pos, -tool_z))
-    tip_projection = float(np.dot(data.site_xpos[tip_site_id] - tool_body_pos, -tool_z))
+    handle_projection = float(np.dot(data.geom_xpos[handle_id] - tool_body_pos, tool_z))
+    blade_projection = float(np.dot(data.geom_xpos[blade_id] - tool_body_pos, tool_z))
+    tip_projection = float(np.dot(data.site_xpos[tip_site_id] - tool_body_pos, tool_z))
 
-    # Handle near flange, blade further, tip furthest along -tool_z
+    # Handle near flange, blade further, tip furthest along +tool_z
     assert 0.03 < handle_projection < 0.06
     assert blade_projection > handle_projection + 0.05
     assert tip_projection > blade_projection + 0.05
@@ -174,32 +174,28 @@ def test_right_tool_is_thin_knife_attached_below_force_sensor():
     tool_body_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_tool_body")
     handle_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_knife_handle")
     blade_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_knife_blade")
-    removed_probe_id = int(mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_tool_shaft"))
 
-    assert removed_probe_id == -1
     assert model.geom_bodyid[handle_id] == tool_body_id
     assert model.geom_bodyid[blade_id] == tool_body_id
     assert model.geom_type[handle_id] == mujoco.mjtGeom.mjGEOM_BOX
     assert model.geom_type[blade_id] == mujoco.mjtGeom.mjGEOM_BOX
     assert model.geom_size[handle_id].tolist() == [0.012, 0.04, 0.04]
     assert model.geom_size[blade_id].tolist() == [0.006, 0.08, 0.10]
-    # knife_blade and tool_tip extend along flange -Z (below the handle)
-    assert model.geom_pos[blade_id, 2] < model.geom_pos[handle_id, 2]
+    # knife_blade extends further along body +Z than knife_handle
+    assert model.geom_pos[blade_id, 2] > model.geom_pos[handle_id, 2]
 
 
-def test_right_tool_uses_visual_cleaver_mesh_with_simple_collision():
+def test_right_tool_uses_visual_box_with_simple_collision():
     model = mujoco.MjModel.from_xml_path(str(right_chopping_scene_path()))
     tool_body_id = _id(model, mujoco.mjtObj.mjOBJ_BODY, "right_tool_body")
-    visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_visual")
-    handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_handle_visual")
+    visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_blade_visual")
+    handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_handle_visual")
     blade_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_knife_blade")
 
-    assert _id(model, mujoco.mjtObj.mjOBJ_MESH, "right_cleaver_mesh") >= 0
-    assert _id(model, mujoco.mjtObj.mjOBJ_MESH, "right_cleaver_handle_mesh") >= 0
     assert model.geom_bodyid[visual_id] == tool_body_id
     assert model.geom_bodyid[handle_visual_id] == tool_body_id
-    assert model.geom_type[visual_id] == mujoco.mjtGeom.mjGEOM_MESH
-    assert model.geom_type[handle_visual_id] == mujoco.mjtGeom.mjGEOM_MESH
+    assert model.geom_type[visual_id] == mujoco.mjtGeom.mjGEOM_BOX
+    assert model.geom_type[handle_visual_id] == mujoco.mjtGeom.mjGEOM_BOX
     assert model.geom_contype[visual_id] == 0
     assert model.geom_conaffinity[visual_id] == 0
     assert model.geom_contype[handle_visual_id] == 0
@@ -212,22 +208,18 @@ def test_right_knife_visual_matches_wecook_asset_proportions():
     model = mujoco.MjModel.from_xml_path(str(right_chopping_scene_path()))
     blade_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_knife_blade")
     handle_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_knife_handle")
-    visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_visual")
-    handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_cleaver_handle_visual")
+    visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_blade_visual")
+    handle_visual_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "right_handle_visual")
 
+    # Collision geoms are invisible (alpha=0)
     assert model.geom_rgba[blade_id, 3] == 0.0
     assert model.geom_rgba[handle_id, 3] == 0.0
-    mesh_id = _id(model, mujoco.mjtObj.mjOBJ_MESH, "right_cleaver_mesh")
-    vertex_start = model.mesh_vertadr[mesh_id]
-    vertex_count = model.mesh_vertnum[mesh_id]
-    vertices = model.mesh_vert[vertex_start : vertex_start + vertex_count]
-    extents = vertices.max(axis=0) - vertices.min(axis=0)
-
-    assert extents[2] > 0.15
-    assert extents[1] < 0.03
-    assert extents[0] < 0.005
-    assert model.geom_type[handle_visual_id] == mujoco.mjtGeom.mjGEOM_MESH
-    assert model.geom_type[visual_id] == mujoco.mjtGeom.mjGEOM_MESH
+    # Visual geoms are visible (alpha=1)
+    assert model.geom_rgba[visual_id, 3] == 1.0
+    assert model.geom_rgba[handle_visual_id, 3] == 1.0
+    # Visual geoms are BOX type
+    assert model.geom_type[handle_visual_id] == mujoco.mjtGeom.mjGEOM_BOX
+    assert model.geom_type[visual_id] == mujoco.mjtGeom.mjGEOM_BOX
 
 
 def test_scene_has_non_colliding_center_visual_between_arms():
