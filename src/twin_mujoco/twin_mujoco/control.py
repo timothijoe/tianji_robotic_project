@@ -69,6 +69,7 @@ class CartesianForceController:
         self.desired_position, self.desired_rotation = arm.site_pose(tool_site)
         self.nullspace_reference = arm.joint_positions
         self.force_enabled = False
+        self.force_axis_world: np.ndarray | None = None
         self._filtered_force = 0.0
         self._force_position_offset = 0.0
         self._previous_torque = np.zeros(7)
@@ -76,6 +77,27 @@ class CartesianForceController:
     def set_target(self, position: Sequence[float], rotation: np.ndarray) -> None:
         self.desired_position = _vector(position, 3, "position")
         self.desired_rotation = np.asarray(rotation, dtype=float).reshape(3, 3).copy()
+
+    def set_force_axis_world(self, axis: Sequence[float] | None) -> None:
+        if axis is None:
+            self.force_axis_world = None
+            return
+        vector = _vector(axis, 3, "axis")
+        norm = float(np.linalg.norm(vector))
+        if norm < 1e-12:
+            raise ValueError("axis must be non-zero")
+        self.force_axis_world = vector / norm
+
+    def _effective_force_axis_world(self, tool_rotation_world: np.ndarray) -> np.ndarray:
+        if self.force_axis_world is not None:
+            return self.force_axis_world.copy()
+        rotation = np.asarray(tool_rotation_world, dtype=float).reshape(3, 3)
+        return rotation[:, 2].copy()
+
+    def _measured_force_along_axis(self, wrench_tool: np.ndarray, tool_rotation_world: np.ndarray) -> float:
+        rotation = np.asarray(tool_rotation_world, dtype=float).reshape(3, 3)
+        force_world = rotation @ wrench_tool[:3]
+        return float(np.dot(force_world, self._effective_force_axis_world(rotation)))
 
     def enable_force(self, enabled: bool, *, target_force_n: float | None = None) -> None:
         if target_force_n is not None:
@@ -99,9 +121,10 @@ class CartesianForceController:
         velocity = jacobian @ self.arm.joint_velocities
         orientation_error = rotation_error(rotation, self.desired_rotation)
         timestep = self.arm.runtime.timestep
-        tool_axis_world = rotation[:, 2]
+        force_axis_world = self._effective_force_axis_world(rotation)
         alpha = self.force.feedback_alpha
-        self._filtered_force = (1.0 - alpha) * self._filtered_force + alpha * float(wrench_tool[2])
+        measured_force = self._measured_force_along_axis(wrench_tool, rotation)
+        self._filtered_force = (1.0 - alpha) * self._filtered_force + alpha * measured_force
         effective_target = self.desired_position.copy()
         if self.force_enabled:
             error = self.force.target_force_n - self._filtered_force
@@ -110,7 +133,7 @@ class CartesianForceController:
                 -self.force.maximum_position_offset_m,
                 self.force.maximum_position_offset_m,
             ))
-            effective_target += self._force_position_offset * tool_axis_world
+            effective_target += self._force_position_offset * force_axis_world
         kp = np.asarray(self.impedance.translational_stiffness)
         kd = np.asarray(self.impedance.translational_damping)
         kr = np.asarray(self.impedance.rotational_stiffness)

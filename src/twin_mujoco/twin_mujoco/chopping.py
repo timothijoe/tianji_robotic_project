@@ -53,6 +53,8 @@ class ForceControlSample:
     fault: str = ""
     blade_edge_positions: tuple[tuple[float, float, float], ...] = ()
     target_blade_edge_positions: tuple[tuple[float, float, float], ...] = ()
+    blade_reference_positions: tuple[tuple[float, float, float], ...] = ()
+    target_blade_reference_positions: tuple[tuple[float, float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,12 @@ BLADE_EDGE_SITE_NAMES = (
     "right_blade_edge_top",
     "right_blade_edge_bot",
 )
+BLADE_REFERENCE_SITE_NAMES = (
+    "right_blade_edge_top",
+    "right_blade_edge_bot",
+    "right_tool_tip_site",
+)
+WORLD_DOWN_AXIS = np.array((0.0, 0.0, -1.0), dtype=float)
 
 
 _CSV_FIELDS = (
@@ -139,6 +147,7 @@ class RightArmChopper:
         self.runtime.set_arm_positions("right", RIGHT_CHOPPING_HOME_Q)
         self.samples.clear()
         self.controller = CartesianForceController(self.right)
+        self.controller.set_force_axis_world(WORLD_DOWN_AXIS)
 
         position, _ = self.right.site_pose("right_tool_tip_site")
         board_top = self._board_top()
@@ -159,6 +168,8 @@ class RightArmChopper:
             shifted_descend[0] += cycle * cfg.spacing_m
             shifted_safe_edges = self._predict_blade_edge_positions(shifted_safe, rotation, geometry)
             shifted_descend_edges = self._predict_blade_edge_positions(shifted_descend, rotation, geometry)
+            shifted_safe_refs = self._predict_blade_reference_positions(shifted_safe, rotation, geometry)
+            shifted_descend_refs = self._predict_blade_reference_positions(shifted_descend, rotation, geometry)
 
             phase = ChoppingPhase.APPROACH if cycle == 0 else ChoppingPhase.SHIFT
             elapsed, torque = self._record_phase(
@@ -173,6 +184,7 @@ class RightArmChopper:
                 control_dt,
                 substeps,
                 shifted_safe_edges,
+                shifted_safe_refs,
                 viewer_sync,
             )
             descend_steps = _motion_steps(shifted_safe, shifted_descend, cfg.descent_speed_m_s, control_dt)
@@ -188,6 +200,7 @@ class RightArmChopper:
                 control_dt,
                 substeps,
                 shifted_descend_edges,
+                shifted_descend_refs,
                 viewer_sync,
             )
             self.controller.enable_force(True, target_force_n=cfg.target_force_n)
@@ -203,6 +216,7 @@ class RightArmChopper:
                 control_dt,
                 substeps,
                 shifted_descend_edges,
+                shifted_descend_refs,
                 viewer_sync,
             )
             self.controller.enable_force(False)
@@ -219,6 +233,7 @@ class RightArmChopper:
                 control_dt,
                 substeps,
                 shifted_safe_edges,
+                shifted_safe_refs,
                 viewer_sync,
             )
             final_target = shifted_safe
@@ -233,6 +248,7 @@ class RightArmChopper:
                 np.zeros(7),
                 "",
                 target_blade_edge_positions=self._predict_blade_edge_positions(final_target, rotation, geometry),
+                target_blade_reference_positions=self._predict_blade_reference_positions(final_target, rotation, geometry),
             )
         )
         if viewer_sync is not None:
@@ -263,15 +279,16 @@ class RightArmChopper:
         control_dt: float,
         substeps: int,
         target_blade_edge_positions: tuple[tuple[float, float, float], ...],
+        target_blade_reference_positions: tuple[tuple[float, float, float], ...],
         viewer_sync: Callable[[], None] | None,
     ) -> tuple[float, np.ndarray]:
         mode = "FORCE" if phase == ChoppingPhase.FORCE_HOLD else "POSITION"
-        control_wrench = _control_wrench(phase, target_force_n)
         count = max(1, steps)
         for index in range(count):
             phase_target = _interpolate(start, target, index + 1, count)
             self.controller.set_target(phase_target, rotation)
-            torque = self.controller.compute(control_wrench)
+            feedback_wrench = self._measured_wrench() if phase == ChoppingPhase.FORCE_HOLD else np.zeros(6)
+            torque = self.controller.compute(feedback_wrench)
             applied = self.right.apply_torque(torque)
             self._hold_left_arm()
             for _ in range(substeps):
@@ -291,6 +308,7 @@ class RightArmChopper:
                     raw_wrench=raw_wrench,
                     compensated_wrench=compensated_wrench,
                     target_blade_edge_positions=target_blade_edge_positions,
+                    target_blade_reference_positions=target_blade_reference_positions,
                 )
             )
             if viewer_sync is not None:
@@ -328,8 +346,9 @@ class RightArmChopper:
         target_y /= float(np.linalg.norm(target_y))
         return np.column_stack((target_x, target_y, target_z))
 
-    def _predict_blade_edge_positions(
+    def _predict_positions(
         self,
+        positions: Sequence[Sequence[float]],
         tip_target: Sequence[float],
         target_rotation: np.ndarray,
         geometry: BladeGeometry,
@@ -339,11 +358,32 @@ class RightArmChopper:
         target = np.asarray(tip_target, dtype=float).reshape(3)
         rotation = np.asarray(target_rotation, dtype=float).reshape(3, 3)
         predicted = []
-        for position in geometry.edge_positions:
-            edge = np.asarray(position, dtype=float).reshape(3)
-            local_offset = current_rotation.T @ (edge - current_tip)
+        for position in positions:
+            point = np.asarray(position, dtype=float).reshape(3)
+            local_offset = current_rotation.T @ (point - current_tip)
             predicted.append(_triple(target + rotation @ local_offset))
         return tuple(predicted)
+
+    def _predict_blade_edge_positions(
+        self,
+        tip_target: Sequence[float],
+        target_rotation: np.ndarray,
+        geometry: BladeGeometry,
+    ) -> tuple[tuple[float, float, float], ...]:
+        return self._predict_positions(geometry.edge_positions, tip_target, target_rotation, geometry)
+
+    def _predict_blade_reference_positions(
+        self,
+        tip_target: Sequence[float],
+        target_rotation: np.ndarray,
+        geometry: BladeGeometry,
+    ) -> tuple[tuple[float, float, float], ...]:
+        return self._predict_positions(
+            (*geometry.edge_positions, geometry.tip_position),
+            tip_target,
+            target_rotation,
+            geometry,
+        )
 
     def _tip_target_for_blade_clearance(
         self,
@@ -354,7 +394,7 @@ class RightArmChopper:
         clearance_m: float,
     ) -> np.ndarray:
         target = np.asarray(tip_position, dtype=float).reshape(3).copy()
-        predicted = self._predict_blade_edge_positions(target, target_rotation, geometry)
+        predicted = self._predict_blade_reference_positions(target, target_rotation, geometry)
         min_z = min(float(position[2]) for position in predicted)
         target[2] += float(board_top) + float(clearance_m) - min_z
         return target
@@ -367,7 +407,7 @@ class RightArmChopper:
         board_top: float,
     ) -> np.ndarray:
         target = np.asarray(tip_position, dtype=float).reshape(3).copy()
-        predicted = self._predict_blade_edge_positions(target, target_rotation, geometry)
+        predicted = self._predict_blade_reference_positions(target, target_rotation, geometry)
         max_z = max(float(position[2]) for position in predicted)
         target[2] += float(board_top) - max_z
         return target
@@ -389,12 +429,16 @@ class RightArmChopper:
         raw_wrench: Sequence[float] | None = None,
         compensated_wrench: Sequence[float] | None = None,
         target_blade_edge_positions: tuple[tuple[float, float, float], ...] | None = None,
+        target_blade_reference_positions: tuple[tuple[float, float, float], ...] | None = None,
     ) -> ForceControlSample:
         actual_position, actual_rotation = self.right.site_pose("right_tool_tip_site")
         blade_geometry = self._blade_geometry()
         target_edges = target_blade_edge_positions
         if target_edges is None:
             target_edges = self._predict_blade_edge_positions(target_position, actual_rotation, blade_geometry)
+        target_refs = target_blade_reference_positions
+        if target_refs is None:
+            target_refs = self._predict_blade_reference_positions(target_position, actual_rotation, blade_geometry)
         raw = np.zeros(6) if raw_wrench is None else np.asarray(raw_wrench, dtype=float).reshape(6)
         wrench = np.zeros(6) if compensated_wrench is None else np.asarray(compensated_wrench, dtype=float).reshape(6)
         tau = np.asarray(torque, dtype=float).reshape(7)
@@ -415,6 +459,8 @@ class RightArmChopper:
             fault=fault,
             blade_edge_positions=blade_geometry.edge_positions,
             target_blade_edge_positions=target_edges,
+            blade_reference_positions=(*blade_geometry.edge_positions, blade_geometry.tip_position),
+            target_blade_reference_positions=target_refs,
         )
 
     def _measured_wrench(self) -> np.ndarray:

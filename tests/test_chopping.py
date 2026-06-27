@@ -70,7 +70,7 @@ def _phase_count(samples, phase):
     return sum(1 for sample in samples if sample.phase == phase)
 
 
-def test_controller_input_wrench_is_deterministic_by_phase(monkeypatch):
+def test_controller_input_wrench_uses_measured_feedback_only_during_force_hold(monkeypatch):
     import twin_mujoco.chopping as chopping
 
     observed = []
@@ -100,7 +100,8 @@ def test_controller_input_wrench_is_deterministic_by_phase(monkeypatch):
     assert free_space
     assert force_hold
     assert all(wrench == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0) for wrench in free_space)
-    assert all(wrench == (0.0, 0.0, 6.0, 0.0, 0.0, 0.0) for wrench in force_hold)
+    assert all(len(wrench) == 6 for wrench in force_hold)
+    assert any(wrench != (0.0, 0.0, 6.0, 0.0, 0.0, 0.0) for wrench in force_hold)
 
 
 def test_descent_targets_interpolate_instead_of_jumping_to_endpoint():
@@ -400,3 +401,36 @@ def test_first_safe_target_keeps_both_blade_edges_above_board():
 
     for position in first.target_blade_edge_positions:
         assert position[2] >= board_top + 0.08 - 1e-9
+
+
+def test_force_hold_targets_all_three_blade_reference_points_at_board_top():
+    chopper = RightArmChopper()
+    samples = chopper.run(ChoppingConfig(cycles=1, control_hz=20.0, force_hold_s=0.01))
+    board_top = chopper._board_top()
+
+    force_samples = [sample for sample in samples if sample.phase == ChoppingPhase.FORCE_HOLD]
+
+    assert force_samples
+    for sample in force_samples:
+        assert len(sample.target_blade_reference_positions) == 3
+        for position in sample.target_blade_reference_positions:
+            assert abs(position[2] - board_top) <= 1e-9
+
+
+def test_force_hold_uses_measured_wrench_feedback_instead_of_commanded_wrench(monkeypatch):
+    import twin_mujoco.chopping as chopping
+
+    observed = []
+    original_controller = chopping.CartesianForceController
+
+    class RecordingController(original_controller):
+        def compute(self, wrench):
+            observed.append(tuple(float(value) for value in wrench))
+            return super().compute(wrench)
+
+    monkeypatch.setattr(chopping, "CartesianForceController", RecordingController)
+
+    RightArmChopper().run(ChoppingConfig(cycles=1, target_force_n=6.0, force_hold_s=0.01))
+
+    assert observed
+    assert any(wrench != (0.0, 0.0, 6.0, 0.0, 0.0, 0.0) for wrench in observed)

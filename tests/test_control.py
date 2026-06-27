@@ -56,3 +56,24 @@ def test_cartesian_controller_force_mode_updates_and_resets_force_state():
 
     assert controller._force_position_offset == 0.0
     assert controller._filtered_force == 0.0
+
+
+def test_cartesian_controller_force_mode_can_use_world_down_axis():
+    runtime = TwinMujocoRuntime.load(right_chopping_scene_path())
+    right = runtime.arm_view("right")
+    controller = CartesianForceController(right)
+    position, rotation = right.site_pose("right_tool_tip_site")
+
+    controller.set_target(position, rotation)
+    controller.set_force_axis_world([0.0, 0.0, -1.0])
+    controller.enable_force(True, target_force_n=10.0)
+    torque = controller.compute(np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+
+    assert torque.shape == (7,)
+    assert np.all(np.isfinite(torque))
+    assert controller._force_position_offset > 0.0
+    np.testing.assert_allclose(
+        controller._effective_force_axis_world(rotation),
+        [0.0, 0.0, -1.0],
+        atol=1e-9,
+    )

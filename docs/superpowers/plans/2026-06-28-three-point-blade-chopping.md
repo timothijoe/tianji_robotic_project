@@ -252,3 +252,12 @@ git commit -m "feat: plan chopping targets from blade edge"
 - Spec coverage: required blade-edge sites are validated, target planning uses the two blade-edge sites, target rotation makes the blade edge horizontal, descent is world `-Z`, CSV remains unchanged, and MuJoCo-only scope is preserved.
 - Placeholder scan: no TBD/TODO/fill-in steps remain.
 - Type consistency: `BladeGeometry`, `blade_edge_positions`, and `target_blade_edge_positions` names are consistent across both tasks.
+
+## Revision Task: Three-Point Completion And World-Z Admittance
+
+- Add tests for controller world-Z force axis support.
+- Add tests that FORCE_HOLD target geometry includes all three blade reference points at `board_top`.
+- Keep two blade-edge target fields for compatibility and add three-point reference target fields.
+- Change FORCE_HOLD controller input from fixed commanded wrench to measured MuJoCo wrench feedback.
+- Set the chopper force axis to world `-Z` during run setup.
+- Preserve existing CSV schema.

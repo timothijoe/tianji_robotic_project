@@ -148,3 +148,26 @@ This phase is accepted when:
 - Full multi-site IK or a 6D/9D multi-site controller.
 - Editing the upstream source asset in `MarvinCCS/`.
 - Constraining `right_tool_tip_site` to reach `board_top` in this quick phase.
+
+## Revision: Three-Point Completion And World-Z Admittance
+
+After visual inspection of the two-point version, the quick MuJoCo demo keeps
+the two blade-edge sites for horizontal blade posture planning, but expands the
+FORCE_HOLD completion target to all three blade reference sites:
+
+- `right_blade_edge_top`
+- `right_blade_edge_bot`
+- `right_tool_tip_site`
+
+The three points are not required to contact the board simultaneously throughout
+the descent. The intended behavior is that one blade reference point may reach
+the board first; FORCE_HOLD continues the world-Z press until the planned target
+places all three reference points on `board_top`.
+
+The admittance direction is world `-Z`, not the current tool local Z axis. The
+controller now supports an explicit world force axis. During FORCE_HOLD,
+`RightArmChopper` feeds the controller measured MuJoCo wrench values instead of
+a fixed commanded wrench, so force mode is driven by sensor feedback.
+
+CSV output remains unchanged. The additional three-point actual/target geometry
+is kept in memory on `ForceControlSample` for tests and future runtime logic.
