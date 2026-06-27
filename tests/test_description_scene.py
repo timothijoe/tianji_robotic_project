@@ -183,8 +183,10 @@ def test_right_tool_is_thin_knife_attached_below_force_sensor():
     assert model.geom_size[blade_id].tolist() == [0.006, 0.05, 0.10]
     # knife_blade extends further along body +Z than knife_handle
     assert model.geom_pos[blade_id, 2] > model.geom_pos[handle_id, 2]
-    # knife_handle is offset toward +Y (spine side), blade extends to -Y (edge side)
-    assert model.geom_pos[handle_id, 1] > model.geom_pos[blade_id, 1]
+    # knife_handle is at Y=0 (aligned with force sensor)
+    # knife_blade is offset toward -Y (edge side)
+    assert model.geom_pos[handle_id, 1] == 0.0
+    assert model.geom_pos[blade_id, 1] < model.geom_pos[handle_id, 1]
 
 
 def test_right_tool_uses_visual_box_with_simple_collision():

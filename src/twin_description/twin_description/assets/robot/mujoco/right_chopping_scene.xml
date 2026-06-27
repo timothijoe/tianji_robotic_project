@@ -106,18 +106,18 @@
                       <geom name="right_force_sensor_housing" type="cylinder" pos="0 0 -0.0105" size="0.026 0.0105" rgba="0.18 0.18 0.2 1" contype="0" conaffinity="0" />
                       <site name="right_force_sensor_site" size="0.012" rgba="1 0.7 0 1" />
                       <body name="right_tool_body">
-                        <inertial pos="0 0.01 0.14" mass="0.22" diaginertia="0.00022 0.00022 0.00003" />
-                        <!-- 刀面可视化: BOX, 偏向 +Y (刀背侧), 刀刃 -Y 侧突出 -->
-                        <geom name="right_blade_visual" type="box" pos="0 0.01 0.18" size="0.003 0.05 0.10" rgba="0.78 0.80 0.82 1" contype="0" conaffinity="0" />
-                        <!-- 刀柄可视化: BOX, 靠向 +Y (刀背侧) -->
-                        <geom name="right_handle_visual" type="box" pos="0 0.03 0.04" size="0.006 0.02 0.04" rgba="0.15 0.13 0.12 1" contype="0" conaffinity="0" />
+                        <inertial pos="0 -0.02 0.14" mass="0.22" diaginertia="0.00022 0.00022 0.00003" />
+                        <!-- 刀面可视化: 刀柄在 Y=0, 刀面中心 Y=-0.02, 刀刃 -Y 侧突出 -->
+                        <geom name="right_blade_visual" type="box" pos="0 -0.02 0.18" size="0.003 0.05 0.10" rgba="0.78 0.80 0.82 1" contype="0" conaffinity="0" />
+                        <!-- 刀柄可视化: 和力传感器共线 Y=0 -->
+                        <geom name="right_handle_visual" type="box" pos="0 0 0.04" size="0.006 0.02 0.04" rgba="0.15 0.13 0.12 1" contype="0" conaffinity="0" />
                         <!-- 碰撞体: 不可见 (rgba alpha=0) -->
-                        <geom name="right_knife_handle" type="box" pos="0 0.03 0.04" size="0.012 0.02 0.04" rgba="0.06 0.06 0.065 0" contype="0" conaffinity="0" />
-                        <geom name="right_knife_blade" type="box" pos="0 0.01 0.18" size="0.006 0.05 0.10" rgba="0.72 0.74 0.76 0" friction="0.9 0.02 0.002" solref="0.04 1" solimp="0.85 0.95 0.005" />
-                        <!-- 刀刃两端标记: 刀面 Y 范围中心在 0.01, 上下各 0.05 -->
-                        <site name="right_blade_edge_top" type="sphere" pos="0  0.06 0.18" size="0.008" rgba="0 1 1 0.9" />
-                        <site name="right_blade_edge_bot" type="sphere" pos="0 -0.04 0.18" size="0.008" rgba="0 1 1 0.9" />
-                        <site name="right_tool_tip_site" pos="0 0.01 0.28" size="0.009" rgba="0 1 1 0.7" />
+                        <geom name="right_knife_handle" type="box" pos="0 0 0.04" size="0.012 0.02 0.04" rgba="0.06 0.06 0.065 0" contype="0" conaffinity="0" />
+                        <geom name="right_knife_blade" type="box" pos="0 -0.02 0.18" size="0.006 0.05 0.10" rgba="0.72 0.74 0.76 0" friction="0.9 0.02 0.002" solref="0.04 1" solimp="0.85 0.95 0.005" />
+                        <!-- 刀刃两端: 刀面 Y 范围 [-0.07, 0.03] -->
+                        <site name="right_blade_edge_top" type="sphere" pos="0  0.03 0.18" size="0.008" rgba="0 1 1 0.9" />
+                        <site name="right_blade_edge_bot" type="sphere" pos="0 -0.07 0.18" size="0.008" rgba="0 1 1 0.9" />
+                        <site name="right_tool_tip_site" pos="0 -0.02 0.28" size="0.009" rgba="0 1 1 0.7" />
                       </body>
                     </body>
                   </body>
