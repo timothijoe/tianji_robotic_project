@@ -127,6 +127,11 @@ class TwinRobot:
         # Cartesian target tracking
         self._cart_target_matrix: np.ndarray | None = None
 
+        # TCP trail for visualisation
+        self._tcp_trail: list[np.ndarray] = []
+        self._trail_color = (1.0, 0.6, 0.0, 0.7)  # orange, semi-transparent
+        self._trail_sphere_size = 0.005
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -444,9 +449,15 @@ class TwinRobot:
         # Log sample
         self._samples.append(self._make_sample(applied, wrench))
 
+        # Record TCP trail for visualisation
+        if pose_matrix is not None:
+            self._tcp_trail.append(pose_matrix[:3, 3].copy())
+
         # Viewer
-        if self._viewer is not None and viewer_sync:
-            self._viewer.sync()
+        if self._viewer is not None:
+            if viewer_sync:
+                self._render_trail()
+                self._viewer.sync()
 
     def spin(self, steps: int, viewer_sync: bool = True) -> None:
         """Run ``step()`` ``steps`` times."""
@@ -483,8 +494,58 @@ class TwinRobot:
     def control_mode(self) -> str:
         return self._state.value
 
-    # ------------------------------------------------------------------
-    # Internal
+    def clear_trail(self) -> None:
+        """Clear the TCP trail."""
+        self._tcp_trail.clear()
+
+    def _render_trail(self) -> None:
+        """Add TCP trail markers as visual geoms to the viewer scene.
+
+        Uses ``mujoco.mjv_addGeoms`` to inject sphere markers into the
+        viewer's active scene.  This is a best-effort operation — if the
+        viewer is not available, it is a no-op.
+        """
+        trail = self._tcp_trail
+        if not trail or self._viewer is None:
+            return
+        # Only render every 5th point for efficiency
+        stride = max(1, len(trail) // 200)
+        pts = trail[::stride]
+        # If trail is very short, render all points
+        if len(trail) <= 50:
+            pts = trail
+        scn = self._viewer.user_scn
+        if scn is None:
+            return
+
+        # Clear previous markers and re-add
+        scn.ngeom = 0
+
+        rgba = np.array(self._trail_color, dtype=float)
+        for pos in pts[-500:]:  # last 500 markers
+            if scn.ngeom >= scn.maxgeom:
+                break
+            g = scn.geoms[scn.ngeom]
+            g.type = mujoco.mjtGeom.mjGEOM_SPHERE
+            g.size[0] = self._trail_sphere_size
+            g.pos[:] = np.asarray(pos, dtype=float).reshape(3)
+            g.mat[:] = np.eye(3).ravel()
+            g.rgba[:] = rgba
+            g.segid = -1
+            g.objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
+            g.objid = -1
+            g.category = mujoco.mjtCatBit.mjCAT_DECOR
+            g.dataid = -1
+            g.texid = -1
+            g.texuniform = 0
+            g.texrepeat[:] = (1, 1)
+            g.emission = 0
+            g.specular = 0.3
+            g.shininess = 0.5
+            g.reflectance = 0
+            g.label[:] = b'\x00' * 100
+            scn.ngeom += 1
+
     # ------------------------------------------------------------------
 
     @property
