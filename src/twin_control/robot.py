@@ -129,8 +129,15 @@ class TwinRobot:
 
         # TCP trail for visualisation
         self._tcp_trail: list[np.ndarray] = []
-        self._trail_color = (1.0, 0.6, 0.0, 0.9)  # bright orange, opaque
-        self._trail_sphere_size = 0.01  # 1 cm spheres — visible from a distance
+        self._target_trail: list[np.ndarray] = []
+        self._trail_rendered_count = 0
+        self._target_trail_rendered_count = 0
+        self._trail_step_count = 0
+        self._trail_sample_stride = 20
+        self._trail_color = (1.0, 0.45, 0.0, 0.95)  # actual TCP path
+        self._target_trail_color = (0.0, 0.85, 1.0, 0.95)  # commanded TCP path
+        self._trail_sphere_size = 0.008
+        self._target_trail_sphere_size = 0.012
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -173,6 +180,8 @@ class TwinRobot:
             self._viewer = mujoco.viewer.launch_passive(
                 self.runtime.model, self.runtime.data,
             )
+            self._configure_viewer_camera()
+            print("[TwinRobot] viewer trail: actual=orange, target=cyan")
 
         self._state = RobotState.IDLE
         self._samples.clear()
@@ -451,8 +460,14 @@ class TwinRobot:
         # Log sample
         self._samples.append(self._make_sample(applied, wrench))
 
-        # Record TCP trail for visualisation (always, for all modes)
-        self._tcp_trail.append(pose_matrix[:3, 3].copy())
+        # Record a decimated actual/commanded TCP trail for visualisation.
+        self._trail_step_count += 1
+        if self._trail_step_count % self._trail_sample_stride == 0:
+            actual_pos, _ = self.get_tcp_pose()
+            self._tcp_trail.append(actual_pos.copy())
+            target_pos = self._target_tcp_position()
+            if target_pos is not None:
+                self._target_trail.append(target_pos)
 
         # Viewer
         if self._viewer is not None:
@@ -464,6 +479,18 @@ class TwinRobot:
         """Run ``step()`` ``steps`` times."""
         for _ in range(steps):
             self.step(viewer_sync=viewer_sync)
+
+    def hold_viewer_open(self, sync_hz: float = 30.0) -> None:
+        """Keep the passive viewer open for inspecting the final scene."""
+        if self._viewer is None:
+            return
+        delay = 1.0 / max(float(sync_hz), 1.0)
+        try:
+            while self._viewer is not None and self._viewer.is_running():
+                self._viewer.sync()
+                time.sleep(delay)
+        except KeyboardInterrupt:
+            pass
 
     # ------------------------------------------------------------------
     # CSV logging
@@ -498,58 +525,138 @@ class TwinRobot:
     def clear_trail(self) -> None:
         """Clear the TCP trail."""
         self._tcp_trail.clear()
+        self._target_trail.clear()
         self._trail_rendered_count = 0
+        self._target_trail_rendered_count = 0
+        self._trail_step_count = 0
+        if self._viewer is not None and self._viewer.user_scn is not None:
+            with self._viewer.lock():
+                self._viewer.user_scn.ngeom = 0
 
     def _render_trail(self) -> None:
-        """Add TCP trail markers as visual geoms to the viewer scene.
-
-        Uses ``mujoco.mjv_addGeoms`` to inject sphere markers into the
-        viewer's active scene.  Markers are appended incrementally;
-        call ``clear_trail()`` to reset.
-        """
-        trail = self._tcp_trail
-        if not trail or self._viewer is None:
+        """Add actual and commanded TCP trail markers to the viewer scene."""
+        if self._viewer is None:
             return
         scn = self._viewer.user_scn
         if scn is None:
             return
 
-        # Only add new points since last render
-        rendered = getattr(self, "_trail_rendered_count", 0)
-        new_pts = trail[rendered:]
+        with self._viewer.lock():
+            self._trail_rendered_count = self._render_trail_points(
+                scn,
+                self._tcp_trail,
+                self._trail_rendered_count,
+                self._trail_color,
+                self._trail_sphere_size,
+            )
+            self._target_trail_rendered_count = self._render_trail_points(
+                scn,
+                self._target_trail,
+                self._target_trail_rendered_count,
+                self._target_trail_color,
+                self._target_trail_sphere_size,
+            )
+
+    def _render_trail_points(
+        self,
+        scn,
+        trail: list[np.ndarray],
+        rendered_count: int,
+        color: Sequence[float],
+        sphere_size: float,
+    ) -> int:
+        new_pts = trail[rendered_count:]
         if not new_pts:
-            return
+            return rendered_count
 
-        # Decimate: render every Nth point for efficiency
         stride = max(1, len(new_pts) // 100) if len(new_pts) > 100 else 1
-        pts_to_add = new_pts[::stride]
-
-        rgba = np.array(self._trail_color, dtype=float)
-        for pos in pts_to_add:
+        rgba = np.array(color, dtype=float)
+        for pos in new_pts[::stride]:
             if scn.ngeom >= scn.maxgeom:
-                break
+                return rendered_count
             g = scn.geoms[scn.ngeom]
-            g.type = mujoco.mjtGeom.mjGEOM_SPHERE
-            g.size[0] = self._trail_sphere_size
-            g.pos[:] = np.asarray(pos, dtype=float).reshape(3)
-            g.mat[:] = np.eye(3).ravel()
-            g.rgba[:] = rgba
-            g.segid = -1
-            g.objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
-            g.objid = -1
-            g.category = mujoco.mjtCatBit.mjCAT_DECOR
-            g.dataid = -1
-            g.texid = -1
-            g.texuniform = 0
-            g.texrepeat[:] = (1, 1)
-            g.emission = 0
-            g.specular = 0.3
-            g.shininess = 0.5
-            g.reflectance = 0
-            g.label[:] = b'\x00' * 100
+            self._init_trail_geom(g, pos, sphere_size, rgba)
             scn.ngeom += 1
 
-        self._trail_rendered_count = len(trail)
+        return len(trail)
+
+    def _init_trail_geom(
+        self,
+        geom,
+        pos: np.ndarray,
+        sphere_size: float,
+        rgba: np.ndarray,
+    ) -> None:
+        size = np.array((sphere_size, sphere_size, sphere_size), dtype=float)
+        position = np.asarray(pos, dtype=float).reshape(3)
+        mat = np.eye(3)
+        try:
+            mujoco.mjv_initGeom(
+                geom,
+                mujoco.mjtGeom.mjGEOM_SPHERE,
+                size,
+                position,
+                mat,
+                rgba,
+            )
+        except TypeError:
+            geom.type = mujoco.mjtGeom.mjGEOM_SPHERE
+            geom.size[:] = size
+            geom.pos[:] = position
+            geom.mat[:] = mat
+            geom.rgba[:] = rgba
+        geom.category = mujoco.mjtCatBit.mjCAT_ALL
+        if hasattr(geom, "segid"):
+            geom.segid = -1
+        if hasattr(geom, "objtype"):
+            geom.objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
+        if hasattr(geom, "objid"):
+            geom.objid = -1
+        if hasattr(geom, "dataid"):
+            geom.dataid = -1
+        if hasattr(geom, "emission"):
+            geom.emission = 0.2
+        if hasattr(geom, "specular"):
+            geom.specular = 0.6
+        if hasattr(geom, "shininess"):
+            geom.shininess = 0.8
+        if hasattr(geom, "reflectance"):
+            geom.reflectance = 0
+        if hasattr(geom, "label"):
+            if isinstance(geom.label, str):
+                geom.label = ""
+            else:
+                geom.label[:] = b"\x00" * len(geom.label)
+
+    def _configure_viewer_camera(self) -> None:
+        if self._viewer is None or not hasattr(self._viewer, "cam"):
+            return
+        cam = self._viewer.cam
+        cam.lookat[:] = (0.38, 0.0, 0.48)
+        cam.distance = 1.15
+        cam.azimuth = 155
+        cam.elevation = -25
+
+    def _target_tcp_position(self) -> np.ndarray | None:
+        if self._controller is None:
+            return None
+        cart_target = getattr(self._controller, "_cart_target_matrix", None)
+        if cart_target is not None and self._state in (
+            RobotState.CARTESIAN_IMPEDANCE,
+            RobotState.POSITION,
+        ):
+            return np.asarray(cart_target[:3, 3], dtype=float).copy()
+        if cart_target is not None and self._state == RobotState.FORCE:
+            q = self._arm.joint_positions
+            pose_matrix = self._kinematics.fk(q)[0]
+            offset = getattr(self._controller, "_force_offset_m", 0.0)
+            return np.asarray(cart_target[:3, 3] + offset * pose_matrix[:3, 2], dtype=float).copy()
+
+        joint_target = getattr(self._controller, "_joint_target_rad", None)
+        if joint_target is not None and self._state == RobotState.JOINT_IMPEDANCE:
+            return self._kinematics.fk(joint_target)[0][:3, 3].copy()
+
+        return None
 
     # ------------------------------------------------------------------
 

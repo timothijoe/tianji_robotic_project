@@ -397,6 +397,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="Run without MuJoCo viewer")
     parser.add_argument("--log", type=str, default=None,
                         help="CSV log output path")
+    parser.add_argument("--hold-open", action="store_true",
+                        help="Keep the MuJoCo viewer open after trajectories complete")
     args = parser.parse_args(argv)
 
     all_specs = _all_specs()
@@ -438,7 +440,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"  Trajectory {spec.name}: {spec.description}")
             print(f"{'='*60}")
 
-            # Reset to home
+            # Reset visual trail and robot state for this trajectory.
+            robot.clear_trail()
             robot.runtime.set_arm_positions("right", home)
             robot._controller.set_joint_cmd(home)
 
@@ -455,6 +458,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.log:
             robot.write_csv(args.log)
+
+        if args.hold_open and not args.headless:
+            print("\nViewer held open. Close the MuJoCo window or press Ctrl-C to exit.")
+            robot.hold_viewer_open()
 
     finally:
         robot.close()
