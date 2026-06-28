@@ -20,6 +20,7 @@ test = [
 [project.scripts]
 twin-chop = "twin_mujoco.cli:main"
 twin-trajectory = "twin_control.trajectory_demo:main"
+twin-chop-sdk = "twin_control.chopping_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src", "src/twin_core", "src/twin_description", "src/twin_mujoco"]
