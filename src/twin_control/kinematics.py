@@ -143,13 +143,14 @@ class MarvinKinematics:
         ``"sdk"``: degrees, millimetres.
     """
 
-    def __init__(self, arm: str, unit_mode: str = "si") -> None:
+    def __init__(self, arm: str, unit_mode: str = "si", tcp_site_name: str | None = None) -> None:
         if arm not in ("left", "right"):
             raise ValueError(f"arm must be 'left' or 'right', got '{arm}'")
         if unit_mode not in ("si", "sdk"):
             raise ValueError(f"unit_mode must be 'si' or 'sdk', got '{unit_mode}'")
         self.arm = arm
         self.unit_mode = unit_mode
+        self._tcp_site_name = tcp_site_name or f"{self.arm}_force_sensor_site"
         self._tool_matrix: np.ndarray | None = None
         # MuJoCo objects (set by TwinRobot.connect)
         self._runtime: object | None = None
@@ -173,7 +174,7 @@ class MarvinKinematics:
 
     @property
     def tcp_site_name(self) -> str:
-        return f"{self.arm}_force_sensor_site"
+        return self._tcp_site_name
 
     def set_runtime(self, runtime: object) -> None:
         """Attach a MuJoCo runtime for FK/Jacobian access."""

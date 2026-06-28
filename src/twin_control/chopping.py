@@ -125,7 +125,9 @@ class TwinRobotChopper:
     """
 
     def __init__(self, robot: TwinRobot | None = None) -> None:
-        self.robot = robot or TwinRobot(arm_name="right", unit_mode="si")
+        self.robot = robot or TwinRobot(
+            arm_name="right", unit_mode="si", tcp_site_name="right_tool_tip_site",
+        )
         self.samples: list[ChoppingSample] = []
 
     # ------------------------------------------------------------------
@@ -142,6 +144,7 @@ class TwinRobotChopper:
         _validate_config(cfg)
 
         # Connect + reset
+        self.robot.control_hz = float(cfg.control_hz)
         self.robot.connect(viewer=not headless, realtime=not headless)
         self.robot.runtime.reset()
         self.robot.runtime.set_arm_positions("left", LEFT_HOME_RAD)
@@ -163,8 +166,8 @@ class TwinRobotChopper:
         K = _DEFAULT_CART_K
         D = _DEFAULT_CART_D
 
-        # Force control: Z-axis (world down)
-        fx_dir = (0.0, 0.0, 1.0, 0.0, 0.0, 0.0)
+        # Force control along world down, matching the reference chopper.
+        fx_dir = (0.0, 0.0, -1.0, 0.0, 0.0, 0.0)
 
         for cycle in range(cfg.cycles):
             # Shift target along X for each cycle
@@ -182,7 +185,7 @@ class TwinRobotChopper:
             # --- Descend ---
             self.robot.set_cart_impedance_state(0.5, 0.5, K, D)
             descend_steps = _motion_steps(shifted_safe, shifted_descend, cfg.descent_speed_m_s, control_dt)
-            self._move_tip_to(shifted_safe, rotation, ChoppingPhase.DESCEND, 0.0, control_dt, cfg,
+            self._move_tip_to(shifted_descend, rotation, ChoppingPhase.DESCEND, 0.0, control_dt, cfg,
                               max(1, descend_steps))
 
             # --- Force hold ---
@@ -298,7 +301,7 @@ class TwinRobotChopper:
             raw_wrench=tuple(float(v) for v in raw),
             joint_positions=tuple(float(v) for v in q),
             joint_velocities=tuple(float(v) for v in qd),
-            joint_torques=tuple(0.0 for _ in range(7)),
+            joint_torques=tuple(float(v) for v in self.robot._last_torque),
             contact=bool(abs(wrench[2]) > 1e-6),
             fault=fault,
         )

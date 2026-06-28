@@ -315,3 +315,35 @@ class TestModeSwitching:
         controller.set_mode(ControlMode.JOINT_IMPEDANCE)
         assert controller._force_offset_m == 0.0
         assert controller._filtered_force_n == 0.0
+
+    def test_force_direction_uses_configured_world_axis(self, controller: UnifiedController):
+        controller.set_mode(ControlMode.FORCE)
+        controller.set_cartesian_impedance_params(
+            CartesianImpedanceParams(
+                translational_stiffness=(1000.0, 1000.0, 1000.0),
+                translational_damping=(0.0, 0.0, 0.0),
+                rotational_stiffness=(0.0, 0.0, 0.0),
+                rotational_damping=(0.0, 0.0, 0.0),
+                nullspace_stiffness=0.0,
+                nullspace_damping=0.0,
+            ),
+        )
+        controller.set_force_params(
+            ForceControlParams(
+                direction=(0.0, 0.0, -1.0, 0.0, 0.0, 0.0),
+                admittance_gain_m_per_ns=0.01,
+                max_position_offset_m=0.05,
+                feedback_alpha=1.0,
+            ),
+        )
+        controller.set_force_cmd(10.0)
+        controller.set_cart_cmd(np.eye(4))
+
+        q = np.zeros(7)
+        qd = np.zeros(7)
+        J = np.zeros((6, 7))
+        J[2, 2] = 1.0
+        tau = controller.compute(q, qd, J, current_pose_matrix=np.eye(4), wrench=np.zeros(6))
+
+        assert controller._force_offset_m > 0.0
+        assert tau[2] < 0.0

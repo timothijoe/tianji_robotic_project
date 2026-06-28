@@ -147,7 +147,25 @@ class UnifiedController:
 
     def set_force_params(self, params: ForceControlParams) -> None:
         _validate_6(params.direction, "direction")
+        axis = np.asarray(params.direction[:3], dtype=float).reshape(3)
+        if float(np.linalg.norm(axis)) < 1e-12:
+            raise ValueError("force direction translation axis must be non-zero")
         self._force_params = params
+
+    def force_axis_world(self, pose_matrix: np.ndarray | None = None) -> np.ndarray:
+        axis = np.asarray(self._force_params.direction[:3], dtype=float).reshape(3)
+        norm = float(np.linalg.norm(axis))
+        if norm < 1e-12:
+            if pose_matrix is None:
+                return np.array((0.0, 0.0, 1.0), dtype=float)
+            return np.asarray(pose_matrix, dtype=float).reshape(4, 4)[:3, 2].copy()
+        return axis / norm
+
+    def measured_force_along_axis(self, wrench: np.ndarray, pose_matrix: np.ndarray) -> float:
+        w = np.asarray(wrench, dtype=float).reshape(6)
+        rotation = np.asarray(pose_matrix, dtype=float).reshape(4, 4)[:3, :3]
+        force_world = rotation @ w[:3]
+        return float(np.dot(force_world, self.force_axis_world(pose_matrix)))
 
     # ------------------------------------------------------------------
     # Target commands
@@ -306,16 +324,15 @@ class UnifiedController:
         if pose_matrix is None or self._cart_target_matrix is None:
             return bias
 
-        # Low-pass filter the force measurement
+        # Low-pass filter force measured along the configured world axis.
         if wrench is not None:
-            w = np.asarray(wrench, dtype=float).reshape(6)
             alpha = self._force_params.feedback_alpha
+            measured = self.measured_force_along_axis(wrench, pose_matrix)
             self._filtered_force_n = (
-                (1.0 - alpha) * self._filtered_force_n
-                + alpha * float(w[2])  # Z-axis force
+                (1.0 - alpha) * self._filtered_force_n + alpha * measured
             )
 
-        # Admittance: adjust target position along tool Z axis
+        # Admittance: adjust target position along configured world axis.
         f_err = self._force_target_n - self._filtered_force_n
         self._force_offset_m += (
             self._force_params.admittance_gain_m_per_ns * f_err * self._dt
@@ -326,9 +343,9 @@ class UnifiedController:
             self._force_params.max_position_offset_m,
         ))
 
-        # Adjust Cartesian target along end-effector Z axis
-        z_ee = pose_matrix[:3, 2]
-        x_des_eff = self._cart_target_matrix[:3, 3] + self._force_offset_m * z_ee
+        # Adjust Cartesian target along the configured force axis.
+        force_axis = self.force_axis_world(pose_matrix)
+        x_des_eff = self._cart_target_matrix[:3, 3] + self._force_offset_m * force_axis
 
         x_cur = pose_matrix[:3, 3]
         e_pos = x_des_eff - x_cur

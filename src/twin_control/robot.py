@@ -106,12 +106,14 @@ class TwinRobot:
         arm_name: str = "right",
         unit_mode: str = "si",
         control_hz: float = 500.0,
+        tcp_site_name: str | None = None,
     ) -> None:
         if arm_name not in ("left", "right"):
             raise ValueError(f"arm_name must be 'left' or 'right', got '{arm_name}'")
         self.arm_name = arm_name
         self.unit_mode = unit_mode
         self.control_hz = float(control_hz)
+        self._tcp_site_name_override = tcp_site_name
 
         # Set during connect()
         self.runtime: TwinMujocoRuntime | None = None
@@ -121,6 +123,7 @@ class TwinRobot:
         self._viewer = None
         self._state = RobotState.IDLE
         self._samples: list[dict] = []
+        self._last_torque = np.zeros(7)
         self._wrench_bias = np.zeros(6)
         self._wrench_calibrated = False
 
@@ -167,7 +170,9 @@ class TwinRobot:
         self.runtime.set_arm_positions("right", RIGHT_HOME_RAD)
 
         self._arm = self.runtime.arm_view(self.arm_name)
-        self._kinematics = MarvinKinematics(self.arm_name, unit_mode=self.unit_mode)
+        self._kinematics = MarvinKinematics(
+            self.arm_name, unit_mode=self.unit_mode, tcp_site_name=self._tcp_site_name,
+        )
         self._kinematics.set_runtime(self.runtime)
         self._controller = UnifiedController(
             joint_limits_rad=self._kinematics.joint_limits_rad,
@@ -457,6 +462,8 @@ class TwinRobot:
             self.runtime.step()
         self._hold_other_arm()
 
+        self._last_torque = np.asarray(applied, dtype=float).reshape(7).copy()
+
         # Log sample
         self._samples.append(self._make_sample(applied, wrench))
 
@@ -650,7 +657,8 @@ class TwinRobot:
             q = self._arm.joint_positions
             pose_matrix = self._kinematics.fk(q)[0]
             offset = getattr(self._controller, "_force_offset_m", 0.0)
-            return np.asarray(cart_target[:3, 3] + offset * pose_matrix[:3, 2], dtype=float).copy()
+            axis = self._controller.force_axis_world(pose_matrix)
+            return np.asarray(cart_target[:3, 3] + offset * axis, dtype=float).copy()
 
         joint_target = getattr(self._controller, "_joint_target_rad", None)
         if joint_target is not None and self._state == RobotState.JOINT_IMPEDANCE:
@@ -662,7 +670,7 @@ class TwinRobot:
 
     @property
     def _tcp_site_name(self) -> str:
-        return f"{self.arm_name}_force_sensor_site"
+        return self._tcp_site_name_override or f"{self.arm_name}_force_sensor_site"
 
     @property
     def _control_dt(self) -> float:

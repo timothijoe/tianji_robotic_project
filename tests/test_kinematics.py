@@ -100,6 +100,32 @@ class TestForwardKinematics:
             recovered = xyzabc_to_matrix(xyzabc)
             assert np.allclose(matrix, recovered, atol=1e-10)
 
+    def test_fk_can_target_tool_tip_site(self, runtime: TwinMujocoRuntime):
+        kin = MarvinKinematics("right", unit_mode="si", tcp_site_name="right_tool_tip_site")
+        kin.set_runtime(runtime)
+        runtime.set_arm_positions("right", HOME_Q)
+        import mujoco
+        site_id = mujoco.mj_name2id(runtime.model, mujoco.mjtObj.mjOBJ_SITE, "right_tool_tip_site")
+        mujoco_pos = runtime.data.site_xpos[site_id].copy()
+        mujoco_rot = runtime.data.site_xmat[site_id].reshape(3, 3).copy()
+
+        matrix, _ = kin.fk(HOME_Q)
+
+        assert np.allclose(matrix[:3, 3], mujoco_pos, atol=1e-8)
+        assert np.allclose(matrix[:3, :3], mujoco_rot, atol=1e-8)
+
+    def test_ik_roundtrip_tool_tip_site(self, runtime: TwinMujocoRuntime):
+        kin = MarvinKinematics("right", unit_mode="si", tcp_site_name="right_tool_tip_site")
+        kin.set_runtime(runtime)
+        target_q = RANDOM_QS[0]
+        target_matrix, _ = kin.fk(target_q)
+
+        result = kin.ik(target_matrix, HOME_Q)
+
+        assert result.success, f"IK failed: residual={result.residual}"
+        recovered_matrix, _ = kin.fk(result.joints_rad)
+        assert np.allclose(target_matrix, recovered_matrix, atol=1e-4)
+
 
 class TestForwardKinematicsSDKMode:
     def test_sdk_mode_degrees_output(self, left_kin_sdk: MarvinKinematics):
