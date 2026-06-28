@@ -441,7 +441,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{'='*60}")
 
             # Reset visual trail and robot state for this trajectory.
-            robot.clear_trail()
+            if robot._trail is not None:
+                robot._trail.clear()
             robot.runtime.set_arm_positions("right", home)
             robot._controller.set_joint_cmd(home)
 

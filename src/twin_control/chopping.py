@@ -4,6 +4,18 @@ Uses ``TwinRobot`` (SDK-style interface) as the control backend, replacing
 the original ``CartesianForceController``-based implementation.  State
 machine logic and blade geometry calculations are preserved from the
 reference implementation.
+
+The chopping cycle is:  APPROACH → DESCEND → FORCE_HOLD → RETRACT  (repeat).
+
+Public API
+----------
+ChoppingPhase        enum: APPROACH / DESCEND / FORCE_HOLD / RETRACT / SHIFT / COMPLETE / FAULT
+ChoppingConfig       dataclass: cycles, safe_height_m, spacing_m, speeds, force params
+BladeGeometry        dataclass: edge_positions, tip_position, tip_rotation
+ChoppingSample       dataclass: per-step telemetry (time, phase, position, wrench, joints, torque)
+TwinRobotChopper(robot=None)
+    .run(config, log_path, headless) → list[ChoppingSample]
+    .write_csv(path)
 """
 
 from __future__ import annotations
@@ -33,17 +45,31 @@ from twin_description.paths import right_chopping_scene_path
 # ---------------------------------------------------------------------------
 
 class ChoppingPhase(str, Enum):
-    APPROACH = "APPROACH"
-    DESCEND = "DESCEND"
-    FORCE_HOLD = "FORCE_HOLD"
-    RETRACT = "RETRACT"
-    SHIFT = "SHIFT"
-    COMPLETE = "COMPLETE"
-    FAULT = "FAULT"
+    """Phases of a single chopping cycle."""
+    APPROACH = "APPROACH"        # move to safe height above board (first cycle only)
+    DESCEND = "DESCEND"          # lower blade onto board under Cartesian impedance
+    FORCE_HOLD = "FORCE_HOLD"    # maintain target force via admittance control
+    RETRACT = "RETRACT"          # lift blade back to safe height
+    SHIFT = "SHIFT"              # move to next cutting position (subsequent cycles)
+    COMPLETE = "COMPLETE"        # all cycles finished
+    FAULT = "FAULT"              # safety stop triggered
 
 
 @dataclass(frozen=True)
 class ChoppingConfig:
+    """Parameters for a chopping run.
+
+    Attributes
+    ----------
+    cycles : int — number of chop cycles (default 3).
+    safe_height_m : float — blade clearance above board (m).
+    spacing_m : float — X shift between successive chops (m).
+    descent_speed_m_s : float — max Cartesian descent speed (m/s).
+    retract_speed_m_s : float — max Cartesian retract speed (m/s).
+    force_hold_s : float — duration of force-hold phase (s).
+    target_force_n : float — desired contact force (N).
+    control_hz : float — control loop rate (Hz).
+    """
     cycles: int = 3
     safe_height_m: float = 0.08
     spacing_m: float = 0.02
@@ -56,21 +82,49 @@ class ChoppingConfig:
 
 @dataclass(frozen=True)
 class BladeGeometry:
+    """Static blade shape captured from MuJoCo site poses at initialisation.
+
+    Attributes
+    ----------
+    edge_positions : tuple of (x,y,z) — blade edge sites in world frame.
+    tip_position : (x,y,z) — tool tip site position.
+    tip_rotation : 3×3 tuple-of-tuples — tool tip rotation matrix.
+    """
     edge_positions: tuple[tuple[float, float, float], ...]
     tip_position: tuple[float, float, float]
     tip_rotation: tuple[tuple[float, float, float], ...]
 
     @property
     def min_z(self) -> float:
+        """Lowest Z among edge positions."""
         return min(float(p[2]) for p in self.edge_positions)
 
     @property
     def max_z(self) -> float:
+        """Highest Z among edge positions."""
         return max(float(p[2]) for p in self.edge_positions)
 
 
 @dataclass(frozen=True)
 class ChoppingSample:
+    """One control-step worth of telemetry.
+
+    Attributes
+    ----------
+    time_s : float — simulation time (s).
+    phase : ChoppingPhase — current state machine phase.
+    control_mode : str — "CARTESIAN_IMPEDANCE", "FORCE", or "IDLE".
+    target_position : (x,y,z) — commanded TCP position (m).
+    actual_position : (x,y,z) — measured TCP position (m).
+    target_force_n : float — commanded force (N).
+    measured_force_n : float — Z-axis force from wrench (N).
+    raw_wrench : (6,) tuple — raw force/torque sensor reading.
+    joint_positions : (7,) tuple — joint angles (rad).
+    joint_velocities : (7,) tuple — joint velocities (rad/s).
+    joint_torques : (7,) tuple — applied joint torques (N·m).
+    contact : bool — True if |Fz| > 1e-6.
+    fault : str — non-empty if a safety fault occurred.
+    """
     time_s: float
     phase: ChoppingPhase
     control_mode: str
@@ -91,12 +145,17 @@ class ChoppingSample:
 # ---------------------------------------------------------------------------
 
 BLADE_EDGE_SITE_NAMES = ("right_blade_edge_top", "right_blade_edge_bot")
+"""MuJoCo site names for the two blade edge reference points."""
+
 BLADE_REFERENCE_SITE_NAMES = (
     "right_blade_edge_top",
     "right_blade_edge_bot",
     "right_tool_tip_site",
 )
+"""MuJoCo site names for all blade reference points (edges + tip)."""
+
 WORLD_DOWN_AXIS = np.array((0.0, 0.0, -1.0), dtype=float)
+"""World-frame downward direction for force control."""
 
 _CSV_FIELDS = (
     "time_s", "phase", "control_mode",
@@ -122,6 +181,7 @@ class TwinRobotChopper:
     ----------
     robot : TwinRobot or None
         Pre-configured robot instance.  Created internally if None.
+        Defaults to right arm, SI units, tool-tip TCP site.
     """
 
     def __init__(self, robot: TwinRobot | None = None) -> None:
@@ -140,6 +200,18 @@ class TwinRobotChopper:
         log_path: str | Path | None = None,
         headless: bool = False,
     ) -> list[ChoppingSample]:
+        """Execute the full chopping sequence.
+
+        Parameters
+        ----------
+        config : ChoppingConfig or None — chopping parameters.
+        log_path : Path or None — if set, write CSV log to this path.
+        headless : bool — if True, run without MuJoCo viewer.
+
+        Returns
+        -------
+        list[ChoppingSample] — per-step telemetry for the entire run.
+        """
         cfg = config or ChoppingConfig()
         _validate_config(cfg)
 
@@ -230,6 +302,13 @@ class TwinRobotChopper:
     # ------------------------------------------------------------------
 
     def write_csv(self, log_path: str | Path) -> None:
+        """Write accumulated samples to a CSV file.
+
+        Parameters
+        ----------
+        log_path : str or Path — output file path.  Parent directories are
+            created if needed.
+        """
         path = Path(log_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="") as stream:
@@ -252,7 +331,19 @@ class TwinRobotChopper:
         cfg: ChoppingConfig,
         steps: int,
     ) -> None:
-        """Interpolate tip from current position to *target_pos* over *steps*."""
+        """Linearly interpolate the TCP from its current position to *target_pos*
+        over *steps* control cycles, recording a sample at each step.
+
+        Parameters
+        ----------
+        target_pos : (3,) ndarray — desired TCP position (m).
+        rotation : (3,3) ndarray — desired TCP rotation matrix.
+        phase : ChoppingPhase — phase label for recorded samples.
+        target_force_n : float — force target for logging (0 during position moves).
+        control_dt : float — control interval (s).
+        cfg : ChoppingConfig — unused; reserved for future use.
+        steps : int — number of control cycles for the move.
+        """
         current_pos, _ = self.robot.get_tcp_pose()
         current_pos = np.asarray(current_pos, dtype=float).reshape(3)
         T = np.eye(4)
@@ -274,6 +365,7 @@ class TwinRobotChopper:
         target_force_n: float,
         wrench: np.ndarray,
     ) -> None:
+        """Convenience wrapper around ``_make_sample``."""
         self.samples.append(self._make_sample(
             self.robot.runtime.data.time, phase, mode,
             np.asarray(target_pos, dtype=float).reshape(3), target_force_n,
@@ -286,6 +378,22 @@ class TwinRobotChopper:
         target_pos: np.ndarray, target_force_n: float,
         wrench: np.ndarray, fault: str = "",
     ) -> ChoppingSample:
+        """Build a ``ChoppingSample`` from the current robot state.
+
+        Parameters
+        ----------
+        t : float — simulation time (s).
+        phase : ChoppingPhase — current phase.
+        mode : str — control mode label.
+        target_pos : (3,) ndarray — commanded TCP position (m).
+        target_force_n : float — commanded force (N).
+        wrench : (6,) ndarray — compensated wrench (N, N·m).
+        fault : str — fault description (empty if none).
+
+        Returns
+        -------
+        ChoppingSample
+        """
         q = self.robot.get_joint_positions()
         qd = self.robot.get_joint_velocities()
         actual_pos, _ = self.robot.get_tcp_pose()
@@ -301,7 +409,7 @@ class TwinRobotChopper:
             raw_wrench=tuple(float(v) for v in raw),
             joint_positions=tuple(float(v) for v in q),
             joint_velocities=tuple(float(v) for v in qd),
-            joint_torques=tuple(float(v) for v in self.robot._last_torque),
+            joint_torques=tuple(float(v) for v in self.robot._controller._previous_torque),
             contact=bool(abs(wrench[2]) > 1e-6),
             fault=fault,
         )
@@ -311,6 +419,12 @@ class TwinRobotChopper:
     # ------------------------------------------------------------------
 
     def _blade_geometry(self) -> BladeGeometry:
+        """Capture the current blade pose from MuJoCo site positions.
+
+        Returns
+        -------
+        BladeGeometry — edge positions, tip position, and tip rotation.
+        """
         edge = []
         for name in BLADE_EDGE_SITE_NAMES:
             pos, _ = self.robot.runtime.site_pose(name)
@@ -320,7 +434,20 @@ class TwinRobotChopper:
         return BladeGeometry(tuple(edge), _triple(tip_pos), rot_rows)
 
     def _horizontal_blade_rotation(self, geometry: BladeGeometry) -> np.ndarray:
+        """Compute a rotation matrix that keeps the blade horizontal (Z=0 in
+        world) while preserving the blade's X-axis orientation as much as
+        possible.
+
+        Parameters
+        ----------
+        geometry : BladeGeometry — current blade pose.
+
+        Returns
+        -------
+        (3, 3) ndarray — target rotation matrix with Z axis horizontal.
+        """
         current_rot = np.asarray(geometry.tip_rotation, dtype=float).reshape(3, 3)
+        # Project tool Z onto XY plane
         target_z = current_rot[:, 2].copy()
         target_z[2] = 0.0
         norm = float(np.linalg.norm(target_z))
@@ -328,6 +455,7 @@ class TwinRobotChopper:
             target_z = np.array((1.0, 0.0, 0.0))
         else:
             target_z /= norm
+        # Orthogonalise X against new Z
         target_x = current_rot[:, 0] - target_z * float(np.dot(current_rot[:, 0], target_z))
         x_norm = float(np.linalg.norm(target_x))
         if x_norm < 1e-9:
@@ -345,6 +473,23 @@ class TwinRobotChopper:
         target_rotation: np.ndarray,
         geometry: BladeGeometry,
     ) -> tuple[tuple[float, float, float], ...]:
+        """Predict where blade reference points would be if the tip were moved
+        to *tip_target* with orientation *target_rotation*.
+
+        Uses the rigid-body assumption: local offsets in the current tip
+        frame are re-applied in the target frame.
+
+        Parameters
+        ----------
+        positions : sequence of (3,) — current world positions of reference points.
+        tip_target : (3,) sequence — desired tip position.
+        target_rotation : (3,3) ndarray — desired tip rotation.
+        geometry : BladeGeometry — current blade pose.
+
+        Returns
+        -------
+        tuple of (x,y,z) — predicted world positions.
+        """
         current_tip = np.array(geometry.tip_position, dtype=float).reshape(3)
         current_rot = np.array(geometry.tip_rotation, dtype=float).reshape(3, 3)
         target = np.asarray(tip_target, dtype=float).reshape(3)
@@ -360,6 +505,21 @@ class TwinRobotChopper:
         self, tip: np.ndarray, rotation: np.ndarray,
         geometry: BladeGeometry, board_top: float, clearance_m: float,
     ) -> np.ndarray:
+        """Adjust the tip Z so the lowest blade point is *clearance_m* above
+        the board.
+
+        Parameters
+        ----------
+        tip : (3,) ndarray — current tip position.
+        rotation : (3,3) ndarray — desired tip rotation.
+        geometry : BladeGeometry — current blade pose.
+        board_top : float — Z coordinate of the board top surface.
+        clearance_m : float — desired clearance (m).
+
+        Returns
+        -------
+        (3,) ndarray — adjusted tip position.
+        """
         target = tip.copy()
         pred = self._predict_positions(
             (*geometry.edge_positions, geometry.tip_position),
@@ -373,6 +533,19 @@ class TwinRobotChopper:
         self, tip: np.ndarray, rotation: np.ndarray,
         geometry: BladeGeometry, board_top: float,
     ) -> np.ndarray:
+        """Adjust the tip Z so the highest blade point sits exactly on the board.
+
+        Parameters
+        ----------
+        tip : (3,) ndarray — current tip position.
+        rotation : (3,3) ndarray — desired tip rotation.
+        geometry : BladeGeometry — current blade pose.
+        board_top : float — Z coordinate of the board top surface.
+
+        Returns
+        -------
+        (3,) ndarray — adjusted tip position.
+        """
         target = tip.copy()
         pred = self._predict_positions(
             (*geometry.edge_positions, geometry.tip_position),
@@ -383,6 +556,12 @@ class TwinRobotChopper:
         return target
 
     def _board_top(self) -> float:
+        """Return the Z coordinate of the chopping board's top surface.
+
+        Returns
+        -------
+        float — board top Z in world frame (m).
+        """
         geom_id = int(mujoco.mj_name2id(
             self.robot.runtime.model, mujoco.mjtObj.mjOBJ_GEOM, "chopping_board",
         ))
@@ -393,10 +572,11 @@ class TwinRobotChopper:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Module-level helpers
 # ---------------------------------------------------------------------------
 
 def _validate_config(cfg: ChoppingConfig) -> None:
+    """Raise ``ValueError`` if any config field is invalid."""
     if cfg.cycles < 1:
         raise ValueError("cycles must be at least 1")
     if cfg.control_hz <= 0.0:
@@ -408,16 +588,41 @@ def _validate_config(cfg: ChoppingConfig) -> None:
 
 
 def _motion_steps(start: np.ndarray, end: np.ndarray, speed_m_s: float, dt: float) -> int:
+    """Return the number of control steps needed to move from *start* to *end*
+    at the given Cartesian speed.
+
+    Parameters
+    ----------
+    start : (3,) ndarray — start position (m).
+    end : (3,) ndarray — end position (m).
+    speed_m_s : float — desired Cartesian speed (m/s).
+    dt : float — control interval (s).
+
+    Returns
+    -------
+    int — number of steps (≥ 1).
+    """
     d = float(np.linalg.norm(np.asarray(end).reshape(3) - np.asarray(start).reshape(3)))
     return max(1, int(np.ceil(d / speed_m_s / dt)))
 
 
 def _triple(v: np.ndarray | Sequence[float]) -> tuple[float, float, float]:
+    """Convert a 3-element array-like to a (float, float, float) tuple."""
     a = np.asarray(v, dtype=float).reshape(3)
     return tuple(float(x) for x in a)
 
 
 def _sample_row(s: ChoppingSample) -> dict[str, object]:
+    """Convert a ``ChoppingSample`` to a flat dict for CSV writing.
+
+    Parameters
+    ----------
+    s : ChoppingSample
+
+    Returns
+    -------
+    dict — keys matching ``_CSV_FIELDS``.
+    """
     row: dict[str, object] = {
         "time_s": f"{s.time_s:.6f}",
         "phase": s.phase.value,

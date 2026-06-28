@@ -1,14 +1,26 @@
-"""Unified impedance/force controller for 7-DOF robot arms.
+"""Unified torque-mode controller for 7-DOF robot arms.
 
-Provides three torque-mode control strategies behind a single ``compute()``
-interface:
+Provides three control strategies behind a single ``compute()`` interface:
 
-- Joint impedance:  τ = K·(q_des − q) + D·(0 − qd) + bias
-- Cartesian impedance:  τ = Jᵀ·F_task + nullspace + bias
-- Force control:  hybrid Cartesian impedance + admittance-based force tracking
+- **Joint impedance**:  τ = K·(q_des − q) + D·(0 − qd) + bias
+- **Cartesian impedance**:  τ = Jᵀ·F_task + nullspace + bias
+- **Force control**:  hybrid Cartesian impedance + admittance force tracking
+  on one axis
 
-All internal calculations use SI units.  Input/output conversion for SDK
-display units (deg, mm) is handled at the ``MarvinKinematics`` boundary.
+All internal calculations use SI units.
+
+Public API
+----------
+ControlMode              enum: POSITION / JOINT_IMPEDANCE / CARTESIAN_IMPEDANCE / FORCE
+JointImpedanceParams     dataclass: stiffness (7,), damping (7,)
+CartesianImpedanceParams dataclass: translational + rotational stiffness/damping, nullspace
+ForceControlParams       dataclass: target_force_n, direction, admittance_gain, etc.
+UnifiedController(joint_limits, torque_limits, rate_limit, dt_s)
+    .set_mode(mode)
+    .set_joint_impedance_params(params) / .set_cartesian_impedance_params(params) / .set_force_params(params)
+    .set_joint_cmd(joints_rad) / .set_cart_cmd(pose_matrix) / .set_force_cmd(force_n)
+    .compute(q, qd, J, pose, wrench, bias) → (7,) joint torques (N·m)
+    .force_axis_world(pose) / .measured_force_along_axis(wrench, pose)
 """
 
 from __future__ import annotations
@@ -20,12 +32,21 @@ from typing import Sequence
 
 import numpy as np
 
+from twin_control.rotation import matrix_to_quat as _matrix_to_quat
+from twin_control.rotation import quat_mul as _quat_mul
+from twin_control.rotation import rotation_error as _rotation_error
+
+
+# ---------------------------------------------------------------------------
+# Control mode enum
+# ---------------------------------------------------------------------------
 
 class ControlMode(Enum):
-    POSITION = 1             # stiff Cartesian impedance (no special params)
+    """Torque-mode control strategies."""
+    POSITION = 1             # stiff Cartesian impedance
     JOINT_IMPEDANCE = 2      # τ = K·(q_des − q) + D·(0 − qd)
-    CARTESIAN_IMPEDANCE = 3  # τ = Jᵀ·(Kp·(x_des − x) − Kd·v) + nullspace
-    FORCE = 4                # hybrid Cartesian + admittance force on one axis
+    CARTESIAN_IMPEDANCE = 3  # τ = Jᵀ·F_task + nullspace
+    FORCE = 4                # hybrid Cartesian + admittance force
 
 
 # ---------------------------------------------------------------------------
@@ -34,40 +55,54 @@ class ControlMode(Enum):
 
 @dataclass
 class JointImpedanceParams:
+    """Joint-space impedance parameters.
+
+    Attributes
+    ----------
+    stiffness : (7,) tuple — joint stiffness (N·m/rad).
+    damping : (7,) tuple — joint damping (N·m/(rad/s)).
+    """
     stiffness: tuple[float, float, float, float, float, float, float]
-    """7 joint stiffness values (N·m/rad)."""
     damping: tuple[float, float, float, float, float, float, float]
-    """7 joint damping values (N·m/(rad/s))."""
 
 
 @dataclass
 class CartesianImpedanceParams:
+    """Cartesian-space impedance parameters.
+
+    Attributes
+    ----------
+    translational_stiffness : (3,) tuple — N/m in X, Y, Z.
+    translational_damping : (3,) tuple — N/(m/s) in X, Y, Z.
+    rotational_stiffness : (3,) tuple — N·m/rad for RX, RY, RZ.
+    rotational_damping : (3,) tuple — N·m/(rad/s) for RX, RY, RZ.
+    nullspace_stiffness : float — joint-space nullspace stiffness (N·m/rad).
+    nullspace_damping : float — joint-space nullspace damping (N·m/(rad/s)).
+    """
     translational_stiffness: tuple[float, float, float] = (2500.0, 2500.0, 2800.0)
-    """X, Y, Z translational stiffness (N/m)."""
     translational_damping: tuple[float, float, float] = (105.0, 105.0, 115.0)
-    """X, Y, Z translational damping (N/(m/s))."""
     rotational_stiffness: tuple[float, float, float] = (45.0, 45.0, 35.0)
-    """RX, RY, RZ rotational stiffness (N·m/rad)."""
     rotational_damping: tuple[float, float, float] = (5.5, 5.5, 4.5)
-    """RX, RY, RZ rotational damping (N·m/(rad/s))."""
     nullspace_stiffness: float = 4.0
-    """Null-space joint stiffness (N·m/rad)."""
     nullspace_damping: float = 1.5
-    """Null-space joint damping (N·m/(rad/s))."""
 
 
 @dataclass
 class ForceControlParams:
+    """Hybrid force-control parameters.
+
+    Attributes
+    ----------
+    direction : (6,) tuple — 6-D force/moment direction (e.g. (0,0,1,0,0,0) = Z force).
+    admittance_gain_m_per_ns : float — position adjustment per force error (m/(N·s)).
+    max_position_offset_m : float — maximum admittance position adjustment (m).
+    feedback_alpha : float — low-pass filter coefficient (0, 1].
+    """
     target_force_n: float = 10.0
-    """Target force in Newtons."""
     direction: tuple[float, float, float, float, float, float] = (0.0, 0.0, 1.0, 0.0, 0.0, 0.0)
-    """6-D force/moment direction vector (unit).  E.g. (0,0,1,0,0,0) = Z force."""
     admittance_gain_m_per_ns: float = 0.03
-    """Admittance gain (m/(N·s))."""
     max_position_offset_m: float = 0.04
-    """Maximum admittance position offset (m)."""
     feedback_alpha: float = 0.18
-    """Low-pass filter coefficient for force feedback (0, 1]."""
 
 
 # ---------------------------------------------------------------------------
@@ -75,20 +110,14 @@ class ForceControlParams:
 # ---------------------------------------------------------------------------
 
 class UnifiedController:
-    """Unified torque-mode controller supporting joint impedance, Cartesian
-    impedance, and force control.
+    """Unified torque-mode controller.
 
     Parameters
     ----------
-    joint_limits_rad : (7, 2) ndarray
-        Per-joint (lower, upper) limits in radians.
-    torque_limits_nm : (7,) ndarray
-        Per-joint maximum torque magnitude (N·m).
-    torque_rate_limit_nm_per_s : float
-        Maximum torque change rate (N·m/s).  Default 1500.
-    dt_s : float
-        Control timestep in seconds (used for rate limiting and admittance
-        integration).  Default 0.002 (500 Hz).
+    joint_limits_rad : (7, 2) ndarray — per-joint (lower, upper) limits.
+    torque_limits_nm : (7,) ndarray — per-joint maximum torque (N·m).
+    torque_rate_limit_nm_per_s : float — max torque change rate (N·m/s). Default 1500.
+    dt_s : float — control timestep (s). Default 0.002 (500 Hz).
     """
 
     def __init__(
@@ -103,20 +132,15 @@ class UnifiedController:
         self._rate_limit = float(torque_rate_limit_nm_per_s)
         self._dt = float(dt_s)
 
-        # Mode & parameters
         self._mode = ControlMode.POSITION
-        self._joint_imp_params = JointImpedanceParams(
-            stiffness=(8.0,) * 7, damping=(1.5,) * 7,
-        )
+        self._joint_imp_params = JointImpedanceParams(stiffness=(8.0,) * 7, damping=(1.5,) * 7)
         self._cart_imp_params = CartesianImpedanceParams()
         self._force_params = ForceControlParams()
 
-        # Targets
         self._joint_target_rad: np.ndarray | None = None
         self._cart_target_matrix: np.ndarray | None = None
         self._force_target_n: float = 0.0
 
-        # State
         self._previous_torque = np.zeros(7)
         self._nullspace_ref_rad: np.ndarray | None = None
         self._force_offset_m = 0.0
@@ -127,8 +151,8 @@ class UnifiedController:
     # ------------------------------------------------------------------
 
     def set_mode(self, mode: ControlMode) -> None:
+        """Switch control mode. Resets force state when leaving FORCE mode."""
         self._mode = mode
-        # Reset force state when switching to non-force modes
         if mode != ControlMode.FORCE:
             self._force_offset_m = 0.0
             self._filtered_force_n = 0.0
@@ -152,7 +176,16 @@ class UnifiedController:
             raise ValueError("force direction translation axis must be non-zero")
         self._force_params = params
 
+    # ------------------------------------------------------------------
+    # Force axis helpers
+    # ------------------------------------------------------------------
+
     def force_axis_world(self, pose_matrix: np.ndarray | None = None) -> np.ndarray:
+        """Return the force-control axis expressed in world frame.
+
+        Uses the configured direction if set; otherwise defaults to the
+        tool Z axis from *pose_matrix*.
+        """
         axis = np.asarray(self._force_params.direction[:3], dtype=float).reshape(3)
         norm = float(np.linalg.norm(axis))
         if norm < 1e-12:
@@ -162,6 +195,17 @@ class UnifiedController:
         return axis / norm
 
     def measured_force_along_axis(self, wrench: np.ndarray, pose_matrix: np.ndarray) -> float:
+        """Project the tool-frame wrench onto the configured force axis.
+
+        Parameters
+        ----------
+        wrench : (6,) ndarray — force/torque in sensor (tool) frame.
+        pose_matrix : (4, 4) ndarray — current end-effector pose.
+
+        Returns
+        -------
+        float — force component along the configured axis (N).
+        """
         w = np.asarray(wrench, dtype=float).reshape(6)
         rotation = np.asarray(pose_matrix, dtype=float).reshape(4, 4)[:3, :3]
         force_world = rotation @ w[:3]
@@ -172,7 +216,7 @@ class UnifiedController:
     # ------------------------------------------------------------------
 
     def set_joint_cmd(self, target_joints_rad: np.ndarray) -> None:
-        """Set joint-space target (radians)."""
+        """Set joint-space target (radians). Also updates nullspace reference."""
         q = np.asarray(target_joints_rad, dtype=float).reshape(7)
         if not np.all(np.isfinite(q)):
             raise ValueError("target joints must be finite")
@@ -180,14 +224,14 @@ class UnifiedController:
         self._nullspace_ref_rad = q.copy()
 
     def set_cart_cmd(self, target_pose_matrix: np.ndarray) -> None:
-        """Set Cartesian target pose as 4×4 homogeneous transform."""
+        """Set Cartesian target pose as a 4×4 homogeneous transform."""
         T = np.asarray(target_pose_matrix, dtype=float).reshape(4, 4)
         if not np.all(np.isfinite(T)):
             raise ValueError("target pose must be finite")
         self._cart_target_matrix = T.copy()
 
     def set_force_cmd(self, force_n: float) -> None:
-        """Set force target in Newtons."""
+        """Set force target (Newtons). Must be non-negative."""
         if not math.isfinite(force_n) or force_n < 0:
             raise ValueError("force target must be non-negative finite")
         self._force_target_n = float(force_n)
@@ -209,22 +253,17 @@ class UnifiedController:
 
         Parameters
         ----------
-        current_joints_rad : (7,) ndarray
-            Current joint positions (rad).
-        current_velocities_rad_s : (7,) ndarray
-            Current joint velocities (rad/s).
-        jacobian : (6, 7) ndarray
-            Geometric Jacobian at the current configuration.
-        current_pose_matrix : (4, 4) ndarray or None
-            Current end-effector pose (required for Cartesian/force modes).
-        wrench : (6,) ndarray or None
-            Compensated force-torque at end-effector (required for force mode).
-        bias_torque : (7,) ndarray or None
-            Gravity compensation torque (added to all modes).
+        current_joints_rad : (7,) ndarray — joint positions (rad).
+        current_velocities_rad_s : (7,) ndarray — joint velocities (rad/s).
+        jacobian : (6, 7) ndarray — geometric Jacobian.
+        current_pose_matrix : (4, 4) ndarray or None — end-effector pose (required
+            for Cartesian/force modes).
+        wrench : (6,) ndarray or None — compensated wrench (required for force mode).
+        bias_torque : (7,) ndarray or None — gravity compensation (added to all modes).
 
         Returns
         -------
-        (7,) ndarray — joint torques (N·m), clamped by limits and rate.
+        (7,) ndarray — joint torques (N·m), clamped by torque and rate limits.
         """
         q = np.asarray(current_joints_rad, dtype=float).reshape(7)
         qd = np.asarray(current_velocities_rad_s, dtype=float).reshape(7)
@@ -235,26 +274,17 @@ class UnifiedController:
         _check_finite(q, "current_joints_rad")
         _check_finite(qd, "current_velocities_rad_s")
 
+        # Dispatch to control law
         if self._mode == ControlMode.JOINT_IMPEDANCE:
             tau = self._joint_impedance(q, qd, bias)
-        elif self._mode == ControlMode.CARTESIAN_IMPEDANCE:
+        elif self._mode in (ControlMode.CARTESIAN_IMPEDANCE, ControlMode.POSITION):
             tau = self._cartesian_impedance(q, qd, J, current_pose_matrix, bias)
-        elif self._mode == ControlMode.FORCE:
+        else:  # FORCE
             tau = self._force_control(q, qd, J, current_pose_matrix, wrench, bias)
-        else:  # POSITION — stiff Cartesian
-            tau = self._cartesian_impedance(q, qd, J, current_pose_matrix, bias)
 
-        # Safety: torque rate limiting
-        max_delta = self._rate_limit * self._dt
-        tau = np.clip(tau, self._previous_torque - max_delta, self._previous_torque + max_delta)
-
-        # Safety: torque magnitude limiting
-        tau = np.clip(tau, -self._torque_limits, self._torque_limits)
-
-        # Safety: NaN guard
-        if not np.all(np.isfinite(tau)):
-            tau = self._previous_torque.copy()
-
+        # Safety: torque rate + magnitude limiting
+        tau = _apply_torque_limits(tau, self._previous_torque,
+                                   self._rate_limit * self._dt, self._torque_limits)
         self._previous_torque = tau.copy()
         return tau
 
@@ -262,9 +292,8 @@ class UnifiedController:
     # Control laws (private)
     # ------------------------------------------------------------------
 
-    def _joint_impedance(
-        self, q: np.ndarray, qd: np.ndarray, bias: np.ndarray,
-    ) -> np.ndarray:
+    def _joint_impedance(self, q: np.ndarray, qd: np.ndarray, bias: np.ndarray) -> np.ndarray:
+        """τ = K·(q_des − q) − D·qd + bias."""
         if self._joint_target_rad is None:
             return bias
         K = np.asarray(self._joint_imp_params.stiffness, dtype=float).reshape(7)
@@ -275,80 +304,51 @@ class UnifiedController:
         self, q: np.ndarray, qd: np.ndarray, J: np.ndarray,
         pose_matrix: np.ndarray | None, bias: np.ndarray,
     ) -> np.ndarray:
+        """τ = Jᵀ·F_task + nullspace + bias."""
         if self._cart_target_matrix is None or pose_matrix is None:
             return bias
 
-        # Position error
-        x_des = self._cart_target_matrix[:3, 3]
-        x_cur = pose_matrix[:3, 3]
-        e_pos = x_des - x_cur
-
-        # Orientation error
+        e_pos = self._cart_target_matrix[:3, 3] - pose_matrix[:3, 3]
         e_rot = _rotation_error(pose_matrix[:3, :3], self._cart_target_matrix[:3, :3])
-
-        # End-effector velocity
         v = J @ qd
 
-        # Task wrench
         Kp = np.asarray(self._cart_imp_params.translational_stiffness)
         Kd = np.asarray(self._cart_imp_params.translational_damping)
         Kr = np.asarray(self._cart_imp_params.rotational_stiffness)
         Dr = np.asarray(self._cart_imp_params.rotational_damping)
 
-        F_task = np.concatenate((
-            Kp * e_pos - Kd * v[:3],
-            Kr * e_rot - Dr * v[3:],
-        ))
-
-        tau = J.T @ F_task
-
-        # Null-space projection
-        if self._nullspace_ref_rad is not None:
-            try:
-                # J is (6,7). Compute J^+ (7,6) via lstsq: J @ X = I_6 → X = (7,6)
-                J_pinv = np.linalg.lstsq(J, np.eye(6), rcond=None)[0]  # (7, 6)
-            except np.linalg.LinAlgError:
-                J_pinv = np.zeros((7, 6))
-            null_proj = np.eye(7) - J_pinv @ J  # (7,7) - (7,6)@(6,7) = (7,7)
-            Kn = self._cart_imp_params.nullspace_stiffness
-            Dn = self._cart_imp_params.nullspace_damping
-            tau += null_proj @ (-Kn * (q - self._nullspace_ref_rad) - Dn * qd)
-
-        return tau + bias
+        F_task = np.concatenate((Kp * e_pos - Kd * v[:3], Kr * e_rot - Dr * v[3:]))
+        tau = J.T @ F_task + bias
+        tau += self._nullspace_torque(q, qd, J)
+        return tau
 
     def _force_control(
         self, q: np.ndarray, qd: np.ndarray, J: np.ndarray,
         pose_matrix: np.ndarray | None, wrench: np.ndarray | None,
         bias: np.ndarray,
     ) -> np.ndarray:
+        """Hybrid: Cartesian impedance + admittance-based force tracking."""
         if pose_matrix is None or self._cart_target_matrix is None:
             return bias
 
-        # Low-pass filter force measured along the configured world axis.
+        # Low-pass filter force along the configured axis
         if wrench is not None:
             alpha = self._force_params.feedback_alpha
             measured = self.measured_force_along_axis(wrench, pose_matrix)
-            self._filtered_force_n = (
-                (1.0 - alpha) * self._filtered_force_n + alpha * measured
-            )
+            self._filtered_force_n = ((1.0 - alpha) * self._filtered_force_n + alpha * measured)
 
-        # Admittance: adjust target position along configured world axis.
+        # Admittance: adjust target position along force axis
         f_err = self._force_target_n - self._filtered_force_n
-        self._force_offset_m += (
-            self._force_params.admittance_gain_m_per_ns * f_err * self._dt
-        )
+        self._force_offset_m += self._force_params.admittance_gain_m_per_ns * f_err * self._dt
         self._force_offset_m = float(np.clip(
-            self._force_offset_m,
-            -self._force_params.max_position_offset_m,
+            self._force_offset_m, -self._force_params.max_position_offset_m,
             self._force_params.max_position_offset_m,
         ))
 
-        # Adjust Cartesian target along the configured force axis.
         force_axis = self.force_axis_world(pose_matrix)
         x_des_eff = self._cart_target_matrix[:3, 3] + self._force_offset_m * force_axis
 
-        x_cur = pose_matrix[:3, 3]
-        e_pos = x_des_eff - x_cur
+        e_pos = x_des_eff - pose_matrix[:3, 3]
         e_rot = _rotation_error(pose_matrix[:3, :3], self._cart_target_matrix[:3, :3])
         v = J @ qd
 
@@ -357,78 +357,49 @@ class UnifiedController:
         Kr = np.asarray(self._cart_imp_params.rotational_stiffness)
         Dr = np.asarray(self._cart_imp_params.rotational_damping)
 
-        F_task = np.concatenate((
-            Kp * e_pos - Kd * v[:3],
-            Kr * e_rot - Dr * v[3:],
-        ))
+        F_task = np.concatenate((Kp * e_pos - Kd * v[:3], Kr * e_rot - Dr * v[3:]))
+        tau = J.T @ F_task + bias
+        tau += self._nullspace_torque(q, qd, J)
+        return tau
 
-        tau = J.T @ F_task
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
 
-        # Null-space
-        if self._nullspace_ref_rad is not None:
-            try:
-                # J is (6,7). Compute J^+ (7,6): J @ X = I_6 → X = (7,6)
-                J_pinv = np.linalg.lstsq(J, np.eye(6), rcond=None)[0]  # (7, 6)
-            except np.linalg.LinAlgError:
-                J_pinv = np.zeros((7, 6))
-            null_proj = np.eye(7) - J_pinv @ J  # (7,7) - (7,6)@(6,7) = (7,7)
-            Kn = self._cart_imp_params.nullspace_stiffness
-            Dn = self._cart_imp_params.nullspace_damping
-            tau += null_proj @ (-Kn * (q - self._nullspace_ref_rad) - Dn * qd)
+    def _nullspace_torque(self, q: np.ndarray, qd: np.ndarray, J: np.ndarray) -> np.ndarray:
+        """Compute null-space joint torque pulling toward the reference configuration.
 
-        return tau + bias
+        Projects the joint-space spring-damper through the nullspace of J
+        so it does not affect the end-effector task.
+        """
+        if self._nullspace_ref_rad is None:
+            return np.zeros(7)
+        try:
+            J_pinv = np.linalg.lstsq(J, np.eye(6), rcond=None)[0]  # (7, 6)
+        except np.linalg.LinAlgError:
+            return np.zeros(7)
+        null_proj = np.eye(7) - J_pinv @ J  # (7, 7)
+        Kn = self._cart_imp_params.nullspace_stiffness
+        Dn = self._cart_imp_params.nullspace_damping
+        return null_proj @ (-Kn * (q - self._nullspace_ref_rad) - Dn * qd)
 
 
 # ---------------------------------------------------------------------------
-# Rotation helpers (module-level to avoid circular import)
+# Safety: torque limiting
 # ---------------------------------------------------------------------------
 
-def _matrix_to_quat(matrix: np.ndarray) -> np.ndarray:
-    m = np.asarray(matrix, dtype=float).reshape(3, 3)
-    trace = float(np.trace(m))
-    if trace > 0.0:
-        s = 2.0 * math.sqrt(trace + 1.0)
-        return np.array((0.25 * s, (m[2, 1] - m[1, 2]) / s,
-                         (m[0, 2] - m[2, 0]) / s, (m[1, 0] - m[0, 1]) / s))
-    idx = int(np.argmax(np.diag(m)))
-    if idx == 0:
-        s = 2.0 * math.sqrt(max(0.0, 1.0 + m[0, 0] - m[1, 1] - m[2, 2]))
-        return np.array(((m[2, 1] - m[1, 2]) / s, 0.25 * s,
-                         (m[0, 1] + m[1, 0]) / s, (m[0, 2] + m[2, 0]) / s))
-    elif idx == 1:
-        s = 2.0 * math.sqrt(max(0.0, 1.0 + m[1, 1] - m[0, 0] - m[2, 2]))
-        return np.array(((m[0, 2] - m[2, 0]) / s, (m[0, 1] + m[1, 0]) / s,
-                         0.25 * s, (m[1, 2] + m[2, 1]) / s))
-    else:
-        s = 2.0 * math.sqrt(max(0.0, 1.0 + m[2, 2] - m[0, 0] - m[1, 1]))
-        return np.array(((m[1, 0] - m[0, 1]) / s, (m[0, 2] + m[2, 0]) / s,
-                         (m[1, 2] + m[2, 1]) / s, 0.25 * s))
-
-
-def _quat_mul(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    lw, lx, ly, lz = left
-    rw, rx, ry, rz = right
-    return np.array((
-        lw * rw - lx * rx - ly * ry - lz * rz,
-        lw * rx + lx * rw + ly * rz - lz * ry,
-        lw * ry - lx * rz + ly * rw + lz * rx,
-        lw * rz + lx * ry - ly * rx + lz * rw,
-    ))
-
-
-def _rotation_error(current: np.ndarray, desired: np.ndarray) -> np.ndarray:
-    current = np.asarray(current, dtype=float).reshape(3, 3)
-    desired = np.asarray(desired, dtype=float).reshape(3, 3)
-    qc = _matrix_to_quat(current)
-    qd = _matrix_to_quat(desired)
-    qerr = _quat_mul(qd, np.array((qc[0], -qc[1], -qc[2], -qc[3])))
-    if qerr[0] < 0.0:
-        qerr = -qerr
-    vnorm = float(np.linalg.norm(qerr[1:]))
-    if vnorm < 1e-12:
-        return np.zeros(3)
-    angle = 2.0 * math.atan2(vnorm, float(np.clip(qerr[0], -1.0, 1.0)))
-    return qerr[1:] * (angle / vnorm)
+def _apply_torque_limits(
+    tau: np.ndarray,
+    prev_tau: np.ndarray,
+    max_delta: float,
+    torque_limits: np.ndarray,
+) -> np.ndarray:
+    """Clamp *tau* by rate and magnitude limits, with NaN guard."""
+    tau = np.clip(tau, prev_tau - max_delta, prev_tau + max_delta)
+    tau = np.clip(tau, -torque_limits, torque_limits)
+    if not np.all(np.isfinite(tau)):
+        tau = prev_tau.copy()
+    return tau
 
 
 # ---------------------------------------------------------------------------

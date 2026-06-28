@@ -1,16 +1,30 @@
-"""Forward/inverse kinematics and Jacobian for Marvin CCS 7-DOF arm.
+"""Forward and inverse kinematics for Marvin CCS 7-DOF arm.
 
-Forward kinematics uses MuJoCo for correctness — the MJCF kinematic chain
-(body stacking with pos+quat) is the ground truth.  Inverse kinematics is
-a pure-Python damped least-squares solver.  The analytical Jacobian uses
-MuJoCo's ``mj_jacSite`` when available, falling back to finite differences.
+Forward kinematics reads MuJoCo site poses (the MJCF kinematic chain is the
+ground truth).  Inverse kinematics uses a damped least-squares solver.
+The Jacobian delegates to MuJoCo's ``mj_jacSite``.
 
 Internal calculations always use SI units (radians, metres, N·m).
-The ``unit_mode`` parameter controls input/output conversion at the public API
-boundary only.
+The ``unit_mode`` parameter controls input/output conversion at the public
+API boundary only.
 
 ``unit_mode="si"`` (default): radians, metres, N·m.
 ``unit_mode="sdk"``: degrees, millimetres, N·m (SDK-compatible display).
+
+Public API
+----------
+MarvinKinematics(arm, unit_mode, tcp_site_name)
+    .fk(joints)          → (4×4 matrix, xyzabc)
+    .ik(target, ref, …)  → IkResult
+    .jacobian(joints)    → (6, 7) ndarray
+    .set_tool(xyzabc) / .remove_tool()
+    .set_runtime(runtime)
+    .joint_limits_rad    → (7, 2) ndarray
+    .tcp_site_name       → str
+
+matrix_to_xyzabc(matrix) → (6,) ndarray
+xyzabc_to_matrix(xyzabc) → (4, 4) ndarray
+IkResult                   dataclass: joints_rad, success, iterations, residual, is_singular
 """
 
 from __future__ import annotations
@@ -21,6 +35,8 @@ from typing import Sequence
 
 import numpy as np
 
+from twin_control.rotation import rotation_error as _rotation_error
+
 # Conversion constants
 _RAD_PER_DEG = math.pi / 180.0
 _DEG_PER_RAD = 180.0 / math.pi
@@ -29,62 +45,20 @@ _M_PER_MM = 0.001
 
 
 # ---------------------------------------------------------------------------
-# Rotation utilities
+# Matrix ↔ XYZABC
 # ---------------------------------------------------------------------------
 
-def _rotation_error(current: np.ndarray, desired: np.ndarray) -> np.ndarray:
-    """Axis-angle rotation error (3-vector) from current to desired rotation."""
-    current = np.asarray(current, dtype=float).reshape(3, 3)
-    desired = np.asarray(desired, dtype=float).reshape(3, 3)
-    qc = _matrix_to_quat(current)
-    qd = _matrix_to_quat(desired)
-    qerr = _quat_mul(qd, np.array((qc[0], -qc[1], -qc[2], -qc[3])))
-    if qerr[0] < 0.0:
-        qerr = -qerr
-    vnorm = float(np.linalg.norm(qerr[1:]))
-    if vnorm < 1e-12:
-        return np.zeros(3)
-    angle = 2.0 * math.atan2(vnorm, float(np.clip(qerr[0], -1.0, 1.0)))
-    return qerr[1:] * (angle / vnorm)
-
-
-def _quat_mul(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    lw, lx, ly, lz = left
-    rw, rx, ry, rz = right
-    return np.array((
-        lw * rw - lx * rx - ly * ry - lz * rz,
-        lw * rx + lx * rw + ly * rz - lz * ry,
-        lw * ry - lx * rz + ly * rw + lz * rx,
-        lw * rz + lx * ry - ly * rx + lz * rw,
-    ))
-
-
-def _matrix_to_quat(matrix: np.ndarray) -> np.ndarray:
-    m = np.asarray(matrix, dtype=float).reshape(3, 3)
-    trace = float(np.trace(m))
-    if trace > 0.0:
-        s = 2.0 * math.sqrt(trace + 1.0)
-        return np.array((
-            0.25 * s, (m[2, 1] - m[1, 2]) / s,
-            (m[0, 2] - m[2, 0]) / s, (m[1, 0] - m[0, 1]) / s,
-        ))
-    idx = int(np.argmax(np.diag(m)))
-    if idx == 0:
-        s = 2.0 * math.sqrt(max(0.0, 1.0 + m[0, 0] - m[1, 1] - m[2, 2]))
-        return np.array(((m[2, 1] - m[1, 2]) / s, 0.25 * s,
-                         (m[0, 1] + m[1, 0]) / s, (m[0, 2] + m[2, 0]) / s))
-    elif idx == 1:
-        s = 2.0 * math.sqrt(max(0.0, 1.0 + m[1, 1] - m[0, 0] - m[2, 2]))
-        return np.array(((m[0, 2] - m[2, 0]) / s, (m[0, 1] + m[1, 0]) / s,
-                         0.25 * s, (m[1, 2] + m[2, 1]) / s))
-    else:
-        s = 2.0 * math.sqrt(max(0.0, 1.0 + m[2, 2] - m[0, 0] - m[1, 1]))
-        return np.array(((m[1, 0] - m[0, 1]) / s, (m[0, 2] + m[2, 0]) / s,
-                         (m[1, 2] + m[2, 1]) / s, 0.25 * s))
-
-
 def matrix_to_xyzabc(matrix: np.ndarray) -> np.ndarray:
-    """4×4 homogeneous transform → XYZABC (m, rad).  ZYX fixed-angle convention."""
+    """4×4 homogeneous transform → XYZABC (m, rad).  ZYX fixed-angle convention.
+
+    Parameters
+    ----------
+    matrix : (4, 4) ndarray — homogeneous transform.
+
+    Returns
+    -------
+    (6,) ndarray — [x, y, z, rx, ry, rz] in metres and radians.
+    """
     m = np.asarray(matrix, dtype=float).reshape(4, 4)
     pos = m[:3, 3].copy()
     r = m[:3, :3]
@@ -101,7 +75,16 @@ def matrix_to_xyzabc(matrix: np.ndarray) -> np.ndarray:
 
 
 def xyzabc_to_matrix(xyzabc: Sequence[float]) -> np.ndarray:
-    """XYZABC (m, rad) → 4×4 homogeneous transform (ZYX fixed-angle)."""
+    """XYZABC (m, rad) → 4×4 homogeneous transform (ZYX fixed-angle).
+
+    Parameters
+    ----------
+    xyzabc : (6,) sequence — [x, y, z, rx, ry, rz] in metres and radians.
+
+    Returns
+    -------
+    (4, 4) ndarray — homogeneous transform.
+    """
     x, y, z, a, b, c = (float(v) for v in xyzabc)
     ca, sa = math.cos(a), math.sin(a)
     cb, sb = math.cos(b), math.sin(b)
@@ -120,7 +103,17 @@ def xyzabc_to_matrix(xyzabc: Sequence[float]) -> np.ndarray:
 
 @dataclass
 class IkResult:
-    joints_rad: np.ndarray       # 7 joint angles (radians)
+    """Result of an inverse kinematics call.
+
+    Attributes
+    ----------
+    joints_rad : (7,) ndarray — solution joint angles in radians.
+    success : bool — True if residual fell below tolerance.
+    iterations : int — number of DLS iterations taken.
+    residual : float — final position+orientation error norm.
+    is_singular : bool — True if a singular Jacobian was encountered.
+    """
+    joints_rad: np.ndarray
     success: bool
     iterations: int
     residual: float
@@ -141,6 +134,9 @@ class MarvinKinematics:
     unit_mode : str
         ``"si"`` (default): radians, metres.
         ``"sdk"``: degrees, millimetres.
+    tcp_site_name : str or None
+        MuJoCo site to use as the end-effector.  Defaults to
+        ``"{arm}_force_sensor_site"``.
     """
 
     def __init__(self, arm: str, unit_mode: str = "si", tcp_site_name: str | None = None) -> None:
@@ -152,7 +148,6 @@ class MarvinKinematics:
         self.unit_mode = unit_mode
         self._tcp_site_name = tcp_site_name or f"{self.arm}_force_sensor_site"
         self._tool_matrix: np.ndarray | None = None
-        # MuJoCo objects (set by TwinRobot.connect)
         self._runtime: object | None = None
 
     # ------------------------------------------------------------------
@@ -174,23 +169,45 @@ class MarvinKinematics:
 
     @property
     def tcp_site_name(self) -> str:
+        """MuJoCo site name used as the end-effector."""
         return self._tcp_site_name
 
     def set_runtime(self, runtime: object) -> None:
-        """Attach a MuJoCo runtime for FK/Jacobian access."""
+        """Attach a MuJoCo runtime for FK/Jacobian access.
+
+        Must be called before ``fk()``, ``ik()``, or ``jacobian()``.
+        """
         self._runtime = runtime
 
     def set_tool(self, tool_xyzabc: Sequence[float]) -> None:
+        """Set an additional tool offset beyond the TCP site frame.
+
+        Parameters
+        ----------
+        tool_xyzabc : (6,) sequence
+            XYZABC in SI (m, rad) or SDK (mm, deg) per ``unit_mode``.
+        """
         xyzabc = _to_si_xyzabc(np.asarray(tool_xyzabc, dtype=float).reshape(6), self.unit_mode)
         self._tool_matrix = xyzabc_to_matrix(xyzabc)
 
     def remove_tool(self) -> None:
+        """Remove the extra tool offset."""
         self._tool_matrix = None
 
     def fk(self, joints: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Forward kinematics via MuJoCo.
+        """Forward kinematics via MuJoCo site pose.
 
-        Returns (4×4 matrix, xyzabc) in units per ``unit_mode``.
+        Parameters
+        ----------
+        joints : (7,) ndarray
+            Joint angles in SI (rad) or SDK (deg) per ``unit_mode``.
+
+        Returns
+        -------
+        matrix : (4, 4) ndarray
+            Homogeneous transform of the end-effector in base frame.
+        xyzabc : (6,) ndarray
+            XYZABC in SI (m, rad) or SDK (mm, deg) per ``unit_mode``.
         """
         q = _to_si_radians(np.asarray(joints, dtype=float).reshape(7), self.unit_mode)
         matrix = self._fk_matrix(q)
@@ -206,9 +223,26 @@ class MarvinKinematics:
         zsp_para: np.ndarray | None = None,
         zsp_angle_deg: float = 0.0,
     ) -> IkResult:
-        """Inverse kinematics via damped least squares.
+        """Inverse kinematics via damped least squares with null-space projection.
 
-        Uses MuJoCo FK + Jacobian at each iteration for correctness.
+        Parameters
+        ----------
+        target_matrix : (4, 4) ndarray
+            Desired end-effector pose (homogeneous transform).
+        ref_joints : (7,) ndarray
+            Reference joint angles in SI (rad) or SDK (deg) per ``unit_mode``.
+            Used as the initial guess and null-space attractor.
+        zsp_type : int
+            0 = minimise Euclidean distance to ref_joints.
+            1 = reserved (not yet implemented).
+        zsp_para : (6,) ndarray or None
+            Null-space plane parameters (only used when zsp_type=1).
+        zsp_angle_deg : float
+            Arm-angle offset in degrees (only used when zsp_type=1).
+
+        Returns
+        -------
+        IkResult
         """
         T_target = np.asarray(target_matrix, dtype=float).reshape(4, 4)
         q_ref = _to_si_radians(np.asarray(ref_joints, dtype=float).reshape(7), self.unit_mode)
@@ -232,6 +266,7 @@ class MarvinKinematics:
 
             J = self._jacobian(q)
 
+            # Damped least squares
             JJt = J @ J.T
             damped = JJt + lam * lam * np.eye(6)
             try:
@@ -240,13 +275,15 @@ class MarvinKinematics:
                 is_singular = True
                 dq = J.T @ np.linalg.lstsq(damped, error, rcond=None)[0]
 
+            # Null-space projection toward reference
             if zsp_type == 0:
-                J_pinv = np.linalg.lstsq(J, np.eye(6), rcond=None)[0]  # (7,6)
+                J_pinv = np.linalg.lstsq(J, np.eye(6), rcond=None)[0]  # (7, 6)
                 null_proj = np.eye(7) - J_pinv @ J
                 dq += null_proj @ ((q_ref - q) * alpha_null)
 
             q = np.clip(q + dq, limits[:, 0], limits[:, 1])
 
+            # Adaptive damping
             if residual < prev_residual:
                 lam = max(lam * 0.7, 0.001)
             else:
@@ -262,7 +299,17 @@ class MarvinKinematics:
         )
 
     def jacobian(self, joints: np.ndarray) -> np.ndarray:
-        """6×7 geometric Jacobian via MuJoCo ``mj_jacSite``."""
+        """6×7 geometric Jacobian via MuJoCo ``mj_jacSite``.
+
+        Parameters
+        ----------
+        joints : (7,) ndarray
+            Joint angles in SI (rad) or SDK (deg) per ``unit_mode``.
+
+        Returns
+        -------
+        (6, 7) ndarray — upper 3 rows = linear velocity, lower 3 = angular velocity.
+        """
         q = _to_si_radians(np.asarray(joints, dtype=float).reshape(7), self.unit_mode)
         return self._jacobian(q)
 
@@ -279,12 +326,11 @@ class MarvinKinematics:
         import mujoco as _mj
         rt = self._runtime
         arm_view = rt.arm_view(self.arm)
-        # Save current state
         saved_qpos = rt.data.qpos.copy()
         saved_qvel = rt.data.qvel.copy()
         try:
             rt.set_arm_positions(self.arm, q_rad)
-            site_id = _mj.mj_name2id(rt.model, _mj.mjtObj.mjOBJ_SITE, self.tcp_site_name)
+            site_id = _mj.mj_name2id(rt.model, _mj.mjtObj.mjOBJ_SITE, self._tcp_site_name)
             pos = rt.data.site_xpos[site_id].copy()
             rot = rt.data.site_xmat[site_id].reshape(3, 3).copy()
         finally:
@@ -310,7 +356,7 @@ class MarvinKinematics:
         saved_qvel = rt.data.qvel.copy()
         try:
             rt.set_arm_positions(self.arm, q_rad)
-            J = arm_view.site_jacobian(self.tcp_site_name)
+            J = arm_view.site_jacobian(self._tcp_site_name)
         finally:
             rt.data.qpos[:] = saved_qpos
             rt.data.qvel[:] = saved_qvel

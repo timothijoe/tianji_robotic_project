@@ -10,6 +10,27 @@ Aligns with the ``Concise_Marvin_Robot`` API from ``TJ_FX_ROBOT_CONTRL_SDK``:
 
 Internally uses ``TwinMujocoRuntime`` + ``ArmView`` from ``twin_mujoco``
 and delegates torque computation to ``UnifiedController``.
+
+TCP trail visualisation is handled by ``TcpTrail`` (``twin_control.trail``).
+
+Public API
+----------
+RobotState                 enum: IDLE / POSITION / JOINT_IMPEDANCE / CARTESIAN_IMPEDANCE / FORCE
+RIGHT_HOME_RAD / LEFT_HOME_RAD   (7,) ndarray — default home configurations
+_DEFAULT_JOINT_K / _DEFAULT_JOINT_D  — default joint impedance (SI)
+_DEFAULT_CART_K / _DEFAULT_CART_D   — default Cartesian impedance (SI)
+TwinRobot(arm_name, unit_mode, control_hz, tcp_site_name)
+    .connect(model_path, viewer, realtime)
+    .set_position_state(vel, acc) / .set_joint_impedance_state(vel, acc, K, D)
+    .set_cart_impedance_state(vel, acc, K, D) / .set_force_state(vel, acc, K, D, fx_dir, adj_lmt)
+    .disable()
+    .set_joint_position_cmd(joints) / .set_force_cmd(force_n)
+    .set_tool(kine_para) / .remove_tool()
+    .get_joint_positions() / .get_joint_velocities()
+    .get_tcp_pose() / .get_raw_wrench() / .get_wrench() / .calibrate_wrench(samples)
+    .step(viewer_sync) / .spin(steps, viewer_sync)
+    .hold_viewer_open(hz)
+    .clear_log() / .write_csv(path)
 """
 
 from __future__ import annotations
@@ -24,12 +45,6 @@ import mujoco
 import mujoco.viewer  # loads lazy submodule (needed in MuJoCo 3.9)
 import numpy as np
 
-# MuJoCo viewer API changed in 3.10; fall back for 3.9.
-try:
-    from mujoco.viewer import launch_passive as _mj_launch_passive
-except ImportError:
-    _mj_launch_passive = None
-
 from twin_control.controller import (
     CartesianImpedanceParams,
     ControlMode,
@@ -38,12 +53,13 @@ from twin_control.controller import (
     UnifiedController,
 )
 from twin_control.kinematics import MarvinKinematics
+from twin_control.trail import TcpTrail
 from twin_description.paths import right_chopping_scene_path
 from twin_mujoco.runtime import ArmView, TwinMujocoRuntime
 
 
 # ---------------------------------------------------------------------------
-# Home configurations (right arm)
+# Home configurations
 # ---------------------------------------------------------------------------
 
 RIGHT_HOME_RAD = np.array(
@@ -99,6 +115,8 @@ class TwinRobot:
         ``"si"`` (rad, m) or ``"sdk"`` (deg, mm).
     control_hz : float
         Control loop rate.  Default 500 Hz.
+    tcp_site_name : str or None
+        MuJoCo site used as end-effector.  Defaults to ``"{arm}_force_sensor_site"``.
     """
 
     def __init__(
@@ -121,26 +139,11 @@ class TwinRobot:
         self._kinematics: MarvinKinematics | None = None
         self._controller: UnifiedController | None = None
         self._viewer = None
+        self._trail: TcpTrail | None = None
         self._state = RobotState.IDLE
         self._samples: list[dict] = []
-        self._last_torque = np.zeros(7)
         self._wrench_bias = np.zeros(6)
         self._wrench_calibrated = False
-
-        # Cartesian target tracking
-        self._cart_target_matrix: np.ndarray | None = None
-
-        # TCP trail for visualisation
-        self._tcp_trail: list[np.ndarray] = []
-        self._target_trail: list[np.ndarray] = []
-        self._trail_rendered_count = 0
-        self._target_trail_rendered_count = 0
-        self._trail_step_count = 0
-        self._trail_sample_stride = 20
-        self._trail_color = (1.0, 0.45, 0.0, 0.95)  # actual TCP path
-        self._target_trail_color = (0.0, 0.85, 1.0, 0.95)  # commanded TCP path
-        self._trail_sphere_size = 0.008
-        self._target_trail_sphere_size = 0.012
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -171,7 +174,8 @@ class TwinRobot:
 
         self._arm = self.runtime.arm_view(self.arm_name)
         self._kinematics = MarvinKinematics(
-            self.arm_name, unit_mode=self.unit_mode, tcp_site_name=self._tcp_site_name,
+            self.arm_name, unit_mode=self.unit_mode,
+            tcp_site_name=self._tcp_site_name,
         )
         self._kinematics.set_runtime(self.runtime)
         self._controller = UnifiedController(
@@ -181,11 +185,13 @@ class TwinRobot:
             dt_s=self._control_dt,
         )
 
+        self._trail = None
         if viewer:
             self._viewer = mujoco.viewer.launch_passive(
                 self.runtime.model, self.runtime.data,
             )
-            self._configure_viewer_camera()
+            self._trail = TcpTrail(self._viewer, self._tcp_site_name)
+            _configure_viewer_camera(self._viewer)
             print("[TwinRobot] viewer trail: actual=orange, target=cyan")
 
         self._state = RobotState.IDLE
@@ -198,6 +204,7 @@ class TwinRobot:
             self._viewer.close()
             time.sleep(0.5)
             self._viewer = None
+        self._trail = None
         self.runtime = None
         self._arm = None
         self._state = RobotState.IDLE
@@ -210,7 +217,7 @@ class TwinRobot:
     def set_position_state(
         self, vel_ratio: float = 0.5, acc_ratio: float = 0.5,
     ) -> None:
-        """Switch to position mode (stiff Cartesian impedance, velocity limited)."""
+        """Switch to position mode (stiff Cartesian impedance)."""
         self._ensure_connected()
         fv = float(np.clip(vel_ratio, 0.0, 1.0))
         params = CartesianImpedanceParams(
@@ -225,97 +232,58 @@ class TwinRobot:
         print(f"[TwinRobot] state → POSITION (vel={vel_ratio})")
 
     def set_joint_impedance_state(
-        self,
-        vel_ratio: float,
-        acc_ratio: float,
-        K: Sequence[float],
-        D: Sequence[float],
+        self, vel_ratio: float, acc_ratio: float,
+        K: Sequence[float], D: Sequence[float],
     ) -> None:
-        """Switch to joint impedance mode.
-
-        Parameters
-        ----------
-        K : (7,) sequence — stiffness (N·m/rad SI or N·m/deg SDK).
-        D : (7,) sequence — damping (N·m/(rad/s) SI or N·m/(deg/s) SDK).
-        """
+        """Switch to joint impedance mode."""
         self._ensure_connected()
         K_si = tuple(float(v) for v in K)
         D_si = tuple(float(v) for v in D)
-        # If SDK mode, convert stiffness from N·m/deg → N·m/rad
         if self.unit_mode == "sdk":
             K_si = tuple(v * 57.29578 for v in K_si)
             D_si = tuple(v * 57.29578 for v in D_si)
-        params = JointImpedanceParams(stiffness=K_si, damping=D_si)
-        self._controller.set_joint_impedance_params(params)
+        self._controller.set_joint_impedance_params(
+            JointImpedanceParams(stiffness=K_si, damping=D_si),
+        )
         self._controller.set_mode(ControlMode.JOINT_IMPEDANCE)
         self._state = RobotState.JOINT_IMPEDANCE
         print(f"[TwinRobot] state → JOINT_IMPEDANCE  K[0]={K_si[0]:.1f} D[0]={D_si[0]:.2f}")
 
     def set_cart_impedance_state(
-        self,
-        vel_ratio: float,
-        acc_ratio: float,
-        K: Sequence[float],
-        D: Sequence[float],
-        rot_type: int = 0,
-        cart_ctrl_para: Sequence[float] | None = None,
+        self, vel_ratio: float, acc_ratio: float,
+        K: Sequence[float], D: Sequence[float],
+        rot_type: int = 0, cart_ctrl_para: Sequence[float] | None = None,
     ) -> None:
-        """Switch to Cartesian impedance mode.
-
-        Parameters
-        ----------
-        K : (7,) sequence — [Kx, Ky, Kz, Krx, Kry, Krz, K_null] (N/m, N·m/rad).
-        D : (7,) sequence — [Dx, Dy, Dz, Drx, Dry, Drz, D_null] (ratio).
-        """
+        """Switch to Cartesian impedance mode."""
         self._ensure_connected()
-        K_t = tuple(float(v) for v in K)
-        D_t = tuple(float(v) for v in D)
-        params = CartesianImpedanceParams(
-            translational_stiffness=K_t[:3],
-            translational_damping=D_t[:3],
-            rotational_stiffness=K_t[3:6],
-            rotational_damping=D_t[3:6],
-            nullspace_stiffness=K_t[6],
-            nullspace_damping=D_t[6],
-        )
-        self._controller.set_cartesian_impedance_params(params)
+        K_t, D_t = tuple(float(v) for v in K), tuple(float(v) for v in D)
+        self._controller.set_cartesian_impedance_params(CartesianImpedanceParams(
+            translational_stiffness=K_t[:3], translational_damping=D_t[:3],
+            rotational_stiffness=K_t[3:6], rotational_damping=D_t[3:6],
+            nullspace_stiffness=K_t[6], nullspace_damping=D_t[6],
+        ))
         self._controller.set_mode(ControlMode.CARTESIAN_IMPEDANCE)
-        # Set nullspace reference to current position
         if self._arm is not None:
             self._controller.set_joint_cmd(self._arm.joint_positions)
         self._state = RobotState.CARTESIAN_IMPEDANCE
         print(f"[TwinRobot] state → CARTESIAN_IMPEDANCE  K_trans[0]={K_t[0]:.0f}")
 
     def set_force_state(
-        self,
-        vel_ratio: float,
-        acc_ratio: float,
-        K: Sequence[float],
-        D: Sequence[float],
-        fx_dir: Sequence[float],
-        fc_adj_lmt: float,
+        self, vel_ratio: float, acc_ratio: float,
+        K: Sequence[float], D: Sequence[float],
+        fx_dir: Sequence[float], fc_adj_lmt: float,
     ) -> None:
-        """Switch to force control mode (hybrid Cartesian impedance + admittance).
-
-        Parameters
-        ----------
-        K, D : Same as Cartesian impedance.
-        fx_dir : (6,) — force direction vector, e.g. (0,0,1,0,0,0) for Z force.
-        fc_adj_lmt : float — maximum admittance position adjustment (mm SDK or m SI).
-        """
+        """Switch to force control mode (hybrid Cartesian impedance + admittance)."""
         self._ensure_connected()
-        # Set Cartesian impedance for non-force axes
         self.set_cart_impedance_state(vel_ratio, acc_ratio, K, D)
         adj_m = fc_adj_lmt * 0.001 if self.unit_mode == "sdk" else float(fc_adj_lmt)
-        fx = tuple(float(v) for v in fx_dir)
-        params = ForceControlParams(
-            direction=fx,
+        self._controller.set_force_params(ForceControlParams(
+            direction=tuple(float(v) for v in fx_dir),
             max_position_offset_m=abs(adj_m),
-        )
-        self._controller.set_force_params(params)
+        ))
         self._controller.set_mode(ControlMode.FORCE)
         self._state = RobotState.FORCE
-        print(f"[TwinRobot] state → FORCE  dir={fx}  adj_lim={adj_m:.4f}m")
+        print(f"[TwinRobot] state → FORCE  dir={fx_dir}  adj_lim={adj_m:.4f}m")
 
     def disable(self) -> None:
         """Disable torque output (set ctrl=0)."""
@@ -329,15 +297,9 @@ class TwinRobot:
     # ------------------------------------------------------------------
 
     def set_joint_position_cmd(self, joints: Sequence[float]) -> None:
-        """Set joint-space position target.
-
-        Parameters
-        ----------
-        joints : (7,) sequence — target joint positions in SI (rad) or SDK (deg).
-        """
+        """Set joint-space position target (rad or deg per unit_mode)."""
         self._ensure_connected()
         q = np.asarray(joints, dtype=float).reshape(7)
-        # Convert to SI if SDK mode
         if self.unit_mode == "sdk":
             q = np.deg2rad(q)
         self._controller.set_joint_cmd(q)
@@ -352,12 +314,6 @@ class TwinRobot:
     # ------------------------------------------------------------------
 
     def set_tool(self, kine_para: Sequence[float]) -> None:
-        """Set tool kinematics offset.
-
-        Parameters
-        ----------
-        kine_para : (6,) — XYZABC in SI (m, rad) or SDK (mm, deg).
-        """
         self._ensure_connected()
         self._kinematics.set_tool(kine_para)
 
@@ -370,23 +326,19 @@ class TwinRobot:
     # ------------------------------------------------------------------
 
     def get_joint_positions(self) -> np.ndarray:
-        """Return current joint positions in SI (rad) or SDK (deg)."""
+        """Return current joint positions (rad or deg per unit_mode)."""
         self._ensure_connected()
         q = self._arm.joint_positions
-        if self.unit_mode == "sdk":
-            return np.rad2deg(q)
-        return q
+        return np.rad2deg(q) if self.unit_mode == "sdk" else q
 
     def get_joint_velocities(self) -> np.ndarray:
-        """Return current joint velocities in SI (rad/s) or SDK (deg/s)."""
+        """Return current joint velocities (rad/s or deg/s per unit_mode)."""
         self._ensure_connected()
         qd = self._arm.joint_velocities
-        if self.unit_mode == "sdk":
-            return np.rad2deg(qd)
-        return qd
+        return np.rad2deg(qd) if self.unit_mode == "sdk" else qd
 
     def get_tcp_pose(self) -> tuple[np.ndarray, np.ndarray]:
-        """Return TCP (sensor site) position (m or mm) and 4×4 matrix."""
+        """Return TCP position (m or mm) and 4×4 matrix."""
         self._ensure_connected()
         matrix, xyzabc = self._kinematics.fk(self._arm.joint_positions)
         return xyzabc[:3], matrix
@@ -400,20 +352,15 @@ class TwinRobot:
         """Return compensated 6-D wrench (N, N·m)."""
         raw = self.get_raw_wrench()
         if self._wrench_calibrated:
-            current_pose = self._kinematics.fk(self._arm.joint_positions)[0]
-            gravity_wrench = _gravity_compensation(current_pose[:3, :3])
-            return raw - self._wrench_bias - gravity_wrench
+            pose = self._kinematics.fk(self._arm.joint_positions)[0]
+            return raw - self._wrench_bias - _gravity_compensation(pose[:3, :3])
         return raw
 
     def calibrate_wrench(self, samples: int = 500) -> None:
-        """Tare the wrench sensor by averaging ``samples`` readings.
-
-        The arm must be stationary during calibration.
-        """
+        """Tare the wrench sensor. Arm must be stationary."""
         self._ensure_connected()
-        readings = []
-        for _ in range(samples):
-            readings.append(self.get_raw_wrench())
+        readings = [self.get_raw_wrench() for _ in range(samples)]
+        for _ in readings[1:]:  # step between readings
             self.runtime.step()
         self._wrench_bias = np.mean(readings, axis=0)
         self._wrench_calibrated = True
@@ -430,60 +377,38 @@ class TwinRobot:
         q = self._arm.joint_positions
         qd = self._arm.joint_velocities
         J = self._arm.site_jacobian(self._tcp_site_name)
-
-        # FK for current TCP pose (needed for Cartesian/force modes, and trail)
         pose_matrix = self._kinematics.fk(q)[0]
 
-        # Wrench for force mode
-        wrench = None
-        if self._state == RobotState.FORCE:
-            wrench = self.get_wrench()
-
-        # Compute torque — only pass pose_matrix if mode needs it
-        compute_pose = None
-        if self._state in (RobotState.CARTESIAN_IMPEDANCE, RobotState.FORCE,
-                           RobotState.POSITION):
-            compute_pose = pose_matrix
+        wrench = self.get_wrench() if self._state == RobotState.FORCE else None
+        compute_pose = pose_matrix if self._state in (
+            RobotState.CARTESIAN_IMPEDANCE, RobotState.FORCE, RobotState.POSITION,
+        ) else None
 
         torque = self._controller.compute(
-            current_joints_rad=q,
-            current_velocities_rad_s=qd,
-            jacobian=J,
-            current_pose_matrix=compute_pose,
-            wrench=wrench,
-            bias_torque=self._arm.bias_torque,
+            current_joints_rad=q, current_velocities_rad_s=qd,
+            jacobian=J, current_pose_matrix=compute_pose,
+            wrench=wrench, bias_torque=self._arm.bias_torque,
         )
 
-        # Apply and step
-        applied = self._arm.apply_torque(torque)
+        self._arm.apply_torque(torque)
         self._hold_other_arm()
-
         for _ in range(self._substeps):
             self.runtime.step()
         self._hold_other_arm()
 
-        self._last_torque = np.asarray(applied, dtype=float).reshape(7).copy()
+        self._samples.append(self._make_sample(torque, wrench))
 
-        # Log sample
-        self._samples.append(self._make_sample(applied, wrench))
+        # Trail recording
+        if self._trail is not None:
+            self._trail.record(q, self._kinematics, self._controller)
 
-        # Record a decimated actual/commanded TCP trail for visualisation.
-        self._trail_step_count += 1
-        if self._trail_step_count % self._trail_sample_stride == 0:
-            actual_pos, _ = self.get_tcp_pose()
-            self._tcp_trail.append(actual_pos.copy())
-            target_pos = self._target_tcp_position()
-            if target_pos is not None:
-                self._target_trail.append(target_pos)
-
-        # Viewer
-        if self._viewer is not None:
-            if viewer_sync:
-                self._render_trail()
-                self._viewer.sync()
+        # Viewer sync
+        if self._viewer is not None and self._trail is not None and viewer_sync:
+            self._trail.render()
+            self._viewer.sync()
 
     def spin(self, steps: int, viewer_sync: bool = True) -> None:
-        """Run ``step()`` ``steps`` times."""
+        """Run ``step()`` *steps* times."""
         for _ in range(steps):
             self.step(viewer_sync=viewer_sync)
 
@@ -529,175 +454,35 @@ class TwinRobot:
     def control_mode(self) -> str:
         return self._state.value
 
-    def clear_trail(self) -> None:
-        """Clear the TCP trail."""
-        self._tcp_trail.clear()
-        self._target_trail.clear()
-        self._trail_rendered_count = 0
-        self._target_trail_rendered_count = 0
-        self._trail_step_count = 0
-        if self._viewer is not None and self._viewer.user_scn is not None:
-            with self._viewer.lock():
-                self._viewer.user_scn.ngeom = 0
-
-    def _render_trail(self) -> None:
-        """Add actual and commanded TCP trail markers to the viewer scene."""
-        if self._viewer is None:
-            return
-        scn = self._viewer.user_scn
-        if scn is None:
-            return
-
-        with self._viewer.lock():
-            self._trail_rendered_count = self._render_trail_points(
-                scn,
-                self._tcp_trail,
-                self._trail_rendered_count,
-                self._trail_color,
-                self._trail_sphere_size,
-            )
-            self._target_trail_rendered_count = self._render_trail_points(
-                scn,
-                self._target_trail,
-                self._target_trail_rendered_count,
-                self._target_trail_color,
-                self._target_trail_sphere_size,
-            )
-
-    def _render_trail_points(
-        self,
-        scn,
-        trail: list[np.ndarray],
-        rendered_count: int,
-        color: Sequence[float],
-        sphere_size: float,
-    ) -> int:
-        new_pts = trail[rendered_count:]
-        if not new_pts:
-            return rendered_count
-
-        stride = max(1, len(new_pts) // 100) if len(new_pts) > 100 else 1
-        rgba = np.array(color, dtype=float)
-        for pos in new_pts[::stride]:
-            if scn.ngeom >= scn.maxgeom:
-                return rendered_count
-            g = scn.geoms[scn.ngeom]
-            self._init_trail_geom(g, pos, sphere_size, rgba)
-            scn.ngeom += 1
-
-        return len(trail)
-
-    def _init_trail_geom(
-        self,
-        geom,
-        pos: np.ndarray,
-        sphere_size: float,
-        rgba: np.ndarray,
-    ) -> None:
-        size = np.array((sphere_size, sphere_size, sphere_size), dtype=float)
-        position = np.asarray(pos, dtype=float).reshape(3)
-        mat = np.eye(3)
-        try:
-            mujoco.mjv_initGeom(
-                geom,
-                mujoco.mjtGeom.mjGEOM_SPHERE,
-                size,
-                position,
-                mat,
-                rgba,
-            )
-        except TypeError:
-            geom.type = mujoco.mjtGeom.mjGEOM_SPHERE
-            geom.size[:] = size
-            geom.pos[:] = position
-            geom.mat[:] = mat
-            geom.rgba[:] = rgba
-        geom.category = mujoco.mjtCatBit.mjCAT_ALL
-        if hasattr(geom, "segid"):
-            geom.segid = -1
-        if hasattr(geom, "objtype"):
-            geom.objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
-        if hasattr(geom, "objid"):
-            geom.objid = -1
-        if hasattr(geom, "dataid"):
-            geom.dataid = -1
-        if hasattr(geom, "emission"):
-            geom.emission = 0.2
-        if hasattr(geom, "specular"):
-            geom.specular = 0.6
-        if hasattr(geom, "shininess"):
-            geom.shininess = 0.8
-        if hasattr(geom, "reflectance"):
-            geom.reflectance = 0
-        if hasattr(geom, "label"):
-            if isinstance(geom.label, str):
-                geom.label = ""
-            else:
-                geom.label[:] = b"\x00" * len(geom.label)
-
-    def _configure_viewer_camera(self) -> None:
-        if self._viewer is None or not hasattr(self._viewer, "cam"):
-            return
-        cam = self._viewer.cam
-        cam.lookat[:] = (0.38, 0.0, 0.48)
-        cam.distance = 1.15
-        cam.azimuth = 155
-        cam.elevation = -25
-
-    def _target_tcp_position(self) -> np.ndarray | None:
-        if self._controller is None:
-            return None
-        cart_target = getattr(self._controller, "_cart_target_matrix", None)
-        if cart_target is not None and self._state in (
-            RobotState.CARTESIAN_IMPEDANCE,
-            RobotState.POSITION,
-        ):
-            return np.asarray(cart_target[:3, 3], dtype=float).copy()
-        if cart_target is not None and self._state == RobotState.FORCE:
-            q = self._arm.joint_positions
-            pose_matrix = self._kinematics.fk(q)[0]
-            offset = getattr(self._controller, "_force_offset_m", 0.0)
-            axis = self._controller.force_axis_world(pose_matrix)
-            return np.asarray(cart_target[:3, 3] + offset * axis, dtype=float).copy()
-
-        joint_target = getattr(self._controller, "_joint_target_rad", None)
-        if joint_target is not None and self._state == RobotState.JOINT_IMPEDANCE:
-            return self._kinematics.fk(joint_target)[0][:3, 3].copy()
-
-        return None
-
-    # ------------------------------------------------------------------
-
     @property
     def _tcp_site_name(self) -> str:
         return self._tcp_site_name_override or f"{self.arm_name}_force_sensor_site"
 
     @property
     def _control_dt(self) -> float:
-        """Control interval in seconds."""
         return 1.0 / self.control_hz
 
     @property
     def _substeps(self) -> int:
-        """Physics substeps per control cycle."""
         if self.runtime is None:
             return 1
         return max(1, int(round(self._control_dt / self.runtime.timestep)))
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
 
     def _ensure_connected(self) -> None:
         if self.runtime is None or self._arm is None:
             raise RuntimeError("TwinRobot not connected — call connect() first")
 
     def _hold_other_arm(self) -> None:
-        """Hold the non-controlled arm with bias torque."""
         other = "left" if self.arm_name == "right" else "right"
         other_arm = self.runtime.arm_view(other)
         other_arm.apply_torque(other_arm.bias_torque)
 
-    def _make_sample(
-        self, torque: np.ndarray, wrench: np.ndarray | None = None,
-    ) -> dict:
-        pos, rot = self.get_tcp_pose()
+    def _make_sample(self, torque: np.ndarray, wrench: np.ndarray | None = None) -> dict:
+        pos, _ = self.get_tcp_pose()
         raw = self.get_raw_wrench()
         q = self.get_joint_positions()
         qd = self.get_joint_velocities()
@@ -724,6 +509,7 @@ class TwinRobot:
 # ---------------------------------------------------------------------------
 
 def _sensor_reading(runtime: TwinMujocoRuntime, force_name: str, torque_name: str) -> np.ndarray:
+    """Read 6-D wrench from named force + torque sensors."""
     fid = _sensor_id(runtime, force_name)
     tid = _sensor_id(runtime, torque_name)
     return np.concatenate((
@@ -738,8 +524,18 @@ def _sensor_id(runtime: TwinMujocoRuntime, name: str) -> int:
 
 
 def _gravity_compensation(sensor_rotation: np.ndarray, tool_mass_kg: float = 0.22) -> np.ndarray:
-    """Compute the wrench from tool gravity (to be subtracted from readings)."""
+    """Compute wrench from tool gravity (to be subtracted from raw readings)."""
     R = np.asarray(sensor_rotation, dtype=float).reshape(3, 3)
     gravity_world = np.array((0.0, 0.0, -9.81))
     force = -(R.T @ (tool_mass_kg * gravity_world))
     return np.concatenate((force, np.zeros(3)))
+
+
+def _configure_viewer_camera(viewer) -> None:
+    """Set default camera for the chopping scene."""
+    if not hasattr(viewer, "cam"):
+        return
+    viewer.cam.lookat[:] = (0.38, 0.0, 0.48)
+    viewer.cam.distance = 1.15
+    viewer.cam.azimuth = 155
+    viewer.cam.elevation = -25
