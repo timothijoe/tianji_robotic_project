@@ -129,8 +129,8 @@ class TwinRobot:
 
         # TCP trail for visualisation
         self._tcp_trail: list[np.ndarray] = []
-        self._trail_color = (1.0, 0.6, 0.0, 0.7)  # orange, semi-transparent
-        self._trail_sphere_size = 0.005
+        self._trail_color = (1.0, 0.6, 0.0, 0.9)  # bright orange, opaque
+        self._trail_sphere_size = 0.01  # 1 cm spheres — visible from a distance
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -417,23 +417,25 @@ class TwinRobot:
         qd = self._arm.joint_velocities
         J = self._arm.site_jacobian(self._tcp_site_name)
 
-        # FK for current TCP pose (needed for Cartesian/force modes)
-        pose_matrix = None
-        if self._state in (RobotState.CARTESIAN_IMPEDANCE, RobotState.FORCE,
-                           RobotState.POSITION):
-            pose_matrix = self._kinematics.fk(q)[0]
+        # FK for current TCP pose (needed for Cartesian/force modes, and trail)
+        pose_matrix = self._kinematics.fk(q)[0]
 
         # Wrench for force mode
         wrench = None
         if self._state == RobotState.FORCE:
             wrench = self.get_wrench()
 
-        # Compute torque
+        # Compute torque — only pass pose_matrix if mode needs it
+        compute_pose = None
+        if self._state in (RobotState.CARTESIAN_IMPEDANCE, RobotState.FORCE,
+                           RobotState.POSITION):
+            compute_pose = pose_matrix
+
         torque = self._controller.compute(
             current_joints_rad=q,
             current_velocities_rad_s=qd,
             jacobian=J,
-            current_pose_matrix=pose_matrix,
+            current_pose_matrix=compute_pose,
             wrench=wrench,
             bias_torque=self._arm.bias_torque,
         )
@@ -449,9 +451,8 @@ class TwinRobot:
         # Log sample
         self._samples.append(self._make_sample(applied, wrench))
 
-        # Record TCP trail for visualisation
-        if pose_matrix is not None:
-            self._tcp_trail.append(pose_matrix[:3, 3].copy())
+        # Record TCP trail for visualisation (always, for all modes)
+        self._tcp_trail.append(pose_matrix[:3, 3].copy())
 
         # Viewer
         if self._viewer is not None:
@@ -497,32 +498,34 @@ class TwinRobot:
     def clear_trail(self) -> None:
         """Clear the TCP trail."""
         self._tcp_trail.clear()
+        self._trail_rendered_count = 0
 
     def _render_trail(self) -> None:
         """Add TCP trail markers as visual geoms to the viewer scene.
 
         Uses ``mujoco.mjv_addGeoms`` to inject sphere markers into the
-        viewer's active scene.  This is a best-effort operation — if the
-        viewer is not available, it is a no-op.
+        viewer's active scene.  Markers are appended incrementally;
+        call ``clear_trail()`` to reset.
         """
         trail = self._tcp_trail
         if not trail or self._viewer is None:
             return
-        # Only render every 5th point for efficiency
-        stride = max(1, len(trail) // 200)
-        pts = trail[::stride]
-        # If trail is very short, render all points
-        if len(trail) <= 50:
-            pts = trail
         scn = self._viewer.user_scn
         if scn is None:
             return
 
-        # Clear previous markers and re-add
-        scn.ngeom = 0
+        # Only add new points since last render
+        rendered = getattr(self, "_trail_rendered_count", 0)
+        new_pts = trail[rendered:]
+        if not new_pts:
+            return
+
+        # Decimate: render every Nth point for efficiency
+        stride = max(1, len(new_pts) // 100) if len(new_pts) > 100 else 1
+        pts_to_add = new_pts[::stride]
 
         rgba = np.array(self._trail_color, dtype=float)
-        for pos in pts[-500:]:  # last 500 markers
+        for pos in pts_to_add:
             if scn.ngeom >= scn.maxgeom:
                 break
             g = scn.geoms[scn.ngeom]
@@ -545,6 +548,8 @@ class TwinRobot:
             g.reflectance = 0
             g.label[:] = b'\x00' * 100
             scn.ngeom += 1
+
+        self._trail_rendered_count = len(trail)
 
     # ------------------------------------------------------------------
 
