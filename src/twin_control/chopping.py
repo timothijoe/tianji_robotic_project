@@ -266,15 +266,15 @@ class TwinRobotChopper:
             T = np.eye(4)
             T[:3, :3] = rotation
             T[:3, 3] = shifted_descend
-            self.robot._controller.set_cart_cmd(T)
+            self.robot.set_cartesian_pose_cmd(T)
             hold_steps = max(2, int(np.ceil(cfg.force_hold_s / control_dt)))
             for _ in range(hold_steps):
                 self.robot.step(viewer_sync=True)
                 wrench = self.robot.get_wrench()
                 self._record_sample(ChoppingPhase.FORCE_HOLD, "FORCE", shifted_descend,
                                     cfg.target_force_n, wrench)
-                if not headless and self.robot._viewer is not None:
-                    self.robot._viewer.sync()
+                if not headless and self.robot.viewer_active:
+                    self.robot.sync_viewer()
 
             # --- Retract ---
             self.robot.set_cart_impedance_state(0.5, 0.5, K, D)
@@ -288,8 +288,8 @@ class TwinRobotChopper:
             safe_tip, 0.0, np.zeros(6),
         ))
 
-        if not headless and self.robot._viewer is not None:
-            self.robot._viewer.sync()
+        if not headless and self.robot.viewer_active:
+            self.robot.sync_viewer()
 
         if log_path is not None:
             self.write_csv(log_path)
@@ -352,7 +352,7 @@ class TwinRobotChopper:
             alpha = (idx + 1) / steps
             interp_pos = current_pos + (target_pos - current_pos) * alpha
             T[:3, 3] = interp_pos
-            self.robot._controller.set_cart_cmd(T)
+            self.robot.set_cartesian_pose_cmd(T)
             self.robot.step(viewer_sync=True)
             wrench = self.robot.get_wrench()
             self._record_sample(phase, "CARTESIAN_IMPEDANCE", interp_pos, target_force_n, wrench)
@@ -409,7 +409,7 @@ class TwinRobotChopper:
             raw_wrench=tuple(float(v) for v in raw),
             joint_positions=tuple(float(v) for v in q),
             joint_velocities=tuple(float(v) for v in qd),
-            joint_torques=tuple(float(v) for v in self.robot._controller._previous_torque),
+            joint_torques=tuple(float(v) for v in self.robot.last_torque),
             contact=bool(abs(wrench[2]) > 1e-6),
             fault=fault,
         )

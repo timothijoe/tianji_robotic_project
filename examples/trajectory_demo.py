@@ -199,7 +199,7 @@ def _run_cartesian_trajectory(
             np.array((0, 0, d)), np.array((0, 0, -d)),
         ]
         for off in offsets:
-            robot._controller.set_cart_cmd(_target_at(off))
+            robot.set_cartesian_pose_cmd(_target_at(off))
             robot.spin(spec.steps_per_segment, viewer_sync=True)
 
     elif spec.name == "2b":
@@ -209,7 +209,7 @@ def _run_cartesian_trajectory(
             np.array((d, 0, -d)), np.array((-d, 0, d)),
         ]
         for off in offsets:
-            robot._controller.set_cart_cmd(_target_at(off))
+            robot.set_cartesian_pose_cmd(_target_at(off))
             robot.spin(spec.steps_per_segment, viewer_sync=True)
 
     elif spec.name == "2c":
@@ -217,9 +217,9 @@ def _run_cartesian_trajectory(
         for axis, delta in [(2, 0.02), (0, 0.02)]:
             off = np.zeros(3)
             off[axis] = delta
-            robot._controller.set_cart_cmd(_target_at(off))
+            robot.set_cartesian_pose_cmd(_target_at(off))
             robot.spin(spec.steps_per_segment, viewer_sync=True)
-            robot._controller.set_cart_cmd(_target_at(np.zeros(3)))
+            robot.set_cartesian_pose_cmd(_target_at(np.zeros(3)))
             robot.spin(spec.steps_per_segment, viewer_sync=True)
 
     elif spec.name == "2d":
@@ -230,7 +230,7 @@ def _run_cartesian_trajectory(
             for sx in (s, -s) for sy in (s, -s) for sz in (s, -s)
         ]
         for off in corners:
-            robot._controller.set_cart_cmd(_target_at(off))
+            robot.set_cartesian_pose_cmd(_target_at(off))
             robot.spin(spec.steps_per_segment, viewer_sync=True)
 
 
@@ -256,7 +256,7 @@ def _run_curve_trajectory(
         for step in range(spec.steps_per_segment):
             angle = 3 * 2 * math.pi * step / spec.steps_per_segment
             pos = p_home + np.array((radius * math.cos(angle), 0.0, radius * math.sin(angle)))
-            robot._controller.set_cart_cmd(_target_at(pos))
+            robot.set_cartesian_pose_cmd(_target_at(pos))
             robot.step(viewer_sync=(step % 10 == 0))
 
     elif spec.name == "3b":
@@ -265,7 +265,7 @@ def _run_curve_trajectory(
         for step in range(spec.steps_per_segment):
             angle = 2 * 2 * math.pi * step / spec.steps_per_segment
             pos = p_home + np.array((radius * math.cos(angle), radius * math.sin(angle), 0.0))
-            robot._controller.set_cart_cmd(_target_at(pos))
+            robot.set_cartesian_pose_cmd(_target_at(pos))
             robot.step(viewer_sync=(step % 10 == 0))
 
     elif spec.name == "3c":
@@ -276,7 +276,7 @@ def _run_curve_trajectory(
             x = a * math.sin(t)
             z = b * math.sin(2 * t)
             pos = p_home + np.array((x, 0.0, z))
-            robot._controller.set_cart_cmd(_target_at(pos))
+            robot.set_cartesian_pose_cmd(_target_at(pos))
             robot.step(viewer_sync=(step % 10 == 0))
 
 
@@ -304,7 +304,7 @@ def _run_force_trajectory(
 
     # Switch to Cartesian impedance for approach
     robot.set_cart_impedance_state(0.3, 0.3, CART_K, CART_D)
-    robot._controller.set_cart_cmd(_cart_target(safe_z))
+    robot.set_cartesian_pose_cmd(_cart_target(safe_z))
     robot.spin(300, viewer_sync=True)
 
     if spec.name == "4a":
@@ -318,7 +318,7 @@ def _run_force_trajectory(
             _force_press(robot, kin, safe_z, contact_z, R_home, p_home, target_force=10.0, hold_steps=500)
             # Retract
             robot.set_cart_impedance_state(0.3, 0.3, CART_K, CART_D)
-            robot._controller.set_cart_cmd(_cart_target(safe_z))
+            robot.set_cartesian_pose_cmd(_cart_target(safe_z))
             robot.spin(300, viewer_sync=True)
 
     elif spec.name == "4c":
@@ -328,12 +328,12 @@ def _run_force_trajectory(
             _force_press(robot, kin, safe_z, contact_z, R_home, p_home, target_force=force_n, hold_steps=500)
             # Retract slightly between levels
             robot.set_cart_impedance_state(0.3, 0.3, CART_K, CART_D)
-            robot._controller.set_cart_cmd(_cart_target(safe_z))
+            robot.set_cartesian_pose_cmd(_cart_target(safe_z))
             robot.spin(200, viewer_sync=True)
 
     # Final retract
     robot.set_cart_impedance_state(0.3, 0.3, CART_K, CART_D)
-    robot._controller.set_cart_cmd(_cart_target(safe_z))
+    robot.set_cartesian_pose_cmd(_cart_target(safe_z))
     robot.spin(300, viewer_sync=True)
 
 
@@ -356,7 +356,7 @@ def _force_press(
     for step in range(descend_steps):
         alpha = (step + 1) / descend_steps
         z = safe_z + (contact_z - safe_z) * alpha
-        robot._controller.set_cart_cmd(_cart_target(z))
+        robot.set_cartesian_pose_cmd(_cart_target(z))
         robot.step(viewer_sync=(step % 20 == 0))
         # Check for contact
         wrench = robot.get_wrench()
@@ -441,10 +441,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{'='*60}")
 
             # Reset visual trail and robot state for this trajectory.
-            if robot._trail is not None:
-                robot._trail.clear()
+            robot.clear_trail()
             robot.runtime.set_arm_positions("right", home)
-            robot._controller.set_joint_cmd(home)
+            robot.set_joint_position_cmd(home)
 
             if spec.group == 1:
                 _run_joint_trajectory(robot, spec, kin, home)

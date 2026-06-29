@@ -12,7 +12,7 @@ spheres marking the TCP (force sensor) path.
 import sys
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[1] if __file__.endswith(".py") else Path.cwd()
+_ROOT = Path(__file__).resolve().parent if __file__.endswith(".py") else Path.cwd()
 sys.path.insert(0, str(_ROOT / "src"))
 sys.path.insert(0, str(_ROOT / "src" / "twin_core"))
 sys.path.insert(0, str(_ROOT / "src" / "twin_description"))
@@ -40,14 +40,13 @@ for i, target in enumerate(targets):
     robot.set_joint_position_cmd(target)
     robot.spin(500, viewer_sync=True)
 
-print(f"Trail markers: {len(robot._tcp_trail)} points recorded")
+actual_count, target_count = robot.trail_point_counts
+print(f"Trail markers: actual={actual_count}, target={target_count} points recorded")
 print("You should see orange spheres along the TCP path in the viewer.")
 print("Press Ctrl+C or close the viewer window to exit.")
 
-# Keep viewer open
 try:
-    while robot._viewer is not None and robot._viewer.is_running:
-        robot._viewer.sync()
+    robot.hold_viewer_open()
 except KeyboardInterrupt:
     pass
 finally:

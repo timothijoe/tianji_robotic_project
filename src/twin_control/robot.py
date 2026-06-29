@@ -63,7 +63,7 @@ from twin_mujoco.runtime import ArmView, TwinMujocoRuntime
 # ---------------------------------------------------------------------------
 
 RIGHT_HOME_RAD = np.array(
-    (0.4, -1.3, 0.0, -1.606525, 0.057176, 0.79256, 1.5), dtype=float,
+    (0.4, -1.3, 0.0, -1.406525, 0.057176, 0.79256, 1.5), dtype=float,
 )
 LEFT_HOME_RAD = np.zeros(7, dtype=float)
 
@@ -309,6 +309,11 @@ class TwinRobot:
         self._ensure_connected()
         self._controller.set_force_cmd(force)
 
+    def set_cartesian_pose_cmd(self, pose_matrix: np.ndarray) -> None:
+        """Set Cartesian target pose as a 4x4 homogeneous transform."""
+        self._ensure_connected()
+        self._controller.set_cart_cmd(pose_matrix)
+
     # ------------------------------------------------------------------
     # Tool
     # ------------------------------------------------------------------
@@ -424,6 +429,16 @@ class TwinRobot:
         except KeyboardInterrupt:
             pass
 
+    def sync_viewer(self) -> None:
+        """Synchronise the passive viewer if one is open."""
+        if self._viewer is not None:
+            self._viewer.sync()
+
+    def clear_trail(self) -> None:
+        """Clear TCP trail markers if trail visualisation is active."""
+        if self._trail is not None:
+            self._trail.clear()
+
     # ------------------------------------------------------------------
     # CSV logging
     # ------------------------------------------------------------------
@@ -453,6 +468,23 @@ class TwinRobot:
     @property
     def control_mode(self) -> str:
         return self._state.value
+
+    @property
+    def last_torque(self) -> np.ndarray:
+        """Return the last torque command produced by the controller."""
+        self._ensure_connected()
+        return self._controller._previous_torque.copy()
+
+    @property
+    def viewer_active(self) -> bool:
+        return self._viewer is not None
+
+    @property
+    def trail_point_counts(self) -> tuple[int, int]:
+        """Return recorded actual/target TCP trail point counts."""
+        if self._trail is None:
+            return (0, 0)
+        return (len(self._trail._actual), len(self._trail._target))
 
     @property
     def _tcp_site_name(self) -> str:
