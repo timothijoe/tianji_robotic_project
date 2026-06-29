@@ -175,6 +175,8 @@ def test_cli_viewer_mode_launches_passive_viewer(monkeypatch, tmp_path):
 
     launches = []
     syncs = []
+    closes = []
+    sleeps = []
 
     class FakeCamera:
         def __init__(self):
@@ -187,21 +189,18 @@ def test_cli_viewer_mode_launches_passive_viewer(monkeypatch, tmp_path):
         def __init__(self):
             self.cam = FakeCamera()
 
-        def __enter__(self):
-            launches.append("enter")
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            launches.append("exit")
-
         def sync(self):
             syncs.append("sync")
+
+        def close(self):
+            closes.append("close")
 
     def launch_passive(model, data):
         launches.append((model.njnt, data.time))
         return FakeViewer()
 
     monkeypatch.setattr(cli.mujoco.viewer, "launch_passive", launch_passive)
+    monkeypatch.setattr(cli.time, "sleep", lambda delay: sleeps.append(delay))
 
     log_path = tmp_path / "viewer_chop.csv"
 
@@ -211,7 +210,8 @@ def test_cli_viewer_mode_launches_passive_viewer(monkeypatch, tmp_path):
     )
     assert log_path.is_file()
     assert launches[0][0] == 14
-    assert launches[1:] == ["enter", "exit"]
+    assert closes == ["close"]
+    assert sleeps == [0.5]
     assert syncs
 
 
@@ -236,6 +236,9 @@ def test_cli_viewer_mode_configures_front_camera(monkeypatch, tmp_path):
             pass
 
         def sync(self):
+            pass
+
+        def close(self):
             pass
 
     viewer = FakeViewer()

@@ -148,3 +148,66 @@ def test_trail_resolve_joint_space_target_uses_fk():
     trail = TcpTrail(None)
     result = trail._resolve_target(FakeKinematics(), FakeController())
     np.testing.assert_allclose(result, [0.0, 1.0, 2.0])
+
+
+def test_step_records_trail_after_physics_step():
+    """TwinRobot.step records the actual trail from the post-step joint state."""
+    class FakeArm:
+        def __init__(self):
+            self._q = np.zeros(7)
+            self.joint_velocities = np.zeros(7)
+            self.bias_torque = np.zeros(7)
+            self.effort_limits = np.ones(7)
+
+        @property
+        def joint_positions(self):
+            return self._q.copy()
+
+        def site_jacobian(self, name):
+            return np.zeros((6, 7))
+
+        def apply_torque(self, torque):
+            return np.asarray(torque, dtype=float)
+
+    class FakeRuntime:
+        timestep = 0.001
+
+        def __init__(self, arm):
+            self.arm = arm
+
+        def step(self):
+            self.arm._q[:] = np.arange(7, dtype=float)
+
+        def arm_view(self, name):
+            return self.arm
+
+    class FakeController:
+        def compute(self, **kwargs):
+            return np.zeros(7)
+
+    class FakeKinematics:
+        def fk(self, joints):
+            transform = np.eye(4)
+            transform[:3, 3] = joints[:3]
+            return transform, np.zeros(6)
+
+    class RecordingTrail:
+        def __init__(self):
+            self.recorded = None
+
+        def record(self, q, kinematics, controller):
+            self.recorded = q.copy()
+
+    arm = FakeArm()
+    trail = RecordingTrail()
+    robot = TwinRobot(control_hz=1000.0)
+    robot.runtime = FakeRuntime(arm)
+    robot._arm = arm
+    robot._controller = FakeController()
+    robot._kinematics = FakeKinematics()
+    robot._trail = trail
+    robot._make_sample = lambda torque, wrench=None: {}
+
+    robot.step(viewer_sync=False)
+
+    np.testing.assert_allclose(trail.recorded, np.arange(7, dtype=float))

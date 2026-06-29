@@ -63,7 +63,7 @@ from twin_mujoco.runtime import ArmView, TwinMujocoRuntime
 # ---------------------------------------------------------------------------
 
 RIGHT_HOME_RAD = np.array(
-    (0.4, -1.3, 0.0, -1.606525, 0.057176, 0.79256, 1.5), dtype=float,
+    (0.4, -1.3, 0.08, -1.606525, 0.057176, 0.79256, 1.5), dtype=float,
 )
 LEFT_HOME_RAD = np.zeros(7, dtype=float)
 
@@ -398,9 +398,10 @@ class TwinRobot:
 
         self._samples.append(self._make_sample(torque, wrench))
 
-        # Trail recording
+        # Trail recording uses the post-step joint state so actual markers
+        # align with the sampled robot state shown in the viewer/logs.
         if self._trail is not None:
-            self._trail.record(q, self._kinematics, self._controller)
+            self._trail.record(self._arm.joint_positions, self._kinematics, self._controller)
 
         # Viewer sync
         if self._viewer is not None and self._trail is not None and viewer_sync:

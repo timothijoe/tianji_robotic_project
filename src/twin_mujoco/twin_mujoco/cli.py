@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 import mujoco.viewer
@@ -25,9 +26,13 @@ def main(argv: list[str] | None = None) -> int:
         force_hold_s=args.hold,
     )
     if args.viewer:
-        with mujoco.viewer.launch_passive(chopper.runtime.model, chopper.runtime.data) as viewer:
+        viewer = mujoco.viewer.launch_passive(chopper.runtime.model, chopper.runtime.data)
+        try:
             _configure_viewer_camera(viewer)
             chopper.run(config, log_path=args.log, viewer_sync=viewer.sync)
+        finally:
+            viewer.close()
+            time.sleep(0.5)
     else:
         chopper.run(config, log_path=args.log)
     return 0
@@ -38,3 +43,6 @@ def _configure_viewer_camera(viewer) -> None:
     viewer.cam.distance = 1.15
     viewer.cam.azimuth = 180
     viewer.cam.elevation = -20
+
+if __name__ == "__main__":
+    raise SystemExit(main())
