@@ -327,7 +327,7 @@ def test_horizontal_blade_rotation_predicts_edge_points_at_equal_height():
     assert abs(predicted[0][2] - predicted[1][2]) <= 1e-9
 
 
-def test_horizontal_blade_rotation_points_handle_toward_robot_body():
+def test_horizontal_blade_rotation_points_force_sensor_axis_straight_forward():
     chopper = RightArmChopper()
     chopper.runtime.reset()
     chopper.runtime.set_arm_positions("left", LEFT_HOME_Q)
@@ -335,18 +335,9 @@ def test_horizontal_blade_rotation_points_handle_toward_robot_body():
     geometry = chopper._blade_geometry()
 
     rotation = chopper._horizontal_blade_rotation(geometry)
-    current_rotation = np.asarray(geometry.tip_rotation, dtype=float).reshape(3, 3)
-    tip = np.asarray(geometry.tip_position, dtype=float).reshape(3)
-    handle = np.asarray(geometry.handle_position, dtype=float).reshape(3)
-    handle_local_offset = current_rotation.T @ (handle - tip)
-    predicted_handle = tip + rotation @ handle_local_offset
-    handle_xy = predicted_handle[:2] - tip[:2]
-    robot_xy = np.zeros(2)
-    target_xy = robot_xy - tip[:2]
+    force_sensor_axis = rotation[:, 2]
 
-    handle_xy /= np.linalg.norm(handle_xy)
-    target_xy /= np.linalg.norm(target_xy)
-    assert float(np.dot(handle_xy, target_xy)) > 0.99
+    np.testing.assert_allclose(force_sensor_axis, np.array((1.0, 0.0, 0.0)), atol=1e-12)
 
 
 def test_first_sample_starts_from_chopping_home_blade_geometry():

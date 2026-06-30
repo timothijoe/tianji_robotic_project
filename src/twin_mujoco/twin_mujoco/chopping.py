@@ -93,6 +93,8 @@ BLADE_REFERENCE_SITE_NAMES = (
     "right_tool_tip_site",
 )
 WORLD_DOWN_AXIS = np.array((0.0, 0.0, -1.0), dtype=float)
+ROBOT_FORWARD_AXIS = np.array((1.0, 0.0, 0.0), dtype=float)
+WORLD_UP_AXIS = np.array((0.0, 0.0, 1.0), dtype=float)
 
 
 _CSV_FIELDS = (
@@ -346,27 +348,8 @@ class RightArmChopper:
         return BladeGeometry(tuple(edge_positions), _triple(tip_position), _triple(handle_position), rotation_rows)
 
     def _horizontal_blade_rotation(self, geometry: BladeGeometry) -> np.ndarray:
-        current_rotation = np.asarray(geometry.tip_rotation, dtype=float).reshape(3, 3)
-        tip = np.asarray(geometry.tip_position, dtype=float).reshape(3)
-        handle = np.asarray(geometry.handle_position, dtype=float).reshape(3)
-        local_handle = current_rotation.T @ (handle - tip)
-        handle_xy = -tip[:2]
-        handle_norm = float(np.linalg.norm(handle_xy))
-        if handle_norm < 1e-9:
-            handle_xy = (current_rotation @ local_handle)[:2]
-            handle_norm = float(np.linalg.norm(handle_xy))
-        if handle_norm < 1e-9:
-            handle_xy = np.array((-1.0, 0.0), dtype=float)
-        else:
-            handle_xy = handle_xy / handle_norm
-
-        local_z_sign = 1.0 if float(local_handle[2]) >= 0.0 else -1.0
-        target_z = np.array(
-            (local_z_sign * handle_xy[0], local_z_sign * handle_xy[1], 0.0),
-            dtype=float,
-        )
-        target_z /= float(np.linalg.norm(target_z))
-        target_y = np.array((0.0, 0.0, 1.0), dtype=float)
+        target_z = ROBOT_FORWARD_AXIS.copy()
+        target_y = WORLD_UP_AXIS.copy()
         target_x = np.cross(target_y, target_z)
         target_x /= float(np.linalg.norm(target_x))
         return np.column_stack((target_x, target_y, target_z))
