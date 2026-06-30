@@ -33,7 +33,6 @@ import numpy as np
 from twin_control.rotation import rotation_error
 from twin_control.robot import (
     LEFT_HOME_RAD,
-    RIGHT_HOME_RAD,
     TwinRobot,
     _DEFAULT_CART_D,
     _DEFAULT_CART_K,
@@ -174,6 +173,11 @@ BLADE_REFERENCE_SITE_NAMES = (
 WORLD_DOWN_AXIS = np.array((0.0, 0.0, -1.0), dtype=float)
 """World-frame downward direction for force control."""
 
+RIGHT_CHOPPING_HOME_RAD = np.array(
+    (0.4, -1.3, 0.0, -1.606525, 0.057176, 0.79256, 1.5), dtype=float,
+)
+"""Right-arm home configuration used by the reference chopping controller."""
+
 _CSV_FIELDS = (
     "time_s", "phase", "control_mode",
     "target_x", "target_y", "target_z",
@@ -237,7 +241,7 @@ class TwinRobotChopper:
         self.robot.connect(viewer=not headless, realtime=not headless)
         self.robot.runtime.reset()
         self.robot.runtime.set_arm_positions("left", LEFT_HOME_RAD)
-        self.robot.runtime.set_arm_positions("right", RIGHT_HOME_RAD)
+        self.robot.runtime.set_arm_positions("right", RIGHT_CHOPPING_HOME_RAD)
         self.samples.clear()
 
         # Compute blade geometry & Cartesian target parameters
@@ -427,29 +431,39 @@ class TwinRobotChopper:
             if ik.residual <= cfg.position_tolerance_m + cfg.orientation_tolerance_rad:
                 joint_start = self.robot._arm.joint_positions.copy()
                 joint_target = ik.joints_rad.copy()
-                self.robot.set_joint_impedance_state(
-                    0.5, 0.5,
-                    (45.0, 45.0, 40.0, 32.0, 18.0, 14.0, 10.0),
-                    (6.0, 6.0, 5.0, 4.0, 2.5, 2.0, 1.5),
+        if joint_start is not None and joint_target is not None:
+            for step_index in range(max_steps):
+                alpha = float(step_index + 1) / float(max_steps)
+                blend = 10.0 * alpha**3 - 15.0 * alpha**4 + 6.0 * alpha**5
+                self.robot.runtime.set_arm_positions(
+                    self.robot.arm_name,
+                    joint_start + blend * (joint_target - joint_start),
                 )
+                wrench = self.robot.get_wrench()
+                self._record_sample(phase, "ENDPOINT_SETTLE", target, rotation, target_force_n, wrench,
+                                    target_blade_edge_positions, target_blade_reference_positions)
+                if self.robot._viewer is not None:
+                    self.robot._viewer.sync()
+                latest = self.samples[-1]
+                blade_errors = [
+                    float(np.linalg.norm(np.asarray(actual) - np.asarray(goal)))
+                    for actual, goal in zip(
+                        latest.blade_reference_positions,
+                        latest.target_blade_reference_positions,
+                    )
+                ]
+                if max(blade_errors) <= cfg.position_tolerance_m:
+                    return
+            return
         for step_index in range(max_steps):
             actual_pos, actual_matrix = self.robot.get_tcp_pose()
             position_error = float(np.linalg.norm(target - np.asarray(actual_pos, dtype=float).reshape(3)))
             orientation_error = float(np.linalg.norm(rotation_error(actual_matrix[:3, :3], rotation)))
             if position_error <= cfg.position_tolerance_m and orientation_error <= cfg.orientation_tolerance_rad:
                 return
-            if joint_start is not None and joint_target is not None:
-                alpha = float(step_index + 1) / float(max_steps)
-                blend = 10.0 * alpha**3 - 15.0 * alpha**4 + 6.0 * alpha**5
-                self.robot.set_joint_position_cmd(joint_start + blend * (joint_target - joint_start))
             self.robot.step(viewer_sync=True)
             wrench = self.robot.get_wrench()
             self._record_sample(phase, self.robot.control_mode, target, rotation, target_force_n, wrench,
-                                target_blade_edge_positions, target_blade_reference_positions)
-        if joint_target is not None:
-            self.robot.runtime.set_arm_positions(self.robot.arm_name, joint_target)
-            wrench = self.robot.get_wrench()
-            self._record_sample(phase, "ENDPOINT_CORRECTION", target, rotation, target_force_n, wrench,
                                 target_blade_edge_positions, target_blade_reference_positions)
 
     def _record_sample(

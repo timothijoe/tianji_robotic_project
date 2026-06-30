@@ -46,6 +46,20 @@ def test_sdk_chopper_descend_finishes_with_blade_references_near_targets():
         assert error_m <= cfg.position_tolerance_m
 
 
+def test_sdk_chopper_position_phases_finish_with_blade_references_near_targets():
+    cfg = ChoppingConfig(cycles=1, force_hold_s=0.01)
+
+    samples = TwinRobotChopper().run(cfg, headless=True)
+
+    for phase in (ChoppingPhase.APPROACH, ChoppingPhase.DESCEND, ChoppingPhase.RETRACT):
+        phase_samples = [sample for sample in samples if sample.phase == phase]
+        assert phase_samples
+        final = phase_samples[-1]
+        for actual, target in zip(final.blade_reference_positions, final.target_blade_reference_positions):
+            error_m = np.linalg.norm(np.asarray(actual) - np.asarray(target))
+            assert error_m <= cfg.position_tolerance_m
+
+
 def test_sdk_chopper_descend_targets_horizontal_blade_reference_line():
     cfg = ChoppingConfig(cycles=1, force_hold_s=0.01)
 
@@ -86,3 +100,14 @@ def test_sdk_chopper_force_hold_targets_blade_references_on_board():
     board_top = chopper._board_top_from_model_path()
     for position in force_samples[-1].target_blade_reference_positions:
         assert abs(position[2] - board_top) <= 1e-9
+
+
+def test_sdk_chopper_uses_continuous_endpoint_settle_instead_of_instant_correction():
+    samples = TwinRobotChopper().run(
+        ChoppingConfig(cycles=1, force_hold_s=0.01),
+        headless=True,
+    )
+
+    active_modes = [sample.control_mode for sample in samples if sample.phase != ChoppingPhase.COMPLETE]
+    assert "ENDPOINT_CORRECTION" not in active_modes
+    assert "ENDPOINT_SETTLE" in active_modes
