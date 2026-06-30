@@ -61,6 +61,7 @@ class ForceControlSample:
 class BladeGeometry:
     edge_positions: tuple[tuple[float, float, float], ...]
     tip_position: tuple[float, float, float]
+    handle_position: tuple[float, float, float]
     tip_rotation: tuple[tuple[float, float, float], ...]
 
     @property
@@ -152,6 +153,23 @@ class RightArmChopper:
         position, _ = self.right.site_pose("right_tool_tip_site")
         board_top = self._board_top()
         geometry = self._blade_geometry()
+        self.samples.append(
+            self._sample(
+                self.runtime.data.time,
+                ChoppingPhase.APPROACH,
+                "INITIALIZE",
+                position,
+                0.0,
+                np.zeros(7),
+                "",
+                raw_wrench=self._measured_wrench(),
+                compensated_wrench=self._measured_wrench(),
+                target_blade_edge_positions=geometry.edge_positions,
+                target_blade_reference_positions=(*geometry.edge_positions, geometry.tip_position),
+            )
+        )
+        if viewer_sync is not None:
+            viewer_sync()
         rotation = self._horizontal_blade_rotation(geometry)
         safe = self._tip_target_for_blade_clearance(position, rotation, geometry, board_top, cfg.safe_height_m)
         descend = self._tip_target_for_blade_on_board(position, rotation, geometry, board_top)
@@ -323,27 +341,34 @@ class RightArmChopper:
             position, _ = self.right.site_pose(site_name)
             edge_positions.append(_triple(position))
         tip_position, tip_rotation = self.right.site_pose("right_tool_tip_site")
+        handle_position, _ = self.right.site_pose("right_force_sensor_site")
         rotation_rows = tuple(tuple(float(value) for value in row) for row in tip_rotation)
-        return BladeGeometry(tuple(edge_positions), _triple(tip_position), rotation_rows)
+        return BladeGeometry(tuple(edge_positions), _triple(tip_position), _triple(handle_position), rotation_rows)
 
     def _horizontal_blade_rotation(self, geometry: BladeGeometry) -> np.ndarray:
         current_rotation = np.asarray(geometry.tip_rotation, dtype=float).reshape(3, 3)
-        target_z = current_rotation[:, 2].copy()
-        target_z[2] = 0.0
-        norm = float(np.linalg.norm(target_z))
-        if norm < 1e-9:
-            target_z = np.array((1.0, 0.0, 0.0), dtype=float)
+        tip = np.asarray(geometry.tip_position, dtype=float).reshape(3)
+        handle = np.asarray(geometry.handle_position, dtype=float).reshape(3)
+        local_handle = current_rotation.T @ (handle - tip)
+        handle_xy = -tip[:2]
+        handle_norm = float(np.linalg.norm(handle_xy))
+        if handle_norm < 1e-9:
+            handle_xy = (current_rotation @ local_handle)[:2]
+            handle_norm = float(np.linalg.norm(handle_xy))
+        if handle_norm < 1e-9:
+            handle_xy = np.array((-1.0, 0.0), dtype=float)
         else:
-            target_z /= norm
+            handle_xy = handle_xy / handle_norm
 
-        target_x = current_rotation[:, 0] - target_z * float(np.dot(current_rotation[:, 0], target_z))
-        x_norm = float(np.linalg.norm(target_x))
-        if x_norm < 1e-9:
-            target_x = np.cross((0.0, 0.0, 1.0), target_z)
-            x_norm = float(np.linalg.norm(target_x))
-        target_x /= x_norm
-        target_y = np.cross(target_z, target_x)
-        target_y /= float(np.linalg.norm(target_y))
+        local_z_sign = 1.0 if float(local_handle[2]) >= 0.0 else -1.0
+        target_z = np.array(
+            (local_z_sign * handle_xy[0], local_z_sign * handle_xy[1], 0.0),
+            dtype=float,
+        )
+        target_z /= float(np.linalg.norm(target_z))
+        target_y = np.array((0.0, 0.0, 1.0), dtype=float)
+        target_x = np.cross(target_y, target_z)
+        target_x /= float(np.linalg.norm(target_x))
         return np.column_stack((target_x, target_y, target_z))
 
     def _predict_positions(

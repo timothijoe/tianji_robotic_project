@@ -128,8 +128,9 @@ def test_first_active_sample_time_matches_post_step_simulation_time():
     chopper = RightArmChopper()
     samples = chopper.run(ChoppingConfig(cycles=1, control_hz=20.0, force_hold_s=0.01))
 
-    assert samples[0].time_s > 0.0
-    assert abs(samples[0].time_s - 0.05) <= chopper.runtime.timestep
+    stepped = next(sample for sample in samples if sample.control_mode != "INITIALIZE")
+    assert stepped.time_s > 0.0
+    assert abs(stepped.time_s - 0.05) <= chopper.runtime.timestep
 
 
 def test_chopping_rejects_invalid_cycle_count():
@@ -306,8 +307,9 @@ def test_blade_geometry_reads_two_finite_edge_positions_and_tip_pose():
     assert len(geometry.z_values) == 2
     assert geometry.min_z <= geometry.max_z
     assert len(geometry.tip_position) == 3
+    assert len(geometry.handle_position) == 3
     assert np.asarray(geometry.tip_rotation).shape == (3, 3)
-    for position in geometry.edge_positions + (geometry.tip_position,):
+    for position in geometry.edge_positions + (geometry.tip_position, geometry.handle_position):
         assert len(position) == 3
         assert np.all(np.isfinite(position))
 
@@ -323,6 +325,47 @@ def test_horizontal_blade_rotation_predicts_edge_points_at_equal_height():
     predicted = chopper._predict_blade_edge_positions(geometry.tip_position, rotation, geometry)
 
     assert abs(predicted[0][2] - predicted[1][2]) <= 1e-9
+
+
+def test_horizontal_blade_rotation_points_handle_toward_robot_body():
+    chopper = RightArmChopper()
+    chopper.runtime.reset()
+    chopper.runtime.set_arm_positions("left", LEFT_HOME_Q)
+    chopper.runtime.set_arm_positions("right", RIGHT_CHOPPING_HOME_Q)
+    geometry = chopper._blade_geometry()
+
+    rotation = chopper._horizontal_blade_rotation(geometry)
+    current_rotation = np.asarray(geometry.tip_rotation, dtype=float).reshape(3, 3)
+    tip = np.asarray(geometry.tip_position, dtype=float).reshape(3)
+    handle = np.asarray(geometry.handle_position, dtype=float).reshape(3)
+    handle_local_offset = current_rotation.T @ (handle - tip)
+    predicted_handle = tip + rotation @ handle_local_offset
+    handle_xy = predicted_handle[:2] - tip[:2]
+    robot_xy = np.zeros(2)
+    target_xy = robot_xy - tip[:2]
+
+    handle_xy /= np.linalg.norm(handle_xy)
+    target_xy /= np.linalg.norm(target_xy)
+    assert float(np.dot(handle_xy, target_xy)) > 0.99
+
+
+def test_first_sample_starts_from_chopping_home_blade_geometry():
+    chopper = RightArmChopper()
+    expected_runtime = TwinMujocoRuntime.load(right_chopping_scene_path())
+    expected_runtime.reset()
+    expected_runtime.set_arm_positions("left", LEFT_HOME_Q)
+    expected_runtime.set_arm_positions("right", RIGHT_CHOPPING_HOME_Q)
+    expected_right = expected_runtime.arm_view("right")
+    expected_edges = tuple(
+        expected_right.site_pose(site_name)[0]
+        for site_name in ("right_blade_edge_top", "right_blade_edge_bot")
+    )
+
+    samples = chopper.run(ChoppingConfig(cycles=1, control_hz=20.0, force_hold_s=0.01))
+
+    first = samples[0]
+    for actual, expected in zip(first.blade_edge_positions, expected_edges):
+        np.testing.assert_allclose(actual, expected, atol=0.02)
 
 
 def test_two_point_safe_target_keeps_both_blade_edges_above_board():
