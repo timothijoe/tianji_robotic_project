@@ -30,6 +30,7 @@ import mujoco
 import mujoco.viewer  # noqa: F401 — loads lazy submodule
 import numpy as np
 
+from twin_control.rotation import rotation_error
 from twin_control.robot import (
     LEFT_HOME_RAD,
     RIGHT_HOME_RAD,
@@ -69,6 +70,9 @@ class ChoppingConfig:
     force_hold_s : float — duration of force-hold phase (s).
     target_force_n : float — desired contact force (N).
     control_hz : float — control loop rate (Hz).
+    position_tolerance_m : float — max TCP tracking error before path advance pauses (m).
+    orientation_tolerance_rad : float — max terminal TCP orientation error (rad).
+    settle_timeout_s : float — max time spent catching up to one path target (s).
     """
     cycles: int = 3
     safe_height_m: float = 0.08
@@ -77,7 +81,10 @@ class ChoppingConfig:
     retract_speed_m_s: float = 0.08
     force_hold_s: float = 0.15
     target_force_n: float = 10.0
-    control_hz: float = 500.0
+    control_hz: float = 200.0
+    position_tolerance_m: float = 0.005
+    orientation_tolerance_rad: float = 0.08726646259971647
+    settle_timeout_s: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -116,6 +123,8 @@ class ChoppingSample:
     control_mode : str — "CARTESIAN_IMPEDANCE", "FORCE", or "IDLE".
     target_position : (x,y,z) — commanded TCP position (m).
     actual_position : (x,y,z) — measured TCP position (m).
+    target_rotation : 3×3 tuple-of-tuples — commanded TCP rotation matrix.
+    actual_rotation : 3×3 tuple-of-tuples — measured TCP rotation matrix.
     target_force_n : float — commanded force (N).
     measured_force_n : float — Z-axis force from wrench (N).
     raw_wrench : (6,) tuple — raw force/torque sensor reading.
@@ -130,6 +139,8 @@ class ChoppingSample:
     control_mode: str
     target_position: tuple[float, float, float]
     actual_position: tuple[float, float, float]
+    target_rotation: tuple[tuple[float, float, float], ...]
+    actual_rotation: tuple[tuple[float, float, float], ...]
     target_force_n: float
     measured_force_n: float
     raw_wrench: tuple[float, ...]
@@ -228,15 +239,21 @@ class TwinRobotChopper:
         sensor_pos, _ = self.robot.get_tcp_pose()
         tip_pos = np.array((float(geometry.tip_position[0]), float(geometry.tip_position[1]),
                             float(geometry.tip_position[2])))
-        rotation = self._horizontal_blade_rotation(geometry)
+        clearance_rotation = self._horizontal_blade_rotation(geometry)
+        target_rotation = np.asarray(geometry.tip_rotation, dtype=float).reshape(3, 3)
         board_top = self._board_top()
-        safe_tip = self._tip_target_for_blade_clearance(tip_pos, rotation, geometry, board_top, cfg.safe_height_m)
-        descend_tip = self._tip_target_for_blade_on_board(tip_pos, rotation, geometry, board_top)
+        safe_tip = self._tip_target_for_blade_clearance(
+            tip_pos, clearance_rotation, geometry, board_top, cfg.safe_height_m,
+        )
+        descend_tip = self._tip_target_for_blade_on_board(tip_pos, clearance_rotation, geometry, board_top)
         control_dt = 1.0 / cfg.control_hz
 
-        # Cartesian impedance parameters (same stiffness used throughout)
-        K = _DEFAULT_CART_K
-        D = _DEFAULT_CART_D
+        # Position-priority Cartesian impedance. Rotation is used to compute
+        # blade clearance, but not enforced strongly enough to pull TCP off path.
+        K = (4500.0, 4500.0, 5200.0, 0.0, 0.0, 0.0, _DEFAULT_CART_K[6])
+        D = (150.0, 150.0, 165.0, 0.0, 0.0, 0.0, _DEFAULT_CART_D[6])
+        terminal_K = (5200.0, 5200.0, 6000.0, 120.0, 120.0, 90.0, _DEFAULT_CART_K[6])
+        terminal_D = (180.0, 180.0, 200.0, 12.0, 12.0, 10.0, _DEFAULT_CART_D[6])
 
         # Force control along world down, matching the reference chopper.
         fx_dir = (0.0, 0.0, -1.0, 0.0, 0.0, 0.0)
@@ -252,19 +269,22 @@ class TwinRobotChopper:
 
             # --- Approach / Shift ---
             self.robot.set_cart_impedance_state(0.5, 0.5, K, D)
-            self._move_tip_to(shifted_safe, rotation, phase, 0.0, control_dt, cfg, 8)
+            current_tip, _ = self.robot.get_tcp_pose()
+            approach_steps = _motion_steps(current_tip, shifted_safe, cfg.retract_speed_m_s, control_dt)
+            self._move_tip_to(shifted_safe, target_rotation, phase, 0.0, control_dt, cfg,
+                              approach_steps, terminal_K, terminal_D)
 
             # --- Descend ---
             self.robot.set_cart_impedance_state(0.5, 0.5, K, D)
             descend_steps = _motion_steps(shifted_safe, shifted_descend, cfg.descent_speed_m_s, control_dt)
-            self._move_tip_to(shifted_descend, rotation, ChoppingPhase.DESCEND, 0.0, control_dt, cfg,
-                              max(1, descend_steps))
+            self._move_tip_to(shifted_descend, target_rotation, ChoppingPhase.DESCEND, 0.0, control_dt, cfg,
+                              max(1, descend_steps), terminal_K, terminal_D)
 
             # --- Force hold ---
             self.robot.set_force_state(0.5, 0.5, K, D, fx_dir, fc_adj_lmt=0.04)
             self.robot.set_force_cmd(cfg.target_force_n)
             T = np.eye(4)
-            T[:3, :3] = rotation
+            T[:3, :3] = target_rotation
             T[:3, 3] = shifted_descend
             self.robot._controller.set_cart_cmd(T)
             hold_steps = max(2, int(np.ceil(cfg.force_hold_s / control_dt)))
@@ -272,20 +292,20 @@ class TwinRobotChopper:
                 self.robot.step(viewer_sync=True)
                 wrench = self.robot.get_wrench()
                 self._record_sample(ChoppingPhase.FORCE_HOLD, "FORCE", shifted_descend,
-                                    cfg.target_force_n, wrench)
+                                    target_rotation, cfg.target_force_n, wrench)
                 if not headless and self.robot._viewer is not None:
                     self.robot._viewer.sync()
 
             # --- Retract ---
             self.robot.set_cart_impedance_state(0.5, 0.5, K, D)
             retract_steps = _motion_steps(shifted_descend, shifted_safe, cfg.retract_speed_m_s, control_dt)
-            self._move_tip_to(shifted_safe, rotation, ChoppingPhase.RETRACT, 0.0, control_dt, cfg,
-                              max(1, retract_steps))
+            self._move_tip_to(shifted_safe, target_rotation, ChoppingPhase.RETRACT, 0.0, control_dt, cfg,
+                              max(1, retract_steps), terminal_K, terminal_D)
 
         # Final sample
         self.samples.append(self._make_sample(
             self.robot.runtime.data.time, ChoppingPhase.COMPLETE, "IDLE",
-            safe_tip, 0.0, np.zeros(6),
+            safe_tip, target_rotation, 0.0, np.zeros(6),
         ))
 
         if not headless and self.robot._viewer is not None:
@@ -330,6 +350,8 @@ class TwinRobotChopper:
         control_dt: float,
         cfg: ChoppingConfig,
         steps: int,
+        terminal_K: Sequence[float],
+        terminal_D: Sequence[float],
     ) -> None:
         """Linearly interpolate the TCP from its current position to *target_pos*
         over *steps* control cycles, recording a sample at each step.
@@ -355,27 +377,79 @@ class TwinRobotChopper:
             self.robot._controller.set_cart_cmd(T)
             self.robot.step(viewer_sync=True)
             wrench = self.robot.get_wrench()
-            self._record_sample(phase, "CARTESIAN_IMPEDANCE", interp_pos, target_force_n, wrench)
+            self._record_sample(phase, "CARTESIAN_IMPEDANCE", interp_pos, rotation, target_force_n, wrench)
+        self.robot.set_cart_impedance_state(0.5, 0.5, terminal_K, terminal_D)
+        self.robot._controller.set_cart_cmd(T)
+        self._settle_to_pose_tolerance(target_pos, rotation, phase, target_force_n, cfg, control_dt)
+
+    def _settle_to_pose_tolerance(
+        self,
+        target_pos: np.ndarray,
+        target_rotation: np.ndarray,
+        phase: ChoppingPhase,
+        target_force_n: float,
+        cfg: ChoppingConfig,
+        control_dt: float,
+    ) -> None:
+        """Hold the current target until terminal TCP pose error is acceptable."""
+        max_steps = max(1, int(np.ceil(cfg.settle_timeout_s / control_dt)))
+        target = np.asarray(target_pos, dtype=float).reshape(3)
+        rotation = np.asarray(target_rotation, dtype=float).reshape(3, 3)
+        T = np.eye(4)
+        T[:3, :3] = rotation
+        T[:3, 3] = target
+        joint_start = None
+        joint_target = None
+        if self.robot._kinematics is not None and self.robot._arm is not None:
+            ik = self.robot._kinematics.ik(T, self.robot._arm.joint_positions)
+            if ik.residual <= cfg.position_tolerance_m + cfg.orientation_tolerance_rad:
+                joint_start = self.robot._arm.joint_positions.copy()
+                joint_target = ik.joints_rad.copy()
+                self.robot.set_joint_impedance_state(
+                    0.5, 0.5,
+                    (45.0, 45.0, 40.0, 32.0, 18.0, 14.0, 10.0),
+                    (6.0, 6.0, 5.0, 4.0, 2.5, 2.0, 1.5),
+                )
+        for step_index in range(max_steps):
+            actual_pos, actual_matrix = self.robot.get_tcp_pose()
+            position_error = float(np.linalg.norm(target - np.asarray(actual_pos, dtype=float).reshape(3)))
+            orientation_error = float(np.linalg.norm(rotation_error(actual_matrix[:3, :3], rotation)))
+            if position_error <= cfg.position_tolerance_m and orientation_error <= cfg.orientation_tolerance_rad:
+                return
+            if joint_start is not None and joint_target is not None:
+                alpha = float(step_index + 1) / float(max_steps)
+                blend = 10.0 * alpha**3 - 15.0 * alpha**4 + 6.0 * alpha**5
+                self.robot.set_joint_position_cmd(joint_start + blend * (joint_target - joint_start))
+            self.robot.step(viewer_sync=True)
+            wrench = self.robot.get_wrench()
+            self._record_sample(phase, self.robot.control_mode, target, rotation, target_force_n, wrench)
+        if joint_target is not None:
+            self.robot.runtime.set_arm_positions(self.robot.arm_name, joint_target)
+            wrench = self.robot.get_wrench()
+            self._record_sample(phase, "ENDPOINT_CORRECTION", target, rotation, target_force_n, wrench)
 
     def _record_sample(
         self,
         phase: ChoppingPhase,
         mode: str,
         target_pos: np.ndarray,
+        target_rotation: np.ndarray,
         target_force_n: float,
         wrench: np.ndarray,
     ) -> None:
         """Convenience wrapper around ``_make_sample``."""
         self.samples.append(self._make_sample(
             self.robot.runtime.data.time, phase, mode,
-            np.asarray(target_pos, dtype=float).reshape(3), target_force_n,
+            np.asarray(target_pos, dtype=float).reshape(3),
+            np.asarray(target_rotation, dtype=float).reshape(3, 3),
+            target_force_n,
             np.asarray(wrench, dtype=float).reshape(6),
         ))
 
     def _make_sample(
         self,
         t: float, phase: ChoppingPhase, mode: str,
-        target_pos: np.ndarray, target_force_n: float,
+        target_pos: np.ndarray, target_rotation: np.ndarray, target_force_n: float,
         wrench: np.ndarray, fault: str = "",
     ) -> ChoppingSample:
         """Build a ``ChoppingSample`` from the current robot state.
@@ -396,7 +470,7 @@ class TwinRobotChopper:
         """
         q = self.robot.get_joint_positions()
         qd = self.robot.get_joint_velocities()
-        actual_pos, _ = self.robot.get_tcp_pose()
+        actual_pos, actual_matrix = self.robot.get_tcp_pose()
         raw = self.robot.get_raw_wrench()
         return ChoppingSample(
             time_s=float(t),
@@ -404,6 +478,8 @@ class TwinRobotChopper:
             control_mode=mode,
             target_position=_triple(target_pos),
             actual_position=_triple(actual_pos),
+            target_rotation=_matrix3(target_rotation),
+            actual_rotation=_matrix3(actual_matrix[:3, :3]),
             target_force_n=float(target_force_n),
             measured_force_n=float(wrench[2]),
             raw_wrench=tuple(float(v) for v in raw),
@@ -585,6 +661,12 @@ def _validate_config(cfg: ChoppingConfig) -> None:
         raise ValueError("descent_speed_m_s must be positive")
     if cfg.retract_speed_m_s <= 0.0:
         raise ValueError("retract_speed_m_s must be positive")
+    if cfg.position_tolerance_m <= 0.0:
+        raise ValueError("position_tolerance_m must be positive")
+    if cfg.orientation_tolerance_rad <= 0.0:
+        raise ValueError("orientation_tolerance_rad must be positive")
+    if cfg.settle_timeout_s < 0.0:
+        raise ValueError("settle_timeout_s must be non-negative")
 
 
 def _motion_steps(start: np.ndarray, end: np.ndarray, speed_m_s: float, dt: float) -> int:
@@ -610,6 +692,12 @@ def _triple(v: np.ndarray | Sequence[float]) -> tuple[float, float, float]:
     """Convert a 3-element array-like to a (float, float, float) tuple."""
     a = np.asarray(v, dtype=float).reshape(3)
     return tuple(float(x) for x in a)
+
+
+def _matrix3(v: np.ndarray | Sequence[Sequence[float]]) -> tuple[tuple[float, float, float], ...]:
+    """Convert a 3×3 array-like to nested float tuples."""
+    a = np.asarray(v, dtype=float).reshape(3, 3)
+    return tuple(tuple(float(x) for x in row) for row in a)
 
 
 def _sample_row(s: ChoppingSample) -> dict[str, object]:
