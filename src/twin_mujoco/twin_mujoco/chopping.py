@@ -81,7 +81,10 @@ class BladeGeometry:
 
 
 LEFT_HOME_Q = np.zeros(7, dtype=float)
-RIGHT_CHOPPING_HOME_Q = np.array((0.4, -1.3, 0.0, -1.606525, 0.057176, 0.79256, 1.5), dtype=float)
+RIGHT_CHOPPING_HOME_Q = np.array(
+    (-0.046875431, -1.287409252, 0.280364873, -1.881210778, -1.589471016, 1.0467, 1.57),
+    dtype=float,
+)
 
 BLADE_EDGE_SITE_NAMES = (
     "right_blade_edge_top",

@@ -21,6 +21,7 @@ test = [
 twin-chop = "twin_mujoco.cli:main"
 twin-trajectory = "twin_control.trajectory_demo:main"
 twin-chop-sdk = "twin_control.chopping_cli:main"
+twin-ik = "twin_control.ik_cli:main"
 
 [tool.setuptools]
 packages = ["twin_control", "twin_core", "twin_description", "twin_mujoco"]
