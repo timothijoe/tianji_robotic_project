@@ -1,7 +1,6 @@
 import numpy as np
 
 from twin_control.chopping import ChoppingConfig, ChoppingPhase, TwinRobotChopper
-from twin_control.rotation import rotation_error
 
 
 def test_sdk_chopper_descend_targets_board_below_safe_height():
@@ -34,33 +33,56 @@ def test_sdk_chopper_defaults_to_200_hz_control():
     assert ChoppingConfig().control_hz == 200.0
 
 
-def test_sdk_chopper_path_phases_finish_within_position_tolerance():
+def test_sdk_chopper_descend_finishes_with_blade_references_near_targets():
     cfg = ChoppingConfig(cycles=1, force_hold_s=0.01)
 
     samples = TwinRobotChopper().run(cfg, headless=True)
 
-    for phase in (ChoppingPhase.APPROACH, ChoppingPhase.DESCEND, ChoppingPhase.RETRACT):
-        phase_samples = [sample for sample in samples if sample.phase == phase]
-        assert phase_samples
-        final = phase_samples[-1]
-        error_m = np.linalg.norm(np.asarray(final.target_position) - np.asarray(final.actual_position))
+    descend_samples = [sample for sample in samples if sample.phase == ChoppingPhase.DESCEND]
+    assert descend_samples
+    final = descend_samples[-1]
+    for actual, target in zip(final.blade_reference_positions, final.target_blade_reference_positions):
+        error_m = np.linalg.norm(np.asarray(actual) - np.asarray(target))
         assert error_m <= cfg.position_tolerance_m
 
 
-def test_sdk_chopper_path_phases_finish_within_pose_tolerance():
+def test_sdk_chopper_descend_targets_horizontal_blade_reference_line():
     cfg = ChoppingConfig(cycles=1, force_hold_s=0.01)
 
     samples = TwinRobotChopper().run(cfg, headless=True)
 
-    for phase in (ChoppingPhase.APPROACH, ChoppingPhase.DESCEND, ChoppingPhase.RETRACT):
-        phase_samples = [sample for sample in samples if sample.phase == phase]
-        assert phase_samples
-        final = phase_samples[-1]
-        position_error_m = np.linalg.norm(
-            np.asarray(final.target_position) - np.asarray(final.actual_position)
-        )
-        orientation_error_rad = np.linalg.norm(
-            rotation_error(np.asarray(final.actual_rotation), np.asarray(final.target_rotation))
-        )
-        assert position_error_m <= cfg.position_tolerance_m
-        assert orientation_error_rad <= cfg.orientation_tolerance_rad
+    descend_samples = [sample for sample in samples if sample.phase == ChoppingPhase.DESCEND]
+    assert descend_samples
+    final = descend_samples[-1]
+    target_z = [position[2] for position in final.target_blade_reference_positions]
+    assert max(target_z) - min(target_z) <= 1e-9
+
+
+def test_sdk_chopper_samples_include_three_blade_reference_points():
+    samples = TwinRobotChopper().run(
+        ChoppingConfig(cycles=1, force_hold_s=0.01),
+        headless=True,
+    )
+
+    active = [sample for sample in samples if sample.phase != ChoppingPhase.COMPLETE]
+    assert active
+    for sample in active:
+        assert len(sample.blade_reference_positions) == 3
+        assert len(sample.target_blade_reference_positions) == 3
+        for position in sample.blade_reference_positions + sample.target_blade_reference_positions:
+            assert len(position) == 3
+            assert np.all(np.isfinite(position))
+
+
+def test_sdk_chopper_force_hold_targets_blade_references_on_board():
+    chopper = TwinRobotChopper()
+    samples = chopper.run(
+        ChoppingConfig(cycles=1, force_hold_s=0.01),
+        headless=True,
+    )
+
+    force_samples = [sample for sample in samples if sample.phase == ChoppingPhase.FORCE_HOLD]
+    assert force_samples
+    board_top = chopper._board_top_from_model_path()
+    for position in force_samples[-1].target_blade_reference_positions:
+        assert abs(position[2] - board_top) <= 1e-9

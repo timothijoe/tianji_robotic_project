@@ -133,6 +133,8 @@ class ChoppingSample:
     joint_torques : (7,) tuple — applied joint torques (N·m).
     contact : bool — True if |Fz| > 1e-6.
     fault : str — non-empty if a safety fault occurred.
+    blade_reference_positions : three current blade reference positions.
+    target_blade_reference_positions : three target blade reference positions.
     """
     time_s: float
     phase: ChoppingPhase
@@ -149,6 +151,10 @@ class ChoppingSample:
     joint_torques: tuple[float, ...]
     contact: bool
     fault: str = ""
+    blade_edge_positions: tuple[tuple[float, float, float], ...] = ()
+    target_blade_edge_positions: tuple[tuple[float, float, float], ...] = ()
+    blade_reference_positions: tuple[tuple[float, float, float], ...] = ()
+    target_blade_reference_positions: tuple[tuple[float, float, float], ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -239,13 +245,12 @@ class TwinRobotChopper:
         sensor_pos, _ = self.robot.get_tcp_pose()
         tip_pos = np.array((float(geometry.tip_position[0]), float(geometry.tip_position[1]),
                             float(geometry.tip_position[2])))
-        clearance_rotation = self._horizontal_blade_rotation(geometry)
-        target_rotation = np.asarray(geometry.tip_rotation, dtype=float).reshape(3, 3)
+        target_rotation = self._horizontal_blade_rotation(geometry)
         board_top = self._board_top()
         safe_tip = self._tip_target_for_blade_clearance(
-            tip_pos, clearance_rotation, geometry, board_top, cfg.safe_height_m,
+            tip_pos, target_rotation, geometry, board_top, cfg.safe_height_m,
         )
-        descend_tip = self._tip_target_for_blade_on_board(tip_pos, clearance_rotation, geometry, board_top)
+        descend_tip = self._tip_target_for_blade_on_board(tip_pos, target_rotation, geometry, board_top)
         control_dt = 1.0 / cfg.control_hz
 
         # Position-priority Cartesian impedance. Rotation is used to compute
@@ -264,6 +269,10 @@ class TwinRobotChopper:
             shifted_safe[0] += cycle * cfg.spacing_m
             shifted_descend = descend_tip.copy()
             shifted_descend[0] += cycle * cfg.spacing_m
+            shifted_safe_edges = self._predict_blade_edge_positions(shifted_safe, target_rotation, geometry)
+            shifted_descend_edges = self._predict_blade_edge_positions(shifted_descend, target_rotation, geometry)
+            shifted_safe_refs = self._predict_blade_reference_positions(shifted_safe, target_rotation, geometry)
+            shifted_descend_refs = self._predict_blade_reference_positions(shifted_descend, target_rotation, geometry)
 
             phase = ChoppingPhase.APPROACH if cycle == 0 else ChoppingPhase.SHIFT
 
@@ -272,13 +281,14 @@ class TwinRobotChopper:
             current_tip, _ = self.robot.get_tcp_pose()
             approach_steps = _motion_steps(current_tip, shifted_safe, cfg.retract_speed_m_s, control_dt)
             self._move_tip_to(shifted_safe, target_rotation, phase, 0.0, control_dt, cfg,
-                              approach_steps, terminal_K, terminal_D)
+                              approach_steps, terminal_K, terminal_D, shifted_safe_edges, shifted_safe_refs)
 
             # --- Descend ---
             self.robot.set_cart_impedance_state(0.5, 0.5, K, D)
             descend_steps = _motion_steps(shifted_safe, shifted_descend, cfg.descent_speed_m_s, control_dt)
             self._move_tip_to(shifted_descend, target_rotation, ChoppingPhase.DESCEND, 0.0, control_dt, cfg,
-                              max(1, descend_steps), terminal_K, terminal_D)
+                              max(1, descend_steps), terminal_K, terminal_D,
+                              shifted_descend_edges, shifted_descend_refs)
 
             # --- Force hold ---
             self.robot.set_force_state(0.5, 0.5, K, D, fx_dir, fc_adj_lmt=0.04)
@@ -292,7 +302,8 @@ class TwinRobotChopper:
                 self.robot.step(viewer_sync=True)
                 wrench = self.robot.get_wrench()
                 self._record_sample(ChoppingPhase.FORCE_HOLD, "FORCE", shifted_descend,
-                                    target_rotation, cfg.target_force_n, wrench)
+                                    target_rotation, cfg.target_force_n, wrench,
+                                    shifted_descend_edges, shifted_descend_refs)
                 if not headless and self.robot._viewer is not None:
                     self.robot._viewer.sync()
 
@@ -300,12 +311,15 @@ class TwinRobotChopper:
             self.robot.set_cart_impedance_state(0.5, 0.5, K, D)
             retract_steps = _motion_steps(shifted_descend, shifted_safe, cfg.retract_speed_m_s, control_dt)
             self._move_tip_to(shifted_safe, target_rotation, ChoppingPhase.RETRACT, 0.0, control_dt, cfg,
-                              max(1, retract_steps), terminal_K, terminal_D)
+                              max(1, retract_steps), terminal_K, terminal_D,
+                              shifted_safe_edges, shifted_safe_refs)
 
         # Final sample
         self.samples.append(self._make_sample(
             self.robot.runtime.data.time, ChoppingPhase.COMPLETE, "IDLE",
             safe_tip, target_rotation, 0.0, np.zeros(6),
+            target_blade_edge_positions=self._predict_blade_edge_positions(safe_tip, target_rotation, geometry),
+            target_blade_reference_positions=self._predict_blade_reference_positions(safe_tip, target_rotation, geometry),
         ))
 
         if not headless and self.robot._viewer is not None:
@@ -352,6 +366,8 @@ class TwinRobotChopper:
         steps: int,
         terminal_K: Sequence[float],
         terminal_D: Sequence[float],
+        target_blade_edge_positions: tuple[tuple[float, float, float], ...],
+        target_blade_reference_positions: tuple[tuple[float, float, float], ...],
     ) -> None:
         """Linearly interpolate the TCP from its current position to *target_pos*
         over *steps* control cycles, recording a sample at each step.
@@ -377,10 +393,14 @@ class TwinRobotChopper:
             self.robot._controller.set_cart_cmd(T)
             self.robot.step(viewer_sync=True)
             wrench = self.robot.get_wrench()
-            self._record_sample(phase, "CARTESIAN_IMPEDANCE", interp_pos, rotation, target_force_n, wrench)
+            self._record_sample(phase, "CARTESIAN_IMPEDANCE", interp_pos, rotation, target_force_n, wrench,
+                                target_blade_edge_positions, target_blade_reference_positions)
         self.robot.set_cart_impedance_state(0.5, 0.5, terminal_K, terminal_D)
         self.robot._controller.set_cart_cmd(T)
-        self._settle_to_pose_tolerance(target_pos, rotation, phase, target_force_n, cfg, control_dt)
+        self._settle_to_pose_tolerance(
+            target_pos, rotation, phase, target_force_n, cfg, control_dt,
+            target_blade_edge_positions, target_blade_reference_positions,
+        )
 
     def _settle_to_pose_tolerance(
         self,
@@ -390,6 +410,8 @@ class TwinRobotChopper:
         target_force_n: float,
         cfg: ChoppingConfig,
         control_dt: float,
+        target_blade_edge_positions: tuple[tuple[float, float, float], ...],
+        target_blade_reference_positions: tuple[tuple[float, float, float], ...],
     ) -> None:
         """Hold the current target until terminal TCP pose error is acceptable."""
         max_steps = max(1, int(np.ceil(cfg.settle_timeout_s / control_dt)))
@@ -422,11 +444,13 @@ class TwinRobotChopper:
                 self.robot.set_joint_position_cmd(joint_start + blend * (joint_target - joint_start))
             self.robot.step(viewer_sync=True)
             wrench = self.robot.get_wrench()
-            self._record_sample(phase, self.robot.control_mode, target, rotation, target_force_n, wrench)
+            self._record_sample(phase, self.robot.control_mode, target, rotation, target_force_n, wrench,
+                                target_blade_edge_positions, target_blade_reference_positions)
         if joint_target is not None:
             self.robot.runtime.set_arm_positions(self.robot.arm_name, joint_target)
             wrench = self.robot.get_wrench()
-            self._record_sample(phase, "ENDPOINT_CORRECTION", target, rotation, target_force_n, wrench)
+            self._record_sample(phase, "ENDPOINT_CORRECTION", target, rotation, target_force_n, wrench,
+                                target_blade_edge_positions, target_blade_reference_positions)
 
     def _record_sample(
         self,
@@ -436,6 +460,8 @@ class TwinRobotChopper:
         target_rotation: np.ndarray,
         target_force_n: float,
         wrench: np.ndarray,
+        target_blade_edge_positions: tuple[tuple[float, float, float], ...] | None = None,
+        target_blade_reference_positions: tuple[tuple[float, float, float], ...] | None = None,
     ) -> None:
         """Convenience wrapper around ``_make_sample``."""
         self.samples.append(self._make_sample(
@@ -444,6 +470,8 @@ class TwinRobotChopper:
             np.asarray(target_rotation, dtype=float).reshape(3, 3),
             target_force_n,
             np.asarray(wrench, dtype=float).reshape(6),
+            target_blade_edge_positions=target_blade_edge_positions,
+            target_blade_reference_positions=target_blade_reference_positions,
         ))
 
     def _make_sample(
@@ -451,6 +479,8 @@ class TwinRobotChopper:
         t: float, phase: ChoppingPhase, mode: str,
         target_pos: np.ndarray, target_rotation: np.ndarray, target_force_n: float,
         wrench: np.ndarray, fault: str = "",
+        target_blade_edge_positions: tuple[tuple[float, float, float], ...] | None = None,
+        target_blade_reference_positions: tuple[tuple[float, float, float], ...] | None = None,
     ) -> ChoppingSample:
         """Build a ``ChoppingSample`` from the current robot state.
 
@@ -471,6 +501,15 @@ class TwinRobotChopper:
         q = self.robot.get_joint_positions()
         qd = self.robot.get_joint_velocities()
         actual_pos, actual_matrix = self.robot.get_tcp_pose()
+        blade_geometry = self._blade_geometry()
+        if target_blade_edge_positions is None:
+            target_blade_edge_positions = self._predict_blade_edge_positions(
+                target_pos, target_rotation, blade_geometry,
+            )
+        if target_blade_reference_positions is None:
+            target_blade_reference_positions = self._predict_blade_reference_positions(
+                target_pos, target_rotation, blade_geometry,
+            )
         raw = self.robot.get_raw_wrench()
         return ChoppingSample(
             time_s=float(t),
@@ -488,6 +527,10 @@ class TwinRobotChopper:
             joint_torques=tuple(float(v) for v in self.robot._controller._previous_torque),
             contact=bool(abs(wrench[2]) > 1e-6),
             fault=fault,
+            blade_edge_positions=blade_geometry.edge_positions,
+            target_blade_edge_positions=target_blade_edge_positions,
+            blade_reference_positions=(*blade_geometry.edge_positions, blade_geometry.tip_position),
+            target_blade_reference_positions=target_blade_reference_positions,
         )
 
     # ------------------------------------------------------------------
@@ -577,6 +620,27 @@ class TwinRobotChopper:
             pred.append(_triple(target + rotation @ local))
         return tuple(pred)
 
+    def _predict_blade_edge_positions(
+        self,
+        tip_target: Sequence[float],
+        target_rotation: np.ndarray,
+        geometry: BladeGeometry,
+    ) -> tuple[tuple[float, float, float], ...]:
+        return self._predict_positions(geometry.edge_positions, tip_target, target_rotation, geometry)
+
+    def _predict_blade_reference_positions(
+        self,
+        tip_target: Sequence[float],
+        target_rotation: np.ndarray,
+        geometry: BladeGeometry,
+    ) -> tuple[tuple[float, float, float], ...]:
+        return self._predict_positions(
+            (*geometry.edge_positions, geometry.tip_position),
+            tip_target,
+            target_rotation,
+            geometry,
+        )
+
     def _tip_target_for_blade_clearance(
         self, tip: np.ndarray, rotation: np.ndarray,
         geometry: BladeGeometry, board_top: float, clearance_m: float,
@@ -645,6 +709,16 @@ class TwinRobotChopper:
             self.robot.runtime.data.geom_xpos[geom_id, 2]
             + self.robot.runtime.model.geom_size[geom_id, 2],
         )
+
+    def _board_top_from_model_path(self) -> float:
+        """Read the chopping-board top height without requiring an active run."""
+        runtime = self.robot.runtime
+        if runtime is None:
+            from twin_mujoco.runtime import TwinMujocoRuntime
+
+            runtime = TwinMujocoRuntime.load(str(right_chopping_scene_path()))
+        geom_id = int(mujoco.mj_name2id(runtime.model, mujoco.mjtObj.mjOBJ_GEOM, "chopping_board"))
+        return float(runtime.data.geom_xpos[geom_id, 2] + runtime.model.geom_size[geom_id, 2])
 
 
 # ---------------------------------------------------------------------------
