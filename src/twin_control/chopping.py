@@ -80,7 +80,7 @@ class ChoppingConfig:
     retract_speed_m_s: float = 0.08
     force_hold_s: float = 0.15
     target_force_n: float = 10.0
-    control_hz: float = 200.0
+    control_hz: float = 500.0
     position_tolerance_m: float = 0.005
     orientation_tolerance_rad: float = 0.08726646259971647
     settle_timeout_s: float = 1.0
@@ -258,12 +258,13 @@ class TwinRobotChopper:
         descend_tip = self._tip_target_for_blade_on_board(tip_pos, target_rotation, geometry, board_top)
         control_dt = 1.0 / cfg.control_hz
 
-        # Position-priority Cartesian impedance. Rotation is used to compute
-        # blade clearance, but not enforced strongly enough to pull TCP off path.
-        K = (4500.0, 4500.0, 5200.0, 0.0, 0.0, 0.0, _DEFAULT_CART_K[6])
-        D = (150.0, 150.0, 165.0, 0.0, 0.0, 0.0, _DEFAULT_CART_D[6])
-        terminal_K = (5200.0, 5200.0, 6000.0, 120.0, 120.0, 90.0, _DEFAULT_CART_K[6])
-        terminal_D = (180.0, 180.0, 200.0, 12.0, 12.0, 10.0, _DEFAULT_CART_D[6])
+        # Match the reference MuJoCo chopper's softer impedance. The SDK path
+        # used to run stiffer gains at 200 Hz, which produced visible chatter
+        # around the folded, low hand posture.
+        K = (2500.0, 2500.0, 2800.0, 45.0, 45.0, 35.0, _DEFAULT_CART_K[6])
+        D = (105.0, 105.0, 115.0, 5.5, 5.5, 4.5, _DEFAULT_CART_D[6])
+        terminal_K = K
+        terminal_D = D
 
         # Force control along world down, matching the reference chopper.
         fx_dir = (0.0, 0.0, -1.0, 0.0, 0.0, 0.0)

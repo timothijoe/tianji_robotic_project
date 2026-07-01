@@ -29,8 +29,8 @@ def test_sdk_chopper_writes_nonzero_joint_torques_in_samples():
     assert any(np.linalg.norm(sample.joint_torques) > 0.0 for sample in active)
 
 
-def test_sdk_chopper_defaults_to_200_hz_control():
-    assert ChoppingConfig().control_hz == 200.0
+def test_sdk_chopper_defaults_to_500_hz_control():
+    assert ChoppingConfig().control_hz == 500.0
 
 
 def test_sdk_chopper_descend_finishes_with_blade_references_near_targets():
