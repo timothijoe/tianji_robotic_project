@@ -59,9 +59,9 @@ def test_chopping_board_is_in_front_of_robot_at_work_height():
     model = mujoco.MjModel.from_xml_path(str(right_chopping_scene_path()))
     geom_id = _id(model, mujoco.mjtObj.mjOBJ_GEOM, "chopping_board")
 
-    assert model.geom_pos[geom_id, 0] == 0.38
+    assert model.geom_pos[geom_id, 0] == 0.48
     assert abs(model.geom_pos[geom_id, 1]) < 1e-9
-    assert model.geom_pos[geom_id, 2] + model.geom_size[geom_id, 2] == 0.26
+    assert abs(model.geom_pos[geom_id, 2] + model.geom_size[geom_id, 2] - 0.23) < 1e-9
 
 
 def test_right_tool_body_frames_are_parallel_to_end_flange_frame():

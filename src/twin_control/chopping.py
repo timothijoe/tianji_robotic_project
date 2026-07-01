@@ -174,7 +174,8 @@ WORLD_DOWN_AXIS = np.array((0.0, 0.0, -1.0), dtype=float)
 """World-frame downward direction for force control."""
 
 RIGHT_CHOPPING_HOME_RAD = np.array(
-    (0.4, -1.3, 0.0, -1.606525, 0.057176, 0.79256, 1.5), dtype=float,
+    (-1.319946, -1.179343, 0.914382, -2.174226, -1.57813, 0.749651, 0.722104),
+    dtype=float,
 )
 """Right-arm home configuration used by the reference chopping controller."""
 
