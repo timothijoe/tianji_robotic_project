@@ -82,7 +82,7 @@ class BladeGeometry:
 
 LEFT_HOME_Q = np.zeros(7, dtype=float)
 RIGHT_CHOPPING_HOME_Q = np.array(
-    (-0.046875431, -1.287409252, 0.280364873, -1.881210778, -1.589471016, 1.0467, 1.57),
+    (-0.81025, -1.378479, 0.706776, -2.109475, -1.901289, 0.832046, 1.357208),
     dtype=float,
 )
 
