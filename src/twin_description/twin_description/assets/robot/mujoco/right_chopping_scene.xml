@@ -28,7 +28,7 @@
     <geom name="ground" type="plane" size="20 20 0.1" material="ground_mat" pos="0 0 0" />
     <light pos="0 -1 1.5" dir="0 1 -1" />
     <geom name="floor" type="plane" size="1.5 1.5 0.05" rgba="0.2 0.25 0.3 1" />
-    <geom name="chopping_board" type="box" pos="0.38 0 0.235" size="0.24 0.18 0.025" rgba="0.55 0.32 0.12 1" friction="1.0 0.03 0.003" solref="0.04 1" solimp="0.85 0.95 0.005" />
+    <geom name="chopping_board" type="box" pos="0.48 0 0.205" size="0.24 0.18 0.025" rgba="0.55 0.32 0.12 1" friction="1.0 0.03 0.003" solref="0.04 1" solimp="0.85 0.95 0.005" />
     <geom name="center_visual_console" type="box" pos="0.16 0 0.19" size="0.16 0.24 0.05" rgba="0.22 0.24 0.26 1" contype="0" conaffinity="0" />
     <body name="robot_base" pos="0 0 0.3">
       <geom type="mesh" rgba="1 1 1 1" mesh="BASE" />
