@@ -66,13 +66,18 @@ def run_demo(
         robot.set_joint_position_cmd(arm, READY_B)
         robot.wait(hold_s, viewer_sync=viewer)
 
-        current_pose = np.asarray(kine.fk(READY_B), dtype=float)
+        arm_index = 0 if arm.upper() == "A" else 1
+        data = robot.subscribe(None)
+        if data is None:
+            raise RuntimeError("subscribe failed after ready command")
+        reference_joints = data["outputs"][arm_index]["fb_joint_pos"]
+        current_pose = np.asarray(kine.fk(reference_joints), dtype=float)
         target_pose = current_pose.copy()
         target_pose[2, 3] += float(dz_mm)
 
         sp = create_ik_param(backend, sdk_root=sdk_root)
         sp.set_input_ik_target_tcp(kine.mat4x4_to_mat1x16(target_pose))
-        sp.set_input_ik_ref_joint(READY_B)
+        sp.set_input_ik_ref_joint(reference_joints)
         sp.set_input_ik_zsp_type(0)
         ik = kine.ik(sp)
         target_joints = ik.get_output_ret_joint()
@@ -89,7 +94,6 @@ def run_demo(
         robot.set_joint_position_cmd(arm, target_joints)
 
         deadline = time.monotonic() + float(hold_s)
-        data = robot.subscribe(None)
         while time.monotonic() < deadline:
             if hasattr(robot, "step"):
                 robot.step(viewer_sync=viewer)
@@ -97,9 +101,9 @@ def run_demo(
                 time.sleep(1.0 / max(float(control_hz), 1.0))
             data = robot.subscribe(None)
 
-        arm_index = 0 if arm.upper() == "A" else 1
         return {
             "ik_success": ik.get_output_result_num() >= 1,
+            "reference_joints": reference_joints,
             "target_joints": target_joints,
             "feedback": data["outputs"][arm_index],
         }

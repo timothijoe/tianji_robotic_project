@@ -2,7 +2,7 @@
 
 Provides three control strategies behind a single ``compute()`` interface:
 
-- **Joint impedance**:  τ = K·(q_des − q) + D·(0 − qd) + bias
+- **Position / joint impedance**:  τ = K·(q_des − q) + D·(0 − qd) + bias
 - **Cartesian impedance**:  τ = Jᵀ·F_task + nullspace + bias
 - **Force control**:  hybrid Cartesian impedance + admittance force tracking
   on one axis
@@ -43,7 +43,7 @@ from twin_control.rotation import rotation_error as _rotation_error
 
 class ControlMode(Enum):
     """Torque-mode control strategies."""
-    POSITION = 1             # stiff Cartesian impedance
+    POSITION = 1             # joint position tracking
     JOINT_IMPEDANCE = 2      # τ = K·(q_des − q) + D·(0 − qd)
     CARTESIAN_IMPEDANCE = 3  # τ = Jᵀ·F_task + nullspace
     FORCE = 4                # hybrid Cartesian + admittance force
@@ -277,8 +277,10 @@ class UnifiedController:
         # Dispatch to control law
         if self._mode == ControlMode.JOINT_IMPEDANCE:
             tau = self._joint_impedance(q, qd, bias)
-        elif self._mode in (ControlMode.CARTESIAN_IMPEDANCE, ControlMode.POSITION):
+        elif self._mode == ControlMode.CARTESIAN_IMPEDANCE:
             tau = self._cartesian_impedance(q, qd, J, current_pose_matrix, bias)
+        elif self._mode == ControlMode.POSITION:
+            tau = self._joint_impedance(q, qd, bias)
         else:  # FORCE
             tau = self._force_control(q, qd, J, current_pose_matrix, wrench, bias)
 

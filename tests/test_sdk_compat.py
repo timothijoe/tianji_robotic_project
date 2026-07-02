@@ -33,6 +33,28 @@ def test_mujoco_sdk_robot_runs_position_command_headless():
         robot.release_robot()
 
 
+def test_mujoco_position_command_moves_toward_joint_target():
+    target = np.array([-75.627, -67.572, 52.390, -124.574, -90.421, 42.952, 41.374])
+    robot = MujocoSdkRobot(
+        arm="B",
+        viewer=False,
+        realtime=False,
+        control_hz=250.0,
+        tcp_site_name="right_tool_tip_site",
+    )
+    try:
+        assert robot.connect("mujoco")
+        initial_error = float(np.linalg.norm(robot.get_joint_positions() - target))
+        assert robot.set_position_state("B", 30, 30)
+        assert robot.set_joint_position_cmd("B", target)
+        robot.wait(0.5, viewer_sync=False)
+        final_error = float(np.linalg.norm(robot.get_joint_positions() - target))
+
+        assert final_error < initial_error - 5.0
+    finally:
+        robot.release_robot()
+
+
 def test_mujoco_sdk_robot_rejects_wrong_arm_for_instance():
     robot = MujocoSdkRobot(arm="B", viewer=False, realtime=False)
     try:
@@ -198,3 +220,29 @@ def test_ik_cart_impedance_demo_exposes_run_demo_function():
     spec.loader.exec_module(module)
 
     assert callable(module.run_demo)
+
+
+def test_ik_cart_impedance_demo_targets_current_feedback_pose():
+    demo_path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "DEMO_PYTHON_STYLE"
+        / "showcase_ik_cart_impedance.py"
+    )
+    spec = importlib.util.spec_from_file_location("_sdk_ik_cart_impedance_demo_run", demo_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(module)
+
+    result = module.run_demo(
+        backend="mujoco",
+        viewer=False,
+        realtime=False,
+        control_hz=100.0,
+        dz_mm=-5.0,
+        hold_s=0.01,
+    )
+
+    reference = np.asarray(result["reference_joints"], dtype=float)
+    target = np.asarray(result["target_joints"], dtype=float)
+    assert np.max(np.abs(target - reference)) < 25.0

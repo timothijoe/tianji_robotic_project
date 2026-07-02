@@ -217,16 +217,15 @@ class TwinRobot:
     def set_position_state(
         self, vel_ratio: float = 0.5, acc_ratio: float = 0.5,
     ) -> None:
-        """Switch to position mode (stiff Cartesian impedance)."""
+        """Switch to position mode (joint target tracking)."""
         self._ensure_connected()
         fv = float(np.clip(vel_ratio, 0.0, 1.0))
-        params = CartesianImpedanceParams(
-            translational_stiffness=(3000.0, 3000.0, 3200.0),
-            translational_damping=tuple(d * fv for d in (105.0, 105.0, 115.0)),
-            nullspace_stiffness=8.0,
-            nullspace_damping=3.0 * fv,
+        self._controller.set_joint_impedance_params(
+            JointImpedanceParams(
+                stiffness=(35.0, 35.0, 30.0, 24.0, 16.0, 10.0, 8.0),
+                damping=tuple(d * max(fv, 0.1) for d in (7.0, 7.0, 6.0, 5.0, 3.5, 2.5, 2.0)),
+            )
         )
-        self._controller.set_cartesian_impedance_params(params)
         self._controller.set_mode(ControlMode.POSITION)
         self._state = RobotState.POSITION
         print(f"[TwinRobot] state → POSITION (vel={vel_ratio})")
