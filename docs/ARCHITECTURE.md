@@ -320,7 +320,7 @@ flowchart TD
 - `ArmView` 的 7 轴顺序就是控制器输入/输出顺序。
 - 所有内部控制计算使用 SI：rad、m、N、N m、s。
 - `unit_mode="sdk"` 只在 public API 边界做 deg/mm 转换，不改变内部计算。
-- 默认仿真 timestep 来自 MJCF，目前是 0.002 s；控制频率需要映射成整数 substeps。
+- 默认仿真 timestep 来自 MJCF，目前是 0.002 s；控制频率需要映射成整数 substeps。SDK 切菜默认 `control_hz=250.0`，即每个控制周期约 2 个 MuJoCo step。
 - 砧板对象名为 `chopping_board`，当前 top surface 是 `0.26 m`。
 - 右臂切菜依赖 `right_tool_tip_site`、`right_force_sensor_site`、`right_tool_force`、`right_tool_torque`、blade edge sites。
 - 左臂在右臂任务中不是任务参与者；通过 bias torque 和/或重置保持在 home。

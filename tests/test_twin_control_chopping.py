@@ -1,6 +1,7 @@
 import numpy as np
 
 from twin_control.chopping import ChoppingConfig, ChoppingPhase, TwinRobotChopper
+from twin_control import chopping_cli
 
 
 def test_sdk_chopper_descend_targets_board_below_safe_height():
@@ -29,8 +30,30 @@ def test_sdk_chopper_writes_nonzero_joint_torques_in_samples():
     assert any(np.linalg.norm(sample.joint_torques) > 0.0 for sample in active)
 
 
-def test_sdk_chopper_defaults_to_500_hz_control():
-    assert ChoppingConfig().control_hz == 500.0
+def test_sdk_chopper_defaults_to_250_hz_control():
+    assert ChoppingConfig().control_hz == 250.0
+
+
+def test_sdk_chopper_cli_accepts_control_hz(monkeypatch):
+    captured = {}
+
+    class FakeChopper:
+        def run(self, config, log_path=None, headless=False):
+            captured["config"] = config
+            captured["log_path"] = log_path
+            captured["headless"] = headless
+
+    monkeypatch.setattr(chopping_cli, "TwinRobotChopper", FakeChopper)
+
+    exit_code = chopping_cli.main([
+        "--cycles", "1",
+        "--control-hz", "250",
+        "--headless",
+    ])
+
+    assert exit_code == 0
+    assert captured["config"].control_hz == 250.0
+    assert captured["headless"] is True
 
 
 def test_sdk_chopper_descend_finishes_with_blade_references_near_targets():

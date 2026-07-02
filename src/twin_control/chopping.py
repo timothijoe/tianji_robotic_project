@@ -84,7 +84,7 @@ class ChoppingConfig:
     retract_speed_m_s: float = 0.08
     force_hold_s: float = 0.15
     target_force_n: float = 10.0
-    control_hz: float = 500.0
+    control_hz: float = 250.0
     position_tolerance_m: float = 0.005
     orientation_tolerance_rad: float = 0.08726646259971647
     settle_timeout_s: float = 1.0

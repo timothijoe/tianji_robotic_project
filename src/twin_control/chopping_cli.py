@@ -19,6 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cycles", type=int, default=3)
     parser.add_argument("--force", type=float, default=10.0)
     parser.add_argument("--hold", type=float, default=0.15)
+    parser.add_argument("--control-hz", type=float, default=ChoppingConfig().control_hz)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--viewer", action="store_true")
     parser.add_argument("--log", type=Path, default=None)
@@ -28,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
         cycles=args.cycles,
         target_force_n=args.force,
         force_hold_s=args.hold,
+        control_hz=args.control_hz,
     )
 
     chopper = TwinRobotChopper()
