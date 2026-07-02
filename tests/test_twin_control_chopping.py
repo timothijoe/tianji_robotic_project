@@ -102,6 +102,22 @@ def test_sdk_chopper_force_hold_targets_blade_references_on_board():
         assert abs(position[2] - board_top) <= 1e-9
 
 
+def test_sdk_chopper_force_hold_ramps_target_force():
+    cfg = ChoppingConfig(cycles=1, force_hold_s=0.05, target_force_n=10.0)
+
+    samples = TwinRobotChopper().run(cfg, headless=True)
+
+    targets = [
+        sample.target_force_n
+        for sample in samples
+        if sample.phase == ChoppingPhase.FORCE_HOLD
+    ]
+    assert len(targets) >= 3
+    assert 0.0 < targets[0] < cfg.target_force_n
+    assert targets[-1] == cfg.target_force_n
+    assert targets == sorted(targets)
+
+
 def test_sdk_chopper_uses_continuous_endpoint_settle_instead_of_instant_correction():
     samples = TwinRobotChopper().run(
         ChoppingConfig(cycles=1, force_hold_s=0.01),

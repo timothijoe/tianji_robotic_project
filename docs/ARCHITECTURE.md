@@ -20,7 +20,8 @@
 - `ArmView` 从 14-DoF 模型中选择 7 个 qpos/dof/actuator，供控制器读写。
 - 运动学通过 MuJoCo site pose/Jacobian 获取 FK/Jacobian，IK 通过 DLS 迭代反复读 FK/Jacobian。
 - 控制器把目标位姿/关节/力转换成 7 维 torque。
-- 任务状态机按阶段更新目标，并循环执行“读状态 -> 计算 torque -> 写 ctrl -> step -> 采样/日志”。
+- SDK 切菜链路在任务目标和控制器之间增加了连续轨迹层：phase 目标先被转换成 minimum-jerk TCP pose 序列，force hold 目标力也按 minimum-jerk ramp 下发。
+- 任务状态机按阶段更新目标，并循环执行“规划目标 -> 读状态 -> 计算 torque -> 写 ctrl -> step -> 采样/日志”。
 
 ## 2. 模块划分
 
@@ -84,6 +85,16 @@
 - **Depends on**：numpy、rotation utilities。
 - **Called by**：`TwinRobot.step()`、trajectory demo、`TcpTrail`。
 
+### 轨迹规划模块
+
+- **Paths**：`src/twin_control/trajectory.py`。
+- **Responsibility**：把阶段级目标转换成每个控制周期的连续 Cartesian target；当前提供 fixed-orientation minimum-jerk position trajectory 和 normalized minimum-jerk scalar。
+- **Input**：start position、target position、target rotation、steps、phase、start time、control dt、optional target force。
+- **Output**：`CartesianTrajectoryPoint` 列表，每个点包含 `time_s`、4x4 `pose_matrix`、`phase`、`target_force_n`。
+- **Public Interface**：`minimum_jerk_scalar()`、`cartesian_minimum_jerk_trajectory()`、`CartesianTrajectoryPoint`。
+- **Depends on**：numpy。
+- **Called by**：`TwinRobotChopper`。
+
 ### SDK 风格机器人接口模块
 
 - **Paths**：`src/twin_control/robot.py`、`src/twin_control/trail.py`。
@@ -125,6 +136,7 @@ flowchart TD
     RefTask[RightArmChopper / twin-chop]
     Kin[MarvinKinematics]
     Ctrl[UnifiedController]
+    Traj[Continuous Trajectory Planner]
     Robot[TwinRobot SDK-style facade]
     SdkTask[TwinRobotChopper / twin-chop-sdk]
     Demo[Trajectory Demo]
@@ -143,6 +155,7 @@ flowchart TD
     Robot --> Kin
     Robot --> Ctrl
     Robot --> Trail
+    SdkTask --> Traj
     SdkTask --> Robot
     Demo --> Robot
     Demo --> Kin
@@ -160,7 +173,8 @@ flowchart TD
     Load --> Reset[Reset MjData, set left/right home]
     Reset --> Geometry[Read board/tool/blade site geometry]
     Geometry --> Targets[Compute safe/descend/shift target poses]
-    Targets --> Loop[Per-control-cycle state machine]
+    Targets --> Traj[Generate minimum-jerk TCP targets / force ramp]
+    Traj --> Loop[Per-control-cycle state machine]
     Loop --> Read[Read q, qd, site pose, Jacobian, wrench]
     Read --> Compute[Compute torque]
     Compute --> Apply[Write 7 right-arm ctrl values]
@@ -177,6 +191,8 @@ flowchart TD
 - `TwinMujocoRuntime` 从模型对象名生成 `joint_names`、`actuator_names`。
 - `ArmView` 把 14 维共享 `qpos/qvel/ctrl` 映射成 7 维 arm-local arrays。
 - blade/tool/board site/geom pose 转换成 `BladeGeometry`，之后用刚体局部 offset 预测目标 blade reference positions。
+- SDK 切菜移动段把 start/target TCP position 转换成 minimum-jerk `CartesianTrajectoryPoint` 序列；每个点携带固定 target rotation 和 4x4 pose。
+- SDK 切菜 force hold 把最终 `target_force_n` 转换成 minimum-jerk ramp，逐周期调用 `set_force_cmd()`，避免阶跃目标力。
 - 控制目标为 3D position + 3x3 rotation，控制器转换成 task wrench，再由 `J.T @ wrench` 转换成 7 维 torque。
 - 传感器 force/torque 的 `sensordata` 切片合并成 6 维 wrench。
 - 每个周期的 runtime state 被快照成 `ForceControlSample` 或 `ChoppingSample`。
@@ -234,10 +250,11 @@ flowchart TD
 3. reset runtime，设置 left/right home。
 4. 读取 blade geometry 和 board top，计算 safe/descend target。
 5. 每个 phase 通过 `TwinRobot.set_cart_impedance_state()` 或 `set_force_state()` 切换控制模式。
-6. 通过 controller `set_cart_cmd()`/`set_force_cmd()` 设置目标。
-7. `TwinRobot.step()` 执行 q/qd/J/pose/wrench 读取、torque 计算、apply torque、MuJoCo step、sample/trail/viewer sync。
-8. endpoint settle 阶段可能调用 IK 并直接 `set_arm_positions()` 做平滑终端校正。
-9. 写 CSV，关闭 robot/viewer。
+6. 移动 phase 生成 minimum-jerk Cartesian pose 序列；force hold phase 生成 minimum-jerk target-force ramp。
+7. 通过 controller `set_cart_cmd()`/`set_force_cmd()` 设置逐周期目标。
+8. `TwinRobot.step()` 执行 q/qd/J/pose/wrench 读取、torque 计算、apply torque、MuJoCo step、sample/trail/viewer sync。
+9. endpoint settle 阶段可能调用 IK 并直接 `set_arm_positions()` 做平滑终端校正。
+10. 写 CSV，关闭 robot/viewer。
 
 ### `twin-trajectory`
 
@@ -257,6 +274,7 @@ flowchart TD
 - `MarvinKinematics`：中等稳定。对外支持 SI/SDK、TCP site、tool offset；内部强依赖 MuJoCo runtime。
 - `UnifiedController.compute()`：核心控制接口，输入格式固定为 `(q, qd, J, pose, wrench, bias) -> torque(7,)`。任何参数含义变化都会影响 `TwinRobot` 和 demo。
 - `TwinRobot`：SDK 风格高层接口，正在成为主接口。它暴露较多状态切换方法，修改 state/mode 语义会影响 `TwinRobotChopper` 和 trajectory demo。
+- `CartesianTrajectoryPoint`：SDK 切菜轨迹接口，当前稳定性中等。修改其 `pose_matrix` 或 `target_force_n` 语义会直接影响 chopper target sampling 和 force ramp。
 - CSV sample fields：测试覆盖，属于开发者观测接口。字段变化会影响回归测试和外部分析脚本。
 
 循环依赖：
@@ -271,8 +289,9 @@ flowchart TD
 1. **场景/对象名/几何变化**：`right_chopping_scene.xml` -> `twin_description.paths` -> `TwinMujocoRuntime` -> `ArmView` -> chopper geometry helpers -> tests。
 2. **控制律变化**：`UnifiedController` -> `TwinRobot.step()` -> `TwinRobotChopper` / trajectory demo -> controller tests。
 3. **运行时映射变化**：`ArmSpec` -> `TwinMujocoRuntime`/`ArmView` -> all controllers/choppers。
-4. **切菜行为变化**：`TwinRobotChopper` 或 `RightArmChopper` phase logic -> sample schema -> CSV/tests。
-5. **运动学变化**：`MarvinKinematics` -> IK settle、trajectory demo、trail、FK/Jacobian tests。
+4. **切菜轨迹变化**：`src/twin_control/trajectory.py` -> `TwinRobotChopper._move_tip_to()` / FORCE_HOLD ramp -> sample schema -> CSV/tests。
+5. **切菜行为变化**：`TwinRobotChopper` 或 `RightArmChopper` phase logic -> sample schema -> CSV/tests。
+6. **运动学变化**：`MarvinKinematics` -> IK settle、trajectory demo、trail、FK/Jacobian tests。
 
 系统主干代码：
 
@@ -282,6 +301,7 @@ flowchart TD
 - `src/twin_mujoco/twin_mujoco/runtime.py`
 - `src/twin_control/kinematics.py`
 - `src/twin_control/controller.py`
+- `src/twin_control/trajectory.py`
 - `src/twin_control/robot.py`
 - `src/twin_control/chopping.py`
 
@@ -305,6 +325,8 @@ flowchart TD
 - 右臂切菜依赖 `right_tool_tip_site`、`right_force_sensor_site`、`right_tool_force`、`right_tool_torque`、blade edge sites。
 - 左臂在右臂任务中不是任务参与者；通过 bias torque 和/或重置保持在 home。
 - force axis 在参考 chopper 中是 world down `(0,0,-1)`；trajectory demo 某些 force 示例使用 `(0,0,1)`，这体现了不同链路的符号约定风险。
+- SDK 切菜移动轨迹假设固定目标姿态，只对 TCP position 做 minimum-jerk 标量插值；姿态不是逐步 slerp。
+- SDK 切菜 force hold 假设目标力可以按 minimum-jerk ramp 从接近 0 平滑上升到最终值；底层 force controller 仍负责接触后的 admittance 修正。
 - 刀具视觉 frame 和控制 task frame 被刻意分离；不要通过堆叠 visual quat 来修正 task frame 问题。
 - `MarvinKinematics` 以 MuJoCo site pose 为 ground truth，而不是独立 MDH 解析。
 - IK 是数值 DLS，成功依赖 reference joints、joint limits、目标可达性和 MuJoCo FK/Jacobian。
@@ -319,6 +341,8 @@ flowchart TD
 - 内部单位必须保持 SI。破坏后 stiffness、IK、force admittance 会数量级错误。
 - FK/Jacobian 调用必须恢复调用前的 runtime qpos/qvel。破坏后读状态会隐式改变仿真。
 - 切菜目标计算必须让 safe blade reference 高于 board，descend/force target 的 blade reference 在 board top。破坏后会穿透或悬空。
+- minimum-jerk Cartesian trajectory 的首点必须等于 start pose，末点必须等于 target pose。破坏后 phase 边界会出现目标跳变或终点误差。
+- force hold ramp 的最后一个 target force 必须等于 `ChoppingConfig.target_force_n`。破坏后切菜力目标会低于配置或出现阶跃。
 - `right_chopping_scene.xml` 中 source robot 的关节/执行器语义必须和 `ArmSpec` 一致。破坏后映射错位。
 - `TwinRobot.connect()` 必须先于任何 command/query/step。破坏后 `_arm/_controller/_kinematics` 不存在。
 - `TwinRobotChopper.run()` 结束必须关闭 viewer/runtime 引用。破坏后 GUI 和资源会泄漏。
@@ -330,6 +354,7 @@ flowchart TD
 - `TwinRobotChopper`：状态机、IK settle、blade geometry prediction、viewer/headless、CSV 采样混在一起。
 - `TwinRobot`：生命周期、controller glue、wrench calibration、viewer trail、logging 都在一个对象中。
 - `UnifiedController`：多控制模式共享内部状态，force filter/admittance/rate limit 的时序敏感。
+- `twin_control.trajectory` 当前只保证目标序列连续，不提供速度/加速度 feedforward；如果未来要高速切菜，仅靠 pose target 平滑可能不够。
 
 最容易出 Bug 的地方：
 
@@ -350,6 +375,7 @@ flowchart TD
 
 - `RightArmChopper` 和 `TwinRobotChopper` 同时维护切菜状态机、blade geometry、CSV schema。
 - `CartesianForceController` 和 `UnifiedController` 都实现 Cartesian/force control 的相似逻辑。
+- SDK 切菜已有连续轨迹层，但 demo 中仍有直接线性/手写 target 更新逻辑，轨迹生成尚未统一复用。
 - `WrenchCalibrator` 和 `TwinRobot` 内部 wrench bias/gravity compensation 逻辑重复。
 - 高层 demo/任务代码绕过 public API 访问 `_controller`，说明 `TwinRobot` 还缺少正式 Cartesian target API。
 

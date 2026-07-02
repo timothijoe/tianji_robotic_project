@@ -38,6 +38,10 @@ from twin_control.robot import (
     _DEFAULT_CART_K,
 )
 from twin_description.paths import right_chopping_scene_path
+from twin_control.trajectory import (
+    cartesian_minimum_jerk_trajectory,
+    minimum_jerk_scalar,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -304,11 +308,14 @@ class TwinRobotChopper:
             T[:3, 3] = shifted_descend
             self.robot._controller.set_cart_cmd(T)
             hold_steps = max(2, int(np.ceil(cfg.force_hold_s / control_dt)))
-            for _ in range(hold_steps):
+            for hold_index in range(hold_steps):
+                force_progress = minimum_jerk_scalar((hold_index + 1) / hold_steps)
+                force_target_n = cfg.target_force_n * force_progress
+                self.robot.set_force_cmd(force_target_n)
                 self.robot.step(viewer_sync=True)
                 wrench = self.robot.get_wrench()
                 self._record_sample(ChoppingPhase.FORCE_HOLD, "FORCE", shifted_descend,
-                                    target_rotation, cfg.target_force_n, wrench,
+                                    target_rotation, force_target_n, wrench,
                                     shifted_descend_edges, shifted_descend_refs)
                 if not headless and self.robot._viewer is not None:
                     self.robot._viewer.sync()
@@ -390,16 +397,24 @@ class TwinRobotChopper:
         """
         current_pos, _ = self.robot.get_tcp_pose()
         current_pos = np.asarray(current_pos, dtype=float).reshape(3)
+        trajectory = cartesian_minimum_jerk_trajectory(
+            start_pos=current_pos,
+            target_pos=target_pos,
+            rotation=rotation,
+            steps=steps,
+            phase=phase,
+            start_time_s=self.robot.runtime.data.time,
+            dt_s=control_dt,
+            target_force_n=target_force_n,
+        )
         T = np.eye(4)
         T[:3, :3] = rotation
-        for idx in range(steps):
-            alpha = (idx + 1) / steps
-            interp_pos = current_pos + (target_pos - current_pos) * alpha
-            T[:3, 3] = interp_pos
+        for point in trajectory:
+            T = point.pose_matrix
             self.robot._controller.set_cart_cmd(T)
             self.robot.step(viewer_sync=True)
             wrench = self.robot.get_wrench()
-            self._record_sample(phase, "CARTESIAN_IMPEDANCE", interp_pos, rotation, target_force_n, wrench,
+            self._record_sample(phase, "CARTESIAN_IMPEDANCE", T[:3, 3], rotation, target_force_n, wrench,
                                 target_blade_edge_positions, target_blade_reference_positions)
         self.robot.set_cart_impedance_state(0.5, 0.5, terminal_K, terminal_D)
         self.robot._controller.set_cart_cmd(T)
