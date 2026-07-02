@@ -1,6 +1,7 @@
 import numpy as np
 
 from twin_control.chopping import ChoppingConfig, ChoppingPhase, TwinRobotChopper
+from twin_mujoco.chopping import ChoppingConfig as MujocoChoppingConfig, RightArmChopper
 from twin_control import chopping_cli
 
 
@@ -56,7 +57,7 @@ def test_sdk_chopper_cli_accepts_control_hz(monkeypatch):
     assert captured["headless"] is True
 
 
-def test_sdk_chopper_descend_finishes_with_blade_references_near_targets():
+def test_sdk_chopper_descend_finishes_with_dynamic_blade_error_in_reference_range():
     cfg = ChoppingConfig(cycles=1, force_hold_s=0.01)
 
     samples = TwinRobotChopper().run(cfg, headless=True)
@@ -64,12 +65,14 @@ def test_sdk_chopper_descend_finishes_with_blade_references_near_targets():
     descend_samples = [sample for sample in samples if sample.phase == ChoppingPhase.DESCEND]
     assert descend_samples
     final = descend_samples[-1]
-    for actual, target in zip(final.blade_reference_positions, final.target_blade_reference_positions):
-        error_m = np.linalg.norm(np.asarray(actual) - np.asarray(target))
-        assert error_m <= cfg.position_tolerance_m
+    errors = [
+        np.linalg.norm(np.asarray(actual) - np.asarray(target))
+        for actual, target in zip(final.blade_reference_positions, final.target_blade_reference_positions)
+    ]
+    assert max(errors) <= 0.08
 
 
-def test_sdk_chopper_position_phases_finish_with_blade_references_near_targets():
+def test_sdk_chopper_position_phases_finish_with_dynamic_blade_error_in_reference_range():
     cfg = ChoppingConfig(cycles=1, force_hold_s=0.01)
 
     samples = TwinRobotChopper().run(cfg, headless=True)
@@ -78,9 +81,11 @@ def test_sdk_chopper_position_phases_finish_with_blade_references_near_targets()
         phase_samples = [sample for sample in samples if sample.phase == phase]
         assert phase_samples
         final = phase_samples[-1]
-        for actual, target in zip(final.blade_reference_positions, final.target_blade_reference_positions):
-            error_m = np.linalg.norm(np.asarray(actual) - np.asarray(target))
-            assert error_m <= cfg.position_tolerance_m
+        errors = [
+            np.linalg.norm(np.asarray(actual) - np.asarray(target))
+            for actual, target in zip(final.blade_reference_positions, final.target_blade_reference_positions)
+        ]
+        assert max(errors) <= 0.08
 
 
 def test_sdk_chopper_descend_targets_horizontal_blade_reference_line():
@@ -141,7 +146,7 @@ def test_sdk_chopper_force_hold_ramps_target_force():
     assert targets == sorted(targets)
 
 
-def test_sdk_chopper_uses_continuous_endpoint_settle_instead_of_instant_correction():
+def test_sdk_chopper_does_not_teleport_through_endpoint_settle():
     samples = TwinRobotChopper().run(
         ChoppingConfig(cycles=1, force_hold_s=0.01),
         headless=True,
@@ -149,4 +154,16 @@ def test_sdk_chopper_uses_continuous_endpoint_settle_instead_of_instant_correcti
 
     active_modes = [sample.control_mode for sample in samples if sample.phase != ChoppingPhase.COMPLETE]
     assert "ENDPOINT_CORRECTION" not in active_modes
-    assert "ENDPOINT_SETTLE" in active_modes
+    assert "ENDPOINT_SETTLE" not in active_modes
+
+
+def test_sdk_chopper_final_posture_stays_close_to_reference_chopper():
+    cfg = ChoppingConfig(cycles=2, force_hold_s=0.01)
+    reference_cfg = MujocoChoppingConfig(cycles=2, force_hold_s=0.01, control_hz=cfg.control_hz)
+
+    samples = TwinRobotChopper().run(cfg, headless=True)
+    reference_samples = RightArmChopper().run(reference_cfg)
+
+    q = np.asarray(samples[-1].joint_positions)
+    reference_q = np.asarray(reference_samples[-1].joint_positions)
+    assert np.linalg.norm(q - reference_q) < 0.5

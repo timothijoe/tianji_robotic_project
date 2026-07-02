@@ -434,54 +434,16 @@ class TwinRobotChopper:
         target_blade_edge_positions: tuple[tuple[float, float, float], ...],
         target_blade_reference_positions: tuple[tuple[float, float, float], ...],
     ) -> None:
-        """Hold the current target until terminal TCP pose error is acceptable."""
-        max_steps = max(1, int(np.ceil(cfg.settle_timeout_s / control_dt)))
-        target = np.asarray(target_pos, dtype=float).reshape(3)
-        rotation = np.asarray(target_rotation, dtype=float).reshape(3, 3)
-        T = np.eye(4)
-        T[:3, :3] = rotation
-        T[:3, 3] = target
-        joint_start = None
-        joint_target = None
-        if self.robot._kinematics is not None and self.robot._arm is not None:
-            ik = self.robot._kinematics.ik(T, self.robot._arm.joint_positions)
-            if ik.residual <= cfg.position_tolerance_m + cfg.orientation_tolerance_rad:
-                joint_start = self.robot._arm.joint_positions.copy()
-                joint_target = ik.joints_rad.copy()
-        if joint_start is not None and joint_target is not None:
-            for step_index in range(max_steps):
-                alpha = float(step_index + 1) / float(max_steps)
-                blend = 10.0 * alpha**3 - 15.0 * alpha**4 + 6.0 * alpha**5
-                self.robot.runtime.set_arm_positions(
-                    self.robot.arm_name,
-                    joint_start + blend * (joint_target - joint_start),
-                )
-                wrench = self.robot.get_wrench()
-                self._record_sample(phase, "ENDPOINT_SETTLE", target, rotation, target_force_n, wrench,
-                                    target_blade_edge_positions, target_blade_reference_positions)
-                if self.robot._viewer is not None:
-                    self.robot._viewer.sync()
-                latest = self.samples[-1]
-                blade_errors = [
-                    float(np.linalg.norm(np.asarray(actual) - np.asarray(goal)))
-                    for actual, goal in zip(
-                        latest.blade_reference_positions,
-                        latest.target_blade_reference_positions,
-                    )
-                ]
-                if max(blade_errors) <= cfg.position_tolerance_m:
-                    return
-            return
-        for step_index in range(max_steps):
-            actual_pos, actual_matrix = self.robot.get_tcp_pose()
-            position_error = float(np.linalg.norm(target - np.asarray(actual_pos, dtype=float).reshape(3)))
-            orientation_error = float(np.linalg.norm(rotation_error(actual_matrix[:3, :3], rotation)))
-            if position_error <= cfg.position_tolerance_m and orientation_error <= cfg.orientation_tolerance_rad:
-                return
-            self.robot.step(viewer_sync=True)
-            wrench = self.robot.get_wrench()
-            self._record_sample(phase, self.robot.control_mode, target, rotation, target_force_n, wrench,
-                                target_blade_edge_positions, target_blade_reference_positions)
+        """Avoid direct IK state correction after Cartesian motion.
+
+        The reference ``twin_mujoco`` chopper leaves the arm in the dynamically
+        reached Cartesian posture.  Forcing an IK endpoint solution here moves
+        the arm into a different null-space posture and makes the simulated
+        chopping motion look like an awkward reconfiguration.
+        """
+        del target_pos, target_rotation, phase, target_force_n, cfg, control_dt
+        del target_blade_edge_positions, target_blade_reference_positions
+        return None
 
     def _record_sample(
         self,
