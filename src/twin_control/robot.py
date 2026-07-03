@@ -295,13 +295,20 @@ class TwinRobot:
     # Command dispatch
     # ------------------------------------------------------------------
 
-    def set_joint_position_cmd(self, joints: Sequence[float]) -> None:
+    def set_joint_position_cmd(
+        self,
+        joints: Sequence[float],
+        velocities: Sequence[float] | None = None,
+    ) -> None:
         """Set joint-space position target (rad or deg per unit_mode)."""
         self._ensure_connected()
         q = np.asarray(joints, dtype=float).reshape(7)
+        qd = None if velocities is None else np.asarray(velocities, dtype=float).reshape(7)
         if self.unit_mode == "sdk":
             q = np.deg2rad(q)
-        self._controller.set_joint_cmd(q)
+            if qd is not None:
+                qd = np.deg2rad(qd)
+        self._controller.set_joint_cmd(q, qd)
 
     def set_force_cmd(self, force: float) -> None:
         """Set force target (Newtons)."""

@@ -171,18 +171,27 @@ class MujocoSdkRobot:
         )
         return True
 
-    def set_joint_position_cmd(self, arm: str, joint: Sequence[float]) -> bool:
+    def set_joint_position_cmd(
+        self,
+        arm: str,
+        joint: Sequence[float],
+        velocity: Sequence[float] | None = None,
+    ) -> bool:
         self._check_arm(arm)
         robot = self._require_robot()
         q_cmd = np.asarray(joint, dtype=float).reshape(7)
+        qd_cmd = None if velocity is None else np.asarray(velocity, dtype=float).reshape(7)
         self._joint_cmd_pos = q_cmd.tolist()
         if robot.state.name in ("CARTESIAN_IMPEDANCE", "FORCE"):
             pose = robot._kinematics.fk(q_cmd)[0]
             robot._controller.set_cart_cmd(pose)
             if robot._controller._mode == ControlMode.FORCE:
-                robot._controller.set_joint_cmd(np.deg2rad(q_cmd))
+                robot._controller.set_joint_cmd(
+                    np.deg2rad(q_cmd),
+                    None if qd_cmd is None else np.deg2rad(qd_cmd),
+                )
         else:
-            robot.set_joint_position_cmd(q_cmd)
+            robot.set_joint_position_cmd(q_cmd, qd_cmd)
         return True
 
     def set_force_cmd(self, arm: str, force: float) -> bool:

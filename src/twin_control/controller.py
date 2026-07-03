@@ -138,6 +138,7 @@ class UnifiedController:
         self._force_params = ForceControlParams()
 
         self._joint_target_rad: np.ndarray | None = None
+        self._joint_target_vel_rad_s = np.zeros(7)
         self._cart_target_matrix: np.ndarray | None = None
         self._force_target_n: float = 0.0
 
@@ -215,12 +216,21 @@ class UnifiedController:
     # Target commands
     # ------------------------------------------------------------------
 
-    def set_joint_cmd(self, target_joints_rad: np.ndarray) -> None:
+    def set_joint_cmd(
+        self,
+        target_joints_rad: np.ndarray,
+        target_velocities_rad_s: np.ndarray | None = None,
+    ) -> None:
         """Set joint-space target (radians). Also updates nullspace reference."""
         q = np.asarray(target_joints_rad, dtype=float).reshape(7)
-        if not np.all(np.isfinite(q)):
-            raise ValueError("target joints must be finite")
+        if target_velocities_rad_s is None:
+            qd = np.zeros(7)
+        else:
+            qd = np.asarray(target_velocities_rad_s, dtype=float).reshape(7)
+        if not np.all(np.isfinite(q)) or not np.all(np.isfinite(qd)):
+            raise ValueError("target joints and velocities must be finite")
         self._joint_target_rad = q.copy()
+        self._joint_target_vel_rad_s = qd.copy()
         self._nullspace_ref_rad = q.copy()
 
     def set_cart_cmd(self, target_pose_matrix: np.ndarray) -> None:
@@ -300,7 +310,7 @@ class UnifiedController:
             return bias
         K = np.asarray(self._joint_imp_params.stiffness, dtype=float).reshape(7)
         D = np.asarray(self._joint_imp_params.damping, dtype=float).reshape(7)
-        return K * (self._joint_target_rad - q) - D * qd + bias
+        return K * (self._joint_target_rad - q) + D * (self._joint_target_vel_rad_s - qd) + bias
 
     def _cartesian_impedance(
         self, q: np.ndarray, qd: np.ndarray, J: np.ndarray,

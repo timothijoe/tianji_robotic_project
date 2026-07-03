@@ -270,12 +270,17 @@ def _cut_cycle_progress(cycle_step: int, steps_per_cycle: int) -> tuple[float, f
     retract_steps = max(1, int(steps_per_cycle) - descent_steps)
     if cycle_step < descent_steps:
         denominator = max(descent_steps - 1, 1)
-        return float(cycle_step) / float(denominator), 0.0
+        return _smoothstep(float(cycle_step) / float(denominator)), 0.0
 
     retract_step = min(int(cycle_step) - descent_steps, retract_steps - 1)
     denominator = max(retract_steps - 1, 1)
-    retract_progress = float(retract_step) / float(denominator)
+    retract_progress = _smoothstep(float(retract_step) / float(denominator))
     return 1.0 - retract_progress, retract_progress
+
+
+def _smoothstep(value: float) -> float:
+    u = float(np.clip(value, 0.0, 1.0))
+    return u * u * (3.0 - 2.0 * u)
 
 
 def _clear_viewer_trace(viewer) -> None:

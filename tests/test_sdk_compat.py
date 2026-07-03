@@ -496,3 +496,160 @@ def test_ik_cart_impedance_showcase_cli_accepts_lateral_flag(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert "lateral: True" in result.stdout
+
+
+def test_ik_joint_impedance_showcase_tracks_ik_targets_with_joint_impedance():
+    demo_path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "DEMO_PYTHON_STYLE"
+        / "showcase_ik_joint_impedance.py"
+    )
+    spec = importlib.util.spec_from_file_location("_sdk_ik_joint_impedance_demo", demo_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(module)
+
+    result = module.run_demo(
+        backend="mujoco",
+        viewer=False,
+        realtime=False,
+        control_hz=250.0,
+        dz_mm=-5.0,
+        hold_s=0.5,
+        cycles=3,
+        lateral=True,
+        lateral_mm=10.0,
+    )
+
+    assert result["ik_success"]
+    assert result["execution_mode"] == "JOINT_IMPEDANCE_IK_OSCILLATION"
+    assert result["control_mode"] == "JOINT_IMPEDANCE"
+    assert result["motion_steps"] == 375
+    assert not result["self_collision_enabled"]
+
+    moving_y = np.asarray(result["target_y_trace_mm"], dtype=float)
+    moving_x = np.asarray(result["target_x_trace_mm"], dtype=float)
+    target_joint_trace = np.asarray(result["target_joint_trace_deg"], dtype=float)
+    assert target_joint_trace.shape == (375, 7)
+    assert np.ptp(moving_x) < 1e-6
+
+    steps_per_cycle = result["motion_steps"] // 3
+    for cycle_index in range(3):
+        cycle_y = moving_y[
+            cycle_index * steps_per_cycle : (cycle_index + 1) * steps_per_cycle
+        ]
+        descent_y = cycle_y[: steps_per_cycle // 2]
+        assert np.ptp(descent_y) < 1e-6
+        assert np.isclose(descent_y[0], moving_y[0] + 10.0 * cycle_index, atol=1e-6)
+
+    assert np.isclose(moving_y[-1], moving_y[0] + 30.0, atol=1e-6)
+
+    final_tcp_error_mm = np.array([
+        result["actual_x_trace_mm"][-1] - result["target_x_trace_mm"][-1],
+        result["actual_y_trace_mm"][-1] - result["target_y_trace_mm"][-1],
+        result["actual_z_trace_mm"][-1] - result["target_z_trace_mm"][-1],
+    ])
+    assert np.linalg.norm(final_tcp_error_mm) < 40.0
+
+def test_ik_joint_impedance_showcase_velocity_feedforward_reduces_tracking_error():
+    demo_path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "DEMO_PYTHON_STYLE"
+        / "showcase_ik_joint_impedance.py"
+    )
+    spec = importlib.util.spec_from_file_location("_sdk_ik_joint_impedance_demo_ff", demo_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(module)
+
+    common = dict(
+        backend="mujoco",
+        viewer=False,
+        realtime=False,
+        control_hz=250.0,
+        dz_mm=-40.0,
+        hold_s=1.0,
+        cycles=2,
+        lateral=True,
+        lateral_mm=10.0,
+    )
+    no_ff = module.run_demo(**common, velocity_ff=0.0)
+    with_ff = module.run_demo(**common, velocity_ff=0.8)
+
+    no_ff_target = np.column_stack([
+        no_ff["target_x_trace_mm"],
+        no_ff["target_y_trace_mm"],
+        no_ff["target_z_trace_mm"],
+    ])
+    no_ff_actual = np.column_stack([
+        no_ff["actual_x_trace_mm"],
+        no_ff["actual_y_trace_mm"],
+        no_ff["actual_z_trace_mm"],
+    ])
+    with_ff_target = np.column_stack([
+        with_ff["target_x_trace_mm"],
+        with_ff["target_y_trace_mm"],
+        with_ff["target_z_trace_mm"],
+    ])
+    with_ff_actual = np.column_stack([
+        with_ff["actual_x_trace_mm"],
+        with_ff["actual_y_trace_mm"],
+        with_ff["actual_z_trace_mm"],
+    ])
+
+    no_ff_rms = float(np.sqrt(np.mean((no_ff_actual - no_ff_target) ** 2)))
+    with_ff_rms = float(np.sqrt(np.mean((with_ff_actual - with_ff_target) ** 2)))
+    assert with_ff_rms < no_ff_rms * 0.8
+
+def test_ik_joint_impedance_path_tracking_reduces_lag_against_trajectory_mode():
+    demo_path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "DEMO_PYTHON_STYLE"
+        / "showcase_ik_joint_impedance.py"
+    )
+    spec = importlib.util.spec_from_file_location("_sdk_ik_joint_impedance_demo_path", demo_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(module)
+
+    common = dict(
+        backend="mujoco",
+        viewer=False,
+        realtime=False,
+        control_hz=250.0,
+        dz_mm=-40.0,
+        hold_s=1.0,
+        cycles=2,
+        lateral=True,
+        lateral_mm=10.0,
+        velocity_ff=0.8,
+    )
+    trajectory = module.run_demo(**common, tracking_mode="trajectory")
+    path = module.run_demo(
+        **common,
+        tracking_mode="path",
+        path_speed_mm_s=80.0,
+        lookahead_mm=8.0,
+        path_tolerance_mm=6.0,
+    )
+
+    def rms_error(result):
+        target = np.column_stack([
+            result["target_x_trace_mm"],
+            result["target_y_trace_mm"],
+            result["target_z_trace_mm"],
+        ])
+        actual = np.column_stack([
+            result["actual_x_trace_mm"],
+            result["actual_y_trace_mm"],
+            result["actual_z_trace_mm"],
+        ])
+        return float(np.sqrt(np.mean((actual - target) ** 2)))
+
+    assert path["tracking_mode"] == "path"
+    assert path["executed_steps"] > trajectory["executed_steps"]
+    assert rms_error(path) < rms_error(trajectory) * 0.75
+
