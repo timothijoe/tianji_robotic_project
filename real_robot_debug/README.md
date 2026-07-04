@@ -3,7 +3,7 @@
 This folder is for real-machine experiments only. It is intentionally separate
 from MuJoCo examples and starts from the robot's current feedback pose.
 
-Default position-mode chopping script:
+Default planned Cartesian MOVLA chopping script:
 
 ```bash
 python3 real_robot_debug/real_pln_cart_position_chop.py \
@@ -15,8 +15,30 @@ python3 real_robot_debug/real_pln_cart_position_chop.py \
   --cycles 5 \
   --lateral \
   --lateral-mm 10 \
-  --trace-csv /tmp/real_a_arm_trace.csv
+  --trace-csv /tmp/real_left_arm_trace.csv
 ```
+
+
+MuJoCo-like sampled IK position-mode chopping script:
+
+```bash
+python3 real_robot_debug/real_sampled_position_chop.py \
+  --robot-ip 192.168.1.190 \
+  --arm A \
+  --control-hz 250 \
+  --dz-mm -20 \
+  --hold-s 2.0 \
+  --cycles 5 \
+  --lateral \
+  --lateral-mm 10 \
+  --print-trajectory \
+  --trajectory-stride 10 \
+  --trace-csv /tmp/real_left_arm_sampled_trace.csv
+```
+
+This sampled entrypoint is closer to the MuJoCo Cartesian impedance demo: every
+control tick builds a TCP target, solves IK, and sends a joint position command
+when `--execute` is present. Use it when checking the down-up chopping shape.
 
 By default this is a dry run: it connects, initializes the planned Cartesian
 position-mode path with MOVLA, and writes trace rows, but does not send motion
@@ -32,7 +54,7 @@ python3 real_robot_debug/real_pln_cart_position_chop.py \
 
 Safety defaults:
 
-- arm: `A`
+- arm: `A` (left arm)
 - control frequency: `250 Hz`
 - vertical motion: `-20 mm`
 - cycle hold time: `2.0 s`

@@ -28,7 +28,7 @@
     <geom name="ground" type="plane" size="20 20 0.1" material="ground_mat" pos="0 0 0" />
     <light pos="0 -1 1.5" dir="0 1 -1" />
     <geom name="floor" type="plane" size="1.5 1.5 0.05" rgba="0.2 0.25 0.3 1" />
-    <geom name="chopping_board" type="box" pos="0.48 0 0.205" size="0.32 0.24 0.025" rgba="0.55 0.32 0.12 1" friction="1.0 0.03 0.003" solref="0.04 1" solimp="0.85 0.95 0.005" />
+    <geom name="chopping_board" type="box" pos="0.62 0 0.205" size="0.32 0.24 0.025" rgba="0.55 0.32 0.12 1" friction="1.0 0.03 0.003" solref="0.04 1" solimp="0.85 0.95 0.005" />
     <geom name="center_visual_console" type="box" pos="0.16 0 0.19" size="0.16 0.24 0.05" rgba="0.22 0.24 0.26 1" contype="0" conaffinity="0" />
     <body name="robot_base" pos="0 0 0.3">
       <geom type="mesh" rgba="1 1 1 1" mesh="BASE" />
@@ -87,15 +87,15 @@
               <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="U_Arm_Marvin_M6_S_CCS" />
               <body name="right_link5" pos="-0.018 0 0.314">
                 <inertial pos="-0.00036467 0.0001479 0.19902" mass="2.0095" fullinertia="0.08529 0.084873 0.0021133 -3.491e-05 -0.0001918 8.319e-05" />
-                <joint name="right_joint5" pos="0 0 0" axis="0 0 1" range="-3.11 3.11" actuatorfrcrange="-18 18" damping="1" frictionloss="0.5" />
+                <joint name="right_joint5" pos="0 0 0" axis="0 0 1" range="-3.11 3.11" actuatorfrcrange="-200 200" damping="1" frictionloss="0.5" />
                 <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="R_Arm_Marvin_M6_S_CCS" />
                 <body name="right_link6">
                   <inertial pos="-0.004911 0.00027206 -8.14e-05" mass="0.67002" fullinertia="0.00048938 0.0004162 0.00038542 -2.3e-06 2.16e-06 6.3e-07" />
-                  <joint name="right_joint6" pos="0 0 0" axis="0 -1 0" range="-1.0467 1.0467" actuatorfrcrange="-18 18" damping="1" frictionloss="0.5" />
+                  <joint name="right_joint6" pos="0 0 0" axis="0 -1 0" range="-1.0467 1.0467" actuatorfrcrange="-200 200" damping="1" frictionloss="0.5" />
                   <geom type="mesh" rgba="0.8 0.8 0.8 1" mesh="B_Arm_Marvin_M6_S_CCS" />
                   <body name="right_link7">
                     <inertial pos="0.044988 -4.226e-05 0.0055581" mass="0.31658" fullinertia="0.00038289 0.00133 0.0011774 -7.4e-07 -1.403e-05 -6.1e-07" />
-                    <joint name="right_joint7" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" actuatorfrcrange="-18 18" damping="0.5" frictionloss="0.3" />
+                    <joint name="right_joint7" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" actuatorfrcrange="-200 200" damping="0.5" frictionloss="0.3" />
                     <geom quat="0.000563312 0.706825 -0.000562864 0.707388" type="mesh" rgba="0.8 0.8 0.8 1" mesh="T_Arm_Marvin_M6_S_R_CCS" />
                     <!-- 末端法兰 body frame 标记: 红=+Z, 绿=+X, 蓝=+Y, 各长10cm -->
                     <site name="right_flange_z_arrow" type="box" pos="0 0 0.05" size="0.006 0.006 0.05" rgba="1 0 0 1" />
@@ -129,6 +129,12 @@
       </body>
     </body>
   </worldbody>
+  <contact>
+    <exclude body1="robot_base" body2="left_link1" />
+    <exclude body1="robot_base" body2="right_link1" />
+    <exclude body1="left_link5" body2="left_link7" />
+    <exclude body1="right_link5" body2="right_link7" />
+  </contact>
   <actuator>
     <motor name="act_left_joint1" joint="left_joint1" gear="1" ctrllimited="true" ctrlrange="-200 200" />
     <motor name="act_left_joint2" joint="left_joint2" gear="1" ctrllimited="true" ctrlrange="-200 200" />

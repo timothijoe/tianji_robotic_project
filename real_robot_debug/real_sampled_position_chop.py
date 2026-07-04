@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Real robot planned Cartesian position-mode chopping entrypoint.
+"""Real robot sampled IK position-mode chopping entrypoint.
 
-This is the position-mode wrapper for the left-arm chopping debug script. It
-forces the implementation to use the SDK MOVLA + setPln_Cart path, matching
-``test/showcase_pln_cart_positionMode.py``.
+This wrapper follows the MuJoCo chopping demo more closely than the MOVLA
+planned-Cartesian wrapper: it forces the implementation to generate a TCP target
+at every control tick, solve IK, and send joint position commands.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from real_robot_debug import real_ik_cart_impedance_lateral as impl
 
 def main(argv: list[str] | None = None) -> int:
     args = list(argv) if argv is not None else sys.argv[1:]
-    return impl.main([*args, "--command-mode", "pln-cart"])
+    return impl.main([*args, "--command-mode", "position"])
 
 
 if __name__ == "__main__":
