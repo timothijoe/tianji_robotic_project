@@ -53,6 +53,24 @@ RIGHT_ARM_REFERENCE_INIT_JOINTS: tuple[float, float, float, float, float, float,
     0.0,
 )
 LEFT_ARM_DEFAULT_INIT_JOINTS = mirror_right_to_left_joints(RIGHT_ARM_REFERENCE_INIT_JOINTS)
+DEFAULT_JOINT_IMPEDANCE_K: tuple[float, float, float, float, float, float, float] = (
+    8.0,
+    8.0,
+    8.0,
+    4.0,
+    2.0,
+    1.5,
+    1.0,
+)
+DEFAULT_JOINT_IMPEDANCE_D: tuple[float, float, float, float, float, float, float] = (
+    0.8,
+    0.8,
+    0.8,
+    0.6,
+    0.4,
+    0.3,
+    0.2,
+)
 
 
 @dataclass(frozen=True)
@@ -78,8 +96,10 @@ class MotionConfig:
     chop_axis: str = "y"
     lateral_axis: str = "x"
     lateral_phase: str = "separate"
-    vel_ratio: int = 10
-    acc_ratio: int = 10
+    vel_ratio: int = 100
+    acc_ratio: int = 100
+    joint_k: tuple[float, float, float, float, float, float, float] = DEFAULT_JOINT_IMPEDANCE_K
+    joint_d: tuple[float, float, float, float, float, float, float] = DEFAULT_JOINT_IMPEDANCE_D
     init_joints: tuple[float, float, float, float, float, float, float] | None = LEFT_ARM_DEFAULT_INIT_JOINTS
     init_timeout_s: float = 10.0
     init_tolerance_deg: float = 0.5
@@ -106,6 +126,19 @@ class PlannedSegment:
     end_xyzabc: np.ndarray
 
 
+def parse_seven_floats(value: str, flag_name: str) -> tuple[float, float, float, float, float, float, float]:
+    """Parse a strict seven-element comma-separated float tuple."""
+    try:
+        values = tuple(float(item.strip()) for item in str(value).split(",") if item.strip())
+    except ValueError as exc:
+        raise ValueError(f"{flag_name} must be seven comma-separated floats") from exc
+    if len(values) != 7:
+        raise ValueError(f"{flag_name} must contain 7 values")
+    if not all(math.isfinite(item) for item in values):
+        raise ValueError(f"{flag_name} must contain 7 finite values")
+    return values  # type: ignore[return-value]
+
+
 def parse_joints(value: str) -> tuple[float, float, float, float, float, float, float] | None:
     """Parse the ``--init-joints`` CLI value.
 
@@ -115,15 +148,17 @@ def parse_joints(value: str) -> tuple[float, float, float, float, float, float, 
     """
     if str(value).strip().lower() in ("", "none", "skip"):
         return None
-    try:
-        joints = tuple(float(item.strip()) for item in str(value).split(",") if item.strip())
-    except ValueError as exc:
-        raise ValueError("--init-joints must be seven comma-separated floats") from exc
-    if len(joints) != 7:
-        raise ValueError("--init-joints must contain 7 values")
-    if not all(math.isfinite(joint) for joint in joints):
-        raise ValueError("--init-joints must contain 7 finite values")
-    return joints  # type: ignore[return-value]
+    return parse_seven_floats(value, "--init-joints")
+
+
+def parse_joint_k(value: str) -> tuple[float, float, float, float, float, float, float]:
+    """Parse joint impedance stiffness values for ``--joint-k``."""
+    return parse_seven_floats(value, "--joint-k")
+
+
+def parse_joint_d(value: str) -> tuple[float, float, float, float, float, float, float]:
+    """Parse joint impedance damping values for ``--joint-d``."""
+    return parse_seven_floats(value, "--joint-d")
 
 
 def parse_args(argv: list[str] | None = None) -> MotionConfig:
@@ -144,10 +179,12 @@ def parse_args(argv: list[str] | None = None) -> MotionConfig:
     parser.add_argument("--lateral-phase", choices=("separate", "retract"), default="separate", help="When to apply lateral shift: after retracting, or during retract like the MuJoCo demo")
     parser.add_argument("--vel-ratio", type=int, default=10)
     parser.add_argument("--acc-ratio", type=int, default=10)
+    parser.add_argument("--joint-k", type=parse_joint_k, default=DEFAULT_JOINT_IMPEDANCE_K, help="Seven joint impedance stiffness values for --command-mode joint-impedance")
+    parser.add_argument("--joint-d", type=parse_joint_d, default=DEFAULT_JOINT_IMPEDANCE_D, help="Seven joint impedance damping values in [0, 1] for --command-mode joint-impedance")
     parser.add_argument("--init-joints", type=parse_joints, default=LEFT_ARM_DEFAULT_INIT_JOINTS, help="Seven comma-separated left-arm initialization joints in degrees; use 'none' to skip")
     parser.add_argument("--init-timeout-s", type=float, default=10.0)
     parser.add_argument("--init-tolerance-deg", type=float, default=0.5)
-    parser.add_argument("--command-mode", choices=("pln-cart", "position", "cart-impedance"), default="pln-cart")
+    parser.add_argument("--command-mode", choices=("pln-cart", "position", "cart-impedance", "joint-impedance"), default="pln-cart")
     parser.add_argument("--execute", action="store_true", help="Send joint commands to the real robot")
     parser.add_argument("--keep-enabled", action="store_true", help="Do not disable the arm at the end")
     parser.add_argument("--trace-csv", type=Path, default=None)
@@ -189,8 +226,14 @@ def validate_config(config: MotionConfig) -> None:
         raise ValueError("init-timeout-s must be positive")
     if config.init_tolerance_deg <= 0.0:
         raise ValueError("init-tolerance-deg must be positive")
-    if config.command_mode not in ("pln-cart", "position", "cart-impedance"):
-        raise ValueError("command-mode must be 'pln-cart', 'position', or 'cart-impedance'")
+    if config.command_mode not in ("pln-cart", "position", "cart-impedance", "joint-impedance"):
+        raise ValueError("command-mode must be 'pln-cart', 'position', 'cart-impedance', or 'joint-impedance'")
+    if len(config.joint_k) != 7 or len(config.joint_d) != 7:
+        raise ValueError("joint-k and joint-d must contain 7 values")
+    if not all(math.isfinite(value) and value >= 0.0 for value in config.joint_k):
+        raise ValueError("joint-k values must be finite and non-negative")
+    if not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in config.joint_d):
+        raise ValueError("joint-d values must be finite and in [0, 1]")
     axis_index(config.chop_axis)
     axis_index(config.lateral_axis)
     if config.chop_axis == config.lateral_axis and config.lateral:
@@ -420,6 +463,8 @@ def run_real_debug(config: MotionConfig) -> dict:
             targets = build_relative_targets(current_pose, config)
             if config.command_mode == "cart-impedance":
                 _configure_cartesian_impedance(robot, config, current_pose)
+            elif config.command_mode == "joint-impedance":
+                _configure_joint_impedance(robot, config)
             else:
                 _set_position_mode(robot, config)
 
@@ -442,9 +487,7 @@ def run_real_debug(config: MotionConfig) -> dict:
                     ref_joints = target_joints
                     last_target_joints = target_joints
                     if config.execute:
-                        robot.clear_set()
-                        robot.set_joint_cmd_pose(arm=config.arm, joints=target_joints)
-                        robot.send_cmd()
+                        _send_sampled_joint_command(robot, config, target_joints)
 
                 feedback = robot.subscribe(dcss)
                 actual_joints = list(feedback["outputs"][arm_index]["fb_joint_pos"])
@@ -740,6 +783,56 @@ def _wait_until_traj_idle(robot, dcss, arm_index: int, timeout_s: float) -> None
             return
         time.sleep(0.001)
     raise RuntimeError("planned Cartesian trajectory did not finish before timeout")
+
+
+def _send_sampled_joint_command(robot, config: MotionConfig, target_joints: Sequence[float]) -> None:
+    """Send one sampled IK joint target using the selected SDK command path."""
+    joints = [float(value) for value in target_joints]
+    robot.clear_set()
+    if config.command_mode == "joint-impedance" and hasattr(robot, "set_joint_position_cmd"):
+        robot.set_joint_position_cmd(config.arm, joints)
+    else:
+        robot.set_joint_cmd_pose(arm=config.arm, joints=joints)
+    robot.send_cmd()
+
+
+def _configure_joint_impedance(robot, config: MotionConfig) -> None:
+    """Configure SDK joint impedance mode for sampled IK joint targets.
+
+    Newer SDK wrappers expose ``set_imp_joint_state``. The real controller SDK
+    in this workspace exposes the lower-level sequence instead: torque state,
+    impedance type 1, velocity/acceleration limits, then joint K/D parameters.
+    """
+    joint_k = list(config.joint_k)
+    joint_d = list(config.joint_d)
+    if hasattr(robot, "set_imp_joint_state"):
+        robot.clear_set()
+        ok = robot.set_imp_joint_state(
+            arm=config.arm,
+            velRatio=int(config.vel_ratio),
+            AccRatio=int(config.acc_ratio),
+            K=joint_k,
+            D=joint_d,
+        )
+        if ok is False:
+            raise RuntimeError("failed to configure joint impedance mode")
+        _send_cmd_prefer_wait(robot)
+        time.sleep(0.2)
+        return
+
+    robot.clear_set()
+    robot.set_state(arm=config.arm, state=3)
+    robot.set_impedance_type(arm=config.arm, type=1)
+    robot.set_vel_acc(arm=config.arm, velRatio=int(config.vel_ratio), AccRatio=int(config.acc_ratio))
+    _send_cmd_prefer_wait(robot)
+    time.sleep(0.2)
+
+    robot.clear_set()
+    ok = robot.set_joint_kd_params(arm=config.arm, K=joint_k, D=joint_d)
+    if ok is False:
+        raise RuntimeError("failed to configure joint impedance K/D parameters")
+    _send_cmd_prefer_wait(robot)
+    time.sleep(0.2)
 
 
 def _configure_cartesian_impedance(robot, config: MotionConfig, current_pose: np.ndarray) -> None:

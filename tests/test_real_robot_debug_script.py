@@ -134,6 +134,181 @@ def test_real_ik_parse_args_supports_feedback_printing():
     assert config.feedback_stride == 4
 
 
+def test_real_ik_parse_args_supports_joint_impedance_mode_and_gains():
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+
+    config = module.parse_args([
+        "--command-mode",
+        "joint-impedance",
+        "--joint-k",
+        "1,2,3,4,5,6,7",
+        "--joint-d",
+        "0.1,0.2,0.3,0.4,0.5,0.6,0.7",
+    ])
+
+    assert config.command_mode == "joint-impedance"
+    assert config.joint_k == (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)
+    assert config.joint_d == (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)
+
+
+def test_configure_joint_impedance_uses_sdk_impedance_mode():
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+
+    class Robot:
+        def __init__(self):
+            self.calls = []
+
+        def clear_set(self):
+            self.calls.append(("clear_set",))
+
+        def set_imp_joint_state(self, arm, velRatio, AccRatio, K, D):
+            self.calls.append(("set_imp_joint_state", arm, velRatio, AccRatio, tuple(K), tuple(D)))
+            return True
+
+        def send_cmd_wait_response(self, timeout):
+            self.calls.append(("send_cmd_wait_response", timeout))
+            return 0
+
+    robot = Robot()
+    config = module.MotionConfig(
+        command_mode="joint-impedance",
+        vel_ratio=11,
+        acc_ratio=12,
+        joint_k=(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0),
+        joint_d=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7),
+    )
+
+    module._configure_joint_impedance(robot, config)
+
+    assert robot.calls == [
+        ("clear_set",),
+        ("set_imp_joint_state", "A", 11, 12, (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0), (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)),
+        ("send_cmd_wait_response", 100),
+    ]
+
+
+def test_configure_joint_impedance_supports_legacy_sdk_methods():
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+
+    class Robot:
+        def __init__(self):
+            self.calls = []
+
+        def clear_set(self):
+            self.calls.append(("clear_set",))
+
+        def set_state(self, arm, state):
+            self.calls.append(("set_state", arm, state))
+
+        def set_impedance_type(self, arm, type):
+            self.calls.append(("set_impedance_type", arm, type))
+
+        def set_vel_acc(self, arm, velRatio, AccRatio):
+            self.calls.append(("set_vel_acc", arm, velRatio, AccRatio))
+
+        def set_joint_kd_params(self, arm, K, D):
+            self.calls.append(("set_joint_kd_params", arm, tuple(K), tuple(D)))
+
+        def send_cmd_wait_response(self, timeout):
+            self.calls.append(("send_cmd_wait_response", timeout))
+            return 0
+
+    robot = Robot()
+    config = module.MotionConfig(
+        command_mode="joint-impedance",
+        vel_ratio=11,
+        acc_ratio=12,
+        joint_k=(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0),
+        joint_d=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7),
+    )
+
+    module._configure_joint_impedance(robot, config)
+
+    assert robot.calls == [
+        ("clear_set",),
+        ("set_state", "A", 3),
+        ("set_impedance_type", "A", 1),
+        ("set_vel_acc", "A", 11, 12),
+        ("send_cmd_wait_response", 100),
+        ("clear_set",),
+        ("set_joint_kd_params", "A", (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0), (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)),
+        ("send_cmd_wait_response", 100),
+    ]
+
+
+def test_send_sampled_joint_command_uses_joint_impedance_sdk_command():
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+
+    class Robot:
+        def __init__(self):
+            self.calls = []
+
+        def clear_set(self):
+            self.calls.append(("clear_set",))
+
+        def set_joint_position_cmd(self, arm, joints):
+            self.calls.append(("set_joint_position_cmd", arm, tuple(joints)))
+
+        def set_joint_cmd_pose(self, arm, joints):
+            self.calls.append(("set_joint_cmd_pose", arm, tuple(joints)))
+
+        def send_cmd(self):
+            self.calls.append(("send_cmd",))
+
+    robot = Robot()
+    config = module.MotionConfig(command_mode="joint-impedance")
+
+    module._send_sampled_joint_command(robot, config, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+
+    assert robot.calls == [
+        ("clear_set",),
+        ("set_joint_position_cmd", "A", (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)),
+        ("send_cmd",),
+    ]
+
+
+def test_send_sampled_joint_command_falls_back_to_legacy_joint_command():
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+
+    class Robot:
+        def __init__(self):
+            self.calls = []
+
+        def clear_set(self):
+            self.calls.append(("clear_set",))
+
+        def set_joint_cmd_pose(self, arm, joints):
+            self.calls.append(("set_joint_cmd_pose", arm, tuple(joints)))
+
+        def send_cmd(self):
+            self.calls.append(("send_cmd",))
+
+    robot = Robot()
+    config = module.MotionConfig(command_mode="joint-impedance")
+
+    module._send_sampled_joint_command(robot, config, [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+
+    assert robot.calls == [
+        ("clear_set",),
+        ("set_joint_cmd_pose", "A", (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)),
+        ("send_cmd",),
+    ]
+
+
+def test_joint_impedance_entrypoint_forces_joint_impedance_mode(monkeypatch):
+    module = importlib.import_module("real_robot_debug.real_sampled_joint_impedance_chop")
+    captured = {}
+
+    def fake_main(argv):
+        captured["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(module.impl, "main", fake_main)
+
+    assert module.main(["--robot-ip", "192.168.1.190"]) == 0
+    assert captured["argv"] == ["--robot-ip", "192.168.1.190", "--command-mode", "joint-impedance"]
+
+
 def test_planned_trajectory_rows_include_cartesian_pose_and_joints():
     module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
 
