@@ -29,3 +29,6 @@ Thumbs.db
 venv/
 .venv/
 env/
+
+# Local generated data
+data/

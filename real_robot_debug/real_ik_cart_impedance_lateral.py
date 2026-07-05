@@ -71,6 +71,7 @@ DEFAULT_JOINT_IMPEDANCE_D: tuple[float, float, float, float, float, float, float
     0.3,
     0.2,
 )
+DCSS_CMD_ARM0_GET_DATA_6FT = 116
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,9 @@ class MotionConfig:
     trajectory_stride: int = 1
     print_feedback: bool = False
     feedback_stride: int = 1
+    force_feedback: bool = True
+    print_force_feedback: bool = False
+    force_feedback_stride: int = 1
 
 
 @dataclass(frozen=True)
@@ -192,6 +196,9 @@ def parse_args(argv: list[str] | None = None) -> MotionConfig:
     parser.add_argument("--trajectory-stride", type=int, default=1, help="Print every Nth planned trajectory point")
     parser.add_argument("--print-feedback", action="store_true", help="Print target/actual Cartesian feedback while running")
     parser.add_argument("--feedback-stride", type=int, default=1, help="Print every Nth feedback sample")
+    parser.add_argument("--force-feedback", action=argparse.BooleanOptionalAction, default=True, help="Subscribe and record DCSS user-specified 6-axis force feedback")
+    parser.add_argument("--print-force-feedback", action="store_true", help="Print DCSS 6-axis force feedback while running")
+    parser.add_argument("--force-feedback-stride", type=int, default=1, help="Print every Nth force feedback sample")
     config = MotionConfig(**vars(parser.parse_args(argv)))
     validate_config(config)
     return config
@@ -244,6 +251,8 @@ def validate_config(config: MotionConfig) -> None:
         raise ValueError("trajectory-stride must be positive")
     if int(config.feedback_stride) <= 0:
         raise ValueError("feedback-stride must be positive")
+    if int(config.force_feedback_stride) <= 0:
+        raise ValueError("force-feedback-stride must be positive")
 
 
 def axis_index(axis: str) -> int:
@@ -412,6 +421,7 @@ def run_real_debug(config: MotionConfig) -> dict:
     trace_rows: list[dict] = []
     last_target_joints: list[float] | None = None
     connected = False
+    force_feedback_configured = False
 
     try:
         connected = bool(robot.connect(config.robot_ip))
@@ -421,6 +431,7 @@ def run_real_debug(config: MotionConfig) -> dict:
         _verify_frame_updates(robot, dcss, arm_index)
         robot.log_switch("1")
         robot.local_log_switch("1")
+        force_feedback_configured = _configure_force_feedback(robot, config)
 
         kine.log_switch(0)
         kine_config = kine.load_config(arm_type=arm_index, config_path=str(config.kine_config))
@@ -470,6 +481,7 @@ def run_real_debug(config: MotionConfig) -> dict:
 
             ref_joints = list(current_joints)
             period_s = 1.0 / float(config.control_hz)
+            trace_start_time_s = time.time()
             for step_index, target_xyzabc in enumerate(targets):
                 target_matrix = kine.xyzabc_to_mat4x4(target_xyzabc.tolist())
                 ik_para = FX_InvKineSolvePara()
@@ -490,11 +502,35 @@ def run_real_debug(config: MotionConfig) -> dict:
                         _send_sampled_joint_command(robot, config, target_joints)
 
                 feedback = robot.subscribe(dcss)
+                sample_time_s = time.time()
                 actual_joints = list(feedback["outputs"][arm_index]["fb_joint_pos"])
+                actual_joint_velocities = list(feedback["outputs"][arm_index].get("fb_joint_vel", []))
+                actual_joint_torques = list(feedback["outputs"][arm_index].get("fb_joint_sToq", []))
                 actual_pose = np.asarray(kine.mat4x4_to_xyzabc(kine.fk(actual_joints)), dtype=float)
                 if config.print_feedback and step_index % int(config.feedback_stride) == 0:
                     _print_feedback_row(step_index, target_xyzabc, actual_pose)
-                trace_rows.append(_trace_row(step_index, target_xyzabc, actual_pose, target_joints, actual_joints, ik_success))
+                force_feedback = _force_feedback_from_feedback(feedback, arm_index) if config.force_feedback else None
+                if (
+                    config.print_force_feedback
+                    and force_feedback is not None
+                    and step_index % int(config.force_feedback_stride) == 0
+                ):
+                    _print_force_feedback_row(step_index, force_feedback)
+                trace_rows.append(
+                    _trace_row(
+                        step_index,
+                        target_xyzabc,
+                        actual_pose,
+                        target_joints,
+                        actual_joints,
+                        ik_success,
+                        timestamp_s=sample_time_s,
+                        elapsed_s=sample_time_s - trace_start_time_s,
+                        actual_joint_velocities=actual_joint_velocities,
+                        actual_joint_torques=actual_joint_torques,
+                        force_feedback=force_feedback,
+                    )
+                )
                 time.sleep(period_s)
 
         if config.trace_csv is not None:
@@ -507,6 +543,7 @@ def run_real_debug(config: MotionConfig) -> dict:
             "execute": config.execute,
             "command_mode": config.command_mode,
             "initialized": initialized,
+            "force_feedback_configured": force_feedback_configured,
             "start_joints": start_joints,
             "final_joints": list(actual_joints) if trace_rows else start_joints,
         }
@@ -867,6 +904,46 @@ def _configure_cartesian_impedance(robot, config: MotionConfig, current_pose: np
     time.sleep(0.2)
 
 
+def _configure_force_feedback(robot, config: MotionConfig) -> bool:
+    """Select the DCSS user-specified data channel for A-arm 6-axis force."""
+    if not config.force_feedback:
+        return False
+    setter = getattr(robot, "set_user_specified_data", None)
+    if setter is None:
+        print(
+            "warning: robot SDK has no set_user_specified_data; "
+            "recording est_joint_firc_dot without switching DCSS user data channel",
+            file=sys.stderr,
+        )
+        return False
+    ok = setter(config.arm, DCSS_CMD_ARM0_GET_DATA_6FT)
+    if ok is False:
+        raise RuntimeError("failed to configure DCSS 6-axis force feedback channel")
+    return True
+
+
+def _force_feedback_from_feedback(feedback: dict, arm_index: int) -> tuple[float, float, float, float, float, float] | None:
+    """Extract the six-axis force/torque values mapped by set_user_specified_data."""
+    try:
+        values = feedback["outputs"][arm_index]["est_joint_firc_dot"][:6]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if len(values) < 6:
+        return None
+    return tuple(float(value) for value in values[:6])  # type: ignore[return-value]
+
+
+def _print_force_feedback_row(step_index: int, force_feedback: Sequence[float]) -> None:
+    """Print one six-axis force/torque feedback sample."""
+    fx, fy, fz, tx, ty, tz = [float(value) for value in list(force_feedback)[:6]]
+    print(
+        "wrench_6ft: "
+        f"step={int(step_index)},"
+        f"fx={fx:.6f},fy={fy:.6f},fz={fz:.6f},"
+        f"tx={tx:.6f},ty={ty:.6f},tz={tz:.6f}"
+    )
+
+
 def _print_feedback_row(step_index: int, target_xyzabc: np.ndarray, actual_xyzabc: np.ndarray) -> None:
     """Print target/actual Cartesian feedback for live debugging."""
     target = np.asarray(target_xyzabc, dtype=float).reshape(6)
@@ -915,15 +992,31 @@ def _trace_row(
     target_joints: Sequence[float],
     actual_joints: Sequence[float],
     ik_success: bool,
+    timestamp_s: float | None = None,
+    elapsed_s: float | None = None,
+    actual_joint_velocities: Sequence[float] | None = None,
+    actual_joint_torques: Sequence[float] | None = None,
+    force_feedback: Sequence[float] | None = None,
 ) -> dict:
     """Create one CSV row comparing target pose/joints with feedback pose/joints."""
     row = {"step": int(step_index), "ik_success": bool(ik_success)}
+    if timestamp_s is not None:
+        row["timestamp_s"] = float(timestamp_s)
+    if elapsed_s is not None:
+        row["elapsed_s"] = float(elapsed_s)
     for i, name in enumerate(("x", "y", "z", "a", "b", "c")):
         row[f"target_{name}"] = float(target_xyzabc[i])
         row[f"actual_{name}"] = float(actual_xyzabc[i])
+    velocities = list(actual_joint_velocities or [])
+    torques = list(actual_joint_torques or [])
     for i in range(7):
         row[f"target_q_{i}"] = float(target_joints[i]) if i < len(target_joints) else 0.0
         row[f"actual_q_{i}"] = float(actual_joints[i]) if i < len(actual_joints) else 0.0
+        row[f"actual_qd_{i}"] = float(velocities[i]) if i < len(velocities) else 0.0
+        row[f"actual_tau_{i}"] = float(torques[i]) if i < len(torques) else 0.0
+    if force_feedback is not None:
+        for name, value in zip(("force_fx", "force_fy", "force_fz", "torque_tx", "torque_ty", "torque_tz"), force_feedback):
+            row[name] = float(value)
     return row
 
 

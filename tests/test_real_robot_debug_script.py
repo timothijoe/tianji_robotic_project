@@ -134,6 +134,16 @@ def test_real_ik_parse_args_supports_feedback_printing():
     assert config.feedback_stride == 4
 
 
+def test_real_ik_parse_args_supports_force_feedback_printing():
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+
+    config = module.parse_args(["--print-force-feedback", "--force-feedback-stride", "5"])
+
+    assert config.force_feedback is True
+    assert config.print_force_feedback is True
+    assert config.force_feedback_stride == 5
+
+
 def test_real_ik_parse_args_supports_joint_impedance_mode_and_gains():
     module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
 
@@ -450,6 +460,91 @@ def test_sampled_position_entrypoint_forces_position_mode(monkeypatch):
 
     assert module.main(["--robot-ip", "192.168.1.190"]) == 0
     assert captured["argv"] == ["--robot-ip", "192.168.1.190", "--command-mode", "position"]
+
+
+def test_configure_force_feedback_sets_user_specified_6ft_channel():
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+
+    class Robot:
+        def __init__(self):
+            self.calls = []
+
+        def set_user_specified_data(self, arm, command):
+            self.calls.append(("set_user_specified_data", arm, command))
+            return True
+
+    robot = Robot()
+
+    assert module._configure_force_feedback(robot, module.MotionConfig(arm="A")) is True
+    assert robot.calls == [("set_user_specified_data", "A", 116)]
+
+
+def test_force_feedback_from_feedback_reads_est_joint_firc_dot():
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+    feedback = {"outputs": [{"est_joint_firc_dot": [1, 2, 3, 4, 5, 6, 116]}]}
+
+    force = module._force_feedback_from_feedback(feedback, 0)
+
+    assert force == (1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+
+
+def test_trace_row_includes_timestamp_joint_velocity_and_torque():
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+
+    row = module._trace_row(
+        step_index=3,
+        target_xyzabc=np.array((10.0, 20.0, 30.0, 1.0, 2.0, 3.0), dtype=float),
+        actual_xyzabc=np.array((11.0, 21.0, 31.0, 1.5, 2.5, 3.5), dtype=float),
+        target_joints=[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0],
+        actual_joints=[11.0, 21.0, 31.0, 41.0, 51.0, 61.0, 71.0],
+        ik_success=True,
+        timestamp_s=123.456,
+        elapsed_s=1.25,
+        actual_joint_velocities=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+        actual_joint_torques=[1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7],
+    )
+
+    assert row["timestamp_s"] == 123.456
+    assert row["elapsed_s"] == 1.25
+    assert row["target_x"] == 10.0
+    assert row["actual_x"] == 11.0
+    assert row["actual_q_6"] == 71.0
+    assert row["actual_qd_0"] == 0.1
+    assert row["actual_qd_6"] == 0.7
+    assert row["actual_tau_0"] == 1.1
+    assert row["actual_tau_6"] == 1.7
+
+
+def test_trace_row_includes_force_feedback_when_available():
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+
+    row = module._trace_row(
+        step_index=1,
+        target_xyzabc=np.zeros(6),
+        actual_xyzabc=np.ones(6),
+        target_joints=[0.0] * 7,
+        actual_joints=[1.0] * 7,
+        ik_success=True,
+        force_feedback=(1.0, 2.0, 3.0, 4.0, 5.0, 6.0),
+    )
+
+    assert row["force_fx"] == 1.0
+    assert row["force_fy"] == 2.0
+    assert row["force_fz"] == 3.0
+    assert row["torque_tx"] == 4.0
+    assert row["torque_ty"] == 5.0
+    assert row["torque_tz"] == 6.0
+
+
+def test_print_force_feedback_row(capsys):
+    module = importlib.import_module("real_robot_debug.real_ik_cart_impedance_lateral")
+
+    module._print_force_feedback_row(7, (1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
+
+    assert capsys.readouterr().out.strip() == (
+        "wrench_6ft: step=7,fx=1.000000,fy=2.000000,fz=3.000000,"
+        "tx=4.000000,ty=5.000000,tz=6.000000"
+    )
 
 
 def test_sampled_trajectory_row_includes_cartesian_pose_and_joints():

@@ -3,47 +3,52 @@
 This folder is for real-machine experiments only. It is intentionally separate
 from MuJoCo examples and starts from the robot's current feedback pose.
 
-Default planned Cartesian MOVLA chopping script:
+## Recommended Real Run
+
+Use this command for the current left-arm sampled IK joint-impedance chopping
+run. It initializes SDK arm `A`, chops along real-robot `+Y` downward, shifts on
+`Z`, prints Cartesian and six-axis force feedback, and writes the full telemetry
+CSV.
 
 ```bash
-python3 real_robot_debug/real_pln_cart_position_chop.py \
+PYTHONPATH=. python3 real_robot_debug/real_sampled_joint_impedance_chop.py \
   --robot-ip 192.168.1.190 \
   --arm A \
+  --init-joints "112.46,-51.20,-85.44,-72.70, 47.48, -12.84, 35.14" \
+  --execute \
   --control-hz 250 \
-  --dz-mm -20 \
+  --dz-mm -40 \
   --hold-s 2.0 \
-  --cycles 5 \
+  --cycles 2 \
   --lateral \
   --lateral-mm 10 \
-  --trace-csv /tmp/real_left_arm_trace.csv
+  --chop-axis y \
+  --lateral-axis z \
+  --lateral-phase separate \
+  --joint-k "8,8,8,4,2,1.5,1" \
+  --joint-d "0.8,0.8,0.8,0.6,0.4,0.3,0.2" \
+  --print-feedback \
+  --feedback-stride 25 \
+  --print-force-feedback \
+  --force-feedback-stride 25 \
+  --trace-csv /home/zhoutong/catkin_robotic_ws/cook_proj/tianji_robotic_project/data/tmp/real_left_arm_joint_impedance_trace.csv
 ```
 
+The trace CSV records timestamped telemetry:
 
-MuJoCo-like sampled IK position-mode chopping script:
+- `timestamp_s`, `elapsed_s`
+- target and actual Cartesian pose: `target_x/y/z/a/b/c`, `actual_x/y/z/a/b/c`
+- target and actual joint positions: `target_q_0..6`, `actual_q_0..6`
+- actual joint velocities and torques: `actual_qd_0..6`, `actual_tau_0..6`
+- six-axis force/torque feedback: `force_fx/fy/fz`, `torque_tx/ty/tz`
 
-```bash
-python3 real_robot_debug/real_sampled_position_chop.py \
-  --robot-ip 192.168.1.190 \
-  --arm A \
-  --control-hz 250 \
-  --dz-mm -20 \
-  --hold-s 2.0 \
-  --cycles 5 \
-  --lateral \
-  --lateral-mm 10 \
-  --print-trajectory \
-  --trajectory-stride 10 \
-  --trace-csv /tmp/real_left_arm_sampled_trace.csv
-```
+## Joint-Impedance Variants
 
-This sampled entrypoint is closer to the MuJoCo Cartesian impedance demo: every
-control tick builds a TCP target, solves IK, and sends a joint position command
-when `--execute` is present. Use it when checking the down-up chopping shape.
-
-Sampled IK joint-impedance chopping script:
+Same controller as the recommended command, but with the previous initial pose,
+`Y` chopping and `X` lateral shift.
 
 ```bash
-python3 real_robot_debug/real_sampled_joint_impedance_chop.py \
+PYTHONPATH=. python3 real_robot_debug/real_sampled_joint_impedance_chop.py \
   --robot-ip 192.168.1.190 \
   --arm A \
   --init-joints "109.81,-62.66,-95.69,-93.79,63.32,-2.76,12.42" \
@@ -61,34 +66,93 @@ python3 real_robot_debug/real_sampled_joint_impedance_chop.py \
   --joint-d "0.8,0.8,0.8,0.6,0.4,0.3,0.2" \
   --print-feedback \
   --feedback-stride 25 \
+  --print-force-feedback \
+  --force-feedback-stride 25 \
   --trace-csv /tmp/real_left_arm_joint_impedance_trace.csv
 ```
 
-This mode uses the same Cartesian target generation and IK as the sampled
-position script, but switches the SDK to joint impedance and sends each IK
-solution with `set_joint_position_cmd`. The initialization move still uses
-position mode before joint impedance is enabled.
+Use `--lateral-phase retract` if you intentionally want lateral motion during
+the upward/retract stroke. The default `separate` mode returns to the upper
+position first, then shifts laterally.
 
-By default this is a dry run: it connects, initializes the planned Cartesian
-position-mode path with MOVLA, and writes trace rows, but does not send motion
-commands. Add `--execute` only when the workspace is clear and the robot is ready.
-The execute path first moves the arm to `--init-joints` and then repeats the
-descend/retract chopping motion.
+## Sampled Position Mode
+
+This is useful for comparing against the joint-impedance run. It uses the same
+sampled Cartesian target generation and IK, but sends sampled joint targets in
+position mode.
 
 ```bash
-python3 real_robot_debug/real_pln_cart_position_chop.py \
+PYTHONPATH=. python3 real_robot_debug/real_sampled_position_chop.py \
   --robot-ip 192.168.1.190 \
-  --execute
+  --arm A \
+  --init-joints "109.81,-62.66,-95.69,-93.79,63.32,-2.76,12.42" \
+  --execute \
+  --control-hz 250 \
+  --dz-mm -20 \
+  --hold-s 2.0 \
+  --cycles 2 \
+  --lateral \
+  --lateral-mm 10 \
+  --chop-axis y \
+  --lateral-axis x \
+  --lateral-phase separate \
+  --print-feedback \
+  --feedback-stride 25 \
+  --print-force-feedback \
+  --force-feedback-stride 25 \
+  --trace-csv /tmp/real_left_arm_sampled_position_trace.csv
 ```
 
-Safety defaults:
+## Planned Cartesian MOVLA Mode
 
-- arm: `A` (left arm)
-- control frequency: `250 Hz`
-- vertical motion: `-20 mm`
-- cycle hold time: `2.0 s`
-- cycles: `5`
-- lateral step: `10 mm`
-- velocity/acceleration ratio: `10`
+This is the coarser planned Cartesian path. It uses MOVLA segments rather than
+sampled IK targets at every control tick.
 
-The script rejects vertical motion above 80 mm and lateral step above 50 mm.
+```bash
+PYTHONPATH=. python3 real_robot_debug/real_pln_cart_position_chop.py \
+  --robot-ip 192.168.1.190 \
+  --arm A \
+  --execute \
+  --control-hz 250 \
+  --dz-mm -20 \
+  --hold-s 2.0 \
+  --cycles 5 \
+  --lateral \
+  --lateral-mm 10 \
+  --chop-axis y \
+  --lateral-axis x \
+  --trace-csv /tmp/real_left_arm_pln_cart_trace.csv
+```
+
+## Offline Planning Check
+
+This does not connect to the robot. It uses FK from the initial joint pose,
+generates sampled Cartesian targets, runs IK, and prints/writes the theoretical
+Cartesian and joint trajectory.
+
+```bash
+PYTHONPATH=. python3 real_robot_debug/plan_sampled_ik_chop.py \
+  --init-joints "112.46,-51.20,-85.44,-72.70,47.48,-12.84,35.14" \
+  --control-hz 250 \
+  --dz-mm -40 \
+  --hold-s 2.0 \
+  --cycles 2 \
+  --lateral \
+  --lateral-mm 10 \
+  --chop-axis y \
+  --lateral-axis z \
+  --lateral-phase separate \
+  --stride 25 \
+  --output-csv /tmp/planned_left_arm_joint_impedance_shape.csv
+```
+
+## Notes
+
+- SDK arm `A` is the left arm on this robot.
+- In the real robot frame used here, `+Y` is downward. The scripts treat
+  `--dz-mm -40` as a 40 mm downward chop when `--chop-axis y` is used.
+- `--lateral-axis z` shifts along the arm-direction axis; `--lateral-axis x`
+  shifts forward/backward.
+- `--execute` sends commands to the real robot. Omit it for dry-run planning
+  and logging setup only.
+- The script rejects vertical motion above 80 mm and lateral step above 50 mm.
