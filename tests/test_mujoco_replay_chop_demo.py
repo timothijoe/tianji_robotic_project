@@ -37,6 +37,16 @@ def test_replay_demo_parse_args_exposes_replay_controls():
     assert args.seed == 42
 
 
+def test_replay_demo_parse_args_exposes_viewer_controls():
+    module = _load_demo()
+
+    args = module.parse_args(["--viewer", "--viewer-sync-stride", "5", "--realtime"])
+
+    assert args.viewer is True
+    assert args.viewer_sync_stride == 5
+    assert args.realtime is True
+
+
 def test_replay_demo_builds_planner_and_replay_config_from_args():
     module = _load_demo()
     args = module.parse_args([

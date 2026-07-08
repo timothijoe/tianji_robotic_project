@@ -6,9 +6,12 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+import time
 from pathlib import Path
 from typing import Sequence
 
+import mujoco
+import mujoco.viewer
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +23,7 @@ from twin_control.chopping import RIGHT_CHOPPING_HOME_RAD
 from twin_control.replay import JointReplayConfig, JointReplayExecutor
 from twin_control.sampled_planner import SampledChopConfig, build_sampled_cartesian_targets
 from twin_control.sdk_kine import FX_InvKineSolvePara, MujocoKine
+from twin_control.trail import _init_sphere_geom
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -49,6 +53,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--csv", type=Path, default=None)
     parser.add_argument("--print-feedback", action="store_true")
     parser.add_argument("--feedback-stride", type=int, default=25)
+    parser.add_argument("--viewer", action="store_true", help="Open a MuJoCo passive viewer and replay actual joints visually.")
+    parser.add_argument("--viewer-sync-stride", type=int, default=1, help="Sync the viewer every N replay steps.")
+    parser.add_argument("--realtime", action="store_true", help="Sleep by dt_s between viewer frames.")
     return parser.parse_args(argv)
 
 
@@ -103,6 +110,26 @@ def run_replay(args: argparse.Namespace) -> list[dict[str, float | int | bool]]:
         jacobian=lambda joints: np.asarray(kine.joints2JacobMatrix(joints), dtype=float).reshape(6, 7),
     )
 
+    viewer = None
+    try:
+        if args.viewer:
+            _set_runtime_arm_positions(kine.runtime, args.arm, start_joints)
+            viewer = mujoco.viewer.launch_passive(kine.runtime.model, kine.runtime.data)
+            _configure_viewer_camera(viewer)
+        return _run_replay_loop(args, kine, targets, executor, start_joints, viewer)
+    finally:
+        if viewer is not None:
+            viewer.close()
+
+
+def _run_replay_loop(
+    args: argparse.Namespace,
+    kine: MujocoKine,
+    targets,
+    executor: JointReplayExecutor,
+    start_joints: np.ndarray,
+    viewer,
+) -> list[dict[str, float | int | bool]]:
     ref_joints = start_joints.copy()
     rows: list[dict[str, float | int | bool]] = []
     for target in targets:
@@ -116,6 +143,8 @@ def run_replay(args: argparse.Namespace) -> list[dict[str, float | int | bool]]:
         actual_pose = np.asarray(kine.mat4x4_to_xyzabc(sample.tcp_pose), dtype=float).reshape(6)
         row = _trace_row(target.step_index, target.xyzabc, actual_pose, target_joints, sample, ik_success)
         rows.append(row)
+        if viewer is not None:
+            _update_viewer(args, kine, viewer, sample, target.xyzabc, actual_pose)
         if args.print_feedback and target.step_index % max(1, int(args.feedback_stride)) == 0:
             print(
                 "feedback: "
@@ -139,6 +168,44 @@ def _start_joints_deg(arm: str) -> np.ndarray:
     if arm == "B":
         return np.rad2deg(RIGHT_CHOPPING_HOME_RAD).astype(float)
     return np.zeros(7, dtype=float)
+
+
+def _set_runtime_arm_positions(runtime, arm: str, joints_deg: np.ndarray) -> None:
+    arm_name = "left" if arm == "A" else "right"
+    runtime.set_arm_positions(arm_name, np.deg2rad(np.asarray(joints_deg, dtype=float).reshape(7)))
+
+
+def _update_viewer(args: argparse.Namespace, kine: MujocoKine, viewer, sample, target_xyzabc: np.ndarray, actual_xyzabc: np.ndarray) -> None:
+    _set_runtime_arm_positions(kine.runtime, args.arm, sample.actual_joints)
+    if sample.step_index % max(1, int(args.viewer_sync_stride)) == 0:
+        _append_trace_markers(viewer, target_xyzabc[:3] * 0.001, actual_xyzabc[:3] * 0.001)
+        viewer.sync()
+        if args.realtime:
+            time.sleep(1.0 / float(args.control_hz))
+
+
+def _append_trace_markers(viewer, target_m: np.ndarray, actual_m: np.ndarray) -> None:
+    if viewer is None or viewer.user_scn is None:
+        return
+    with viewer.lock():
+        for position, rgba, size in (
+            (np.asarray(target_m, dtype=float).reshape(3), np.array((0.0, 0.85, 1.0, 0.9)), 0.01),
+            (np.asarray(actual_m, dtype=float).reshape(3), np.array((1.0, 0.45, 0.0, 0.9)), 0.008),
+        ):
+            if viewer.user_scn.ngeom >= viewer.user_scn.maxgeom:
+                return
+            geom = viewer.user_scn.geoms[viewer.user_scn.ngeom]
+            _init_sphere_geom(geom, position, size, rgba)
+            viewer.user_scn.ngeom += 1
+
+
+def _configure_viewer_camera(viewer) -> None:
+    if not hasattr(viewer, "cam"):
+        return
+    viewer.cam.lookat[:] = (0.4, 0.0, 0.45)
+    viewer.cam.distance = 1.25
+    viewer.cam.azimuth = 155
+    viewer.cam.elevation = -25
 
 
 def _trace_row(
