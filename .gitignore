@@ -33,3 +33,7 @@ env/
 
 # Local generated data
 data/
+
+# Simulation environment and runtime output
+*.csv
+logs/
