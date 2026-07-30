@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 from typing import Sequence
 
 import mujoco
@@ -65,6 +66,8 @@ class RightArmRobot:
             mujoco.mj_step(self.sim.model, self.sim.data)
         self._require_finite_state()
         self._sync_viewer()
+        if self._viewer is not None:
+            time.sleep(float(control_dt_s))
 
     @property
     def joint_positions(self) -> np.ndarray:

@@ -88,3 +88,23 @@ def test_reset_holds_the_left_arm_and_exposes_right_arm_state():
 
     np.testing.assert_allclose(robot.sim.data.ctrl[robot.sim.left.actuator_ids], left_hold)
     robot.close()
+
+
+def test_viewer_step_is_paced_in_real_time(monkeypatch):
+    robot = RightArmRobot()
+
+    class FakeViewer:
+        def sync(self):
+            pass
+
+        def close(self):
+            pass
+
+    sleeps = []
+    robot._viewer = FakeViewer()
+    monkeypatch.setattr("twin_sim.robot.time.sleep", sleeps.append)
+
+    robot.step(0.002)
+
+    assert sleeps == [0.002]
+    robot.close()
