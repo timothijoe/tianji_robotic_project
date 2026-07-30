@@ -9,12 +9,21 @@ from twin_sim.force_monitor import ForceMonitor
 from twin_sim.kinematics import Kinematics
 from twin_sim.logging import CsvLogger, SimulationSample
 from twin_sim.robot import RIGHT_HOME_RAD, RightArmRobot
-from twin_sim.trajectory import TrajectoryPoint, cartesian_trajectory
+from twin_sim.trajectory import (
+    TrajectoryPoint,
+    cartesian_trajectory,
+    joint_trajectory,
+)
+
+
+CHOP_READY_RAD = RIGHT_HOME_RAD.copy()
+CHOP_READY_RAD[6] = 0.36
 
 
 @dataclass(frozen=True)
 class ChopConfig:
     control_dt_s: float = 0.01
+    orient_duration_s: float = 1.2
     approach_duration_s: float = 1.0
     descent_duration_s: float = 1.0
     hold_duration_s: float = 0.2
@@ -54,7 +63,7 @@ def run_chop(
             robot.validate_targets(
                 [
                     point.joints_rad
-                    for phase in ("APPROACH", "DESCEND", "RETRACT")
+                    for phase in ("ORIENT", "APPROACH", "DESCEND", "RETRACT")
                     for point in trajectories[phase]
                 ]
             )
@@ -77,7 +86,11 @@ def run_chop(
                         phase=phase,
                         target_joints_rad=point.joints_rad.copy(),
                         actual_joints_rad=robot.joint_positions,
-                        target_pose=point.target_pose.copy(),
+                        target_pose=(
+                            point.target_pose.copy()
+                            if point.target_pose is not None
+                            else kinematics.fk(point.joints_rad)
+                        ),
                         actual_pose=kinematics.fk(robot.joint_positions),
                         raw_force_n=force.raw_force_n,
                         filtered_force_n=force.filtered_force_n,
@@ -86,6 +99,7 @@ def run_chop(
                     samples.append(sample)
                     csv_logger.write(sample)
 
+            execute("ORIENT", trajectories["ORIENT"][1:])
             execute("APPROACH", trajectories["APPROACH"][1:])
             execute("DESCEND", trajectories["DESCEND"][1:])
             hold_count = int(round(config.hold_duration_s / config.control_dt_s))
@@ -126,15 +140,22 @@ def _preflight(
     board_id = robot.sim.require_geom("chopping_board")
     blade_id = robot.sim.require_site("right_blade_edge_bot")
     board_top = float(data.geom_xpos[board_id, 2] + model.geom_size[board_id, 2])
-    initial_blade_z = float(data.site_xpos[blade_id, 2])
-    initial_pose = kinematics.fk(RIGHT_HOME_RAD)
+    with kinematics._configuration(CHOP_READY_RAD):
+        initial_blade_z = float(data.site_xpos[blade_id, 2])
+    initial_pose = kinematics.fk(CHOP_READY_RAD)
     safe_pose = initial_pose.copy()
     safe_pose[2, 3] += board_top + config.safe_clearance_m - initial_blade_z
     contact_pose = safe_pose.copy()
     contact_pose[2, 3] -= config.safe_clearance_m + config.penetration_m
 
+    orient = joint_trajectory(
+        RIGHT_HOME_RAD,
+        CHOP_READY_RAD,
+        config.orient_duration_s,
+        config.control_dt_s,
+    )
     approach = cartesian_trajectory(
-        kinematics, initial_pose, safe_pose, RIGHT_HOME_RAD,
+        kinematics, initial_pose, safe_pose, CHOP_READY_RAD,
         config.approach_duration_s, config.control_dt_s,
     )
     descent = cartesian_trajectory(
@@ -145,14 +166,18 @@ def _preflight(
         kinematics, contact_pose, safe_pose, descent[-1].joints_rad,
         config.retract_duration_s, config.control_dt_s,
     )
-    return {"APPROACH": approach, "DESCEND": descent, "RETRACT": retract}, float(
-        safe_pose[2, 3]
-    )
+    return {
+        "ORIENT": orient,
+        "APPROACH": approach,
+        "DESCEND": descent,
+        "RETRACT": retract,
+    }, float(safe_pose[2, 3])
 
 
 def _validate_config(config: ChopConfig) -> None:
     positive = (
         config.control_dt_s,
+        config.orient_duration_s,
         config.approach_duration_s,
         config.descent_duration_s,
         config.hold_duration_s,

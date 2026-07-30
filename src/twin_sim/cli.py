@@ -15,6 +15,7 @@ def main(argv: list[str] | None = None) -> int:
         config = (
             ChopConfig(
                 control_dt_s=args.control_dt,
+                orient_duration_s=3.0,
                 approach_duration_s=3.0,
                 descent_duration_s=3.0,
                 hold_duration_s=1.0,

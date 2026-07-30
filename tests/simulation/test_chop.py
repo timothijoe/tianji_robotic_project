@@ -82,9 +82,12 @@ def test_contact_target_limits_blade_penetration():
         robot.close()
 
 
-def test_cleaver_cutting_edge_is_horizontal_at_home():
+def test_chop_ready_pose_levels_edge_with_only_wrist_rotation():
     robot = RightArmRobot()
     try:
+        ready = chop.CHOP_READY_RAD
+        np.testing.assert_allclose(ready[:6], chop.RIGHT_HOME_RAD[:6])
+        robot.reset(ready)
         data = robot.sim.data
         edge_start = data.site_xpos[
             robot.sim.require_site("right_blade_edge_top")
