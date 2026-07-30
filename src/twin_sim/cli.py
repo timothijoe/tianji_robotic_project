@@ -22,9 +22,13 @@ def main(argv: list[str] | None = None) -> int:
                 retract_duration_s=3.0,
                 viewer_start_hold_s=5.0,
                 viewer_end_hold_s=8.0,
+                full_motion=args.full_motion,
             )
             if args.slow
-            else ChopConfig(control_dt_s=args.control_dt)
+            else ChopConfig(
+                control_dt_s=args.control_dt,
+                full_motion=args.full_motion,
+            )
         )
         run_chop(
             config,
@@ -83,6 +87,7 @@ def _parser() -> argparse.ArgumentParser:
     chop.add_argument("--log", type=Path, required=True)
     chop.add_argument("--control-dt", type=float, default=0.01)
     chop.add_argument("--slow", action="store_true")
+    chop.add_argument("--full-motion", action="store_true")
     return parser
 
 

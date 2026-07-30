@@ -34,6 +34,7 @@ class ChopConfig:
     safe_clearance_m: float = 0.03
     viewer_start_hold_s: float = 0.0
     viewer_end_hold_s: float = 0.0
+    full_motion: bool = False
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,8 @@ def run_chop(
                     for point in trajectories[phase]
                 ]
             )
+            if not config.full_motion:
+                robot.reset(trajectories["APPROACH"][-1].joints_rad)
             _prepare_viewer_presentation(robot, config)
             samples: list[SimulationSample] = []
             warning_count = 0
@@ -99,8 +102,11 @@ def run_chop(
                     samples.append(sample)
                     csv_logger.write(sample)
 
-            execute("ORIENT", trajectories["ORIENT"][1:])
-            execute("APPROACH", trajectories["APPROACH"][1:])
+            if config.full_motion:
+                execute("ORIENT", trajectories["ORIENT"][1:])
+                execute("APPROACH", trajectories["APPROACH"][1:])
+            else:
+                execute("READY", [trajectories["APPROACH"][-1]])
             execute("DESCEND", trajectories["DESCEND"][1:])
             hold_count = int(round(config.hold_duration_s / config.control_dt_s))
             execute("HOLD", [trajectories["DESCEND"][-1]] * hold_count)

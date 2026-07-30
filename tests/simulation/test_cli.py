@@ -34,4 +34,25 @@ def test_slow_chop_cli_uses_observable_durations(monkeypatch, tmp_path):
         config.retract_duration_s,
     ) == (3.0, 3.0, 1.0, 3.0)
     assert (config.viewer_start_hold_s, config.viewer_end_hold_s) == (5.0, 8.0)
+    assert config.full_motion is False
     assert captured["viewer"] is True
+
+
+def test_full_motion_cli_preserves_complete_sequence(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(config, *, log_path, viewer):
+        captured["config"] = config
+
+    monkeypatch.setattr(cli, "run_chop", fake_run)
+
+    assert main(
+        [
+            "chop",
+            "--full-motion",
+            "--headless",
+            "--log",
+            str(tmp_path / "full.csv"),
+        ]
+    ) == 0
+    assert captured["config"].full_motion is True

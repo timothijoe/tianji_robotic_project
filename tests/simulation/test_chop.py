@@ -12,14 +12,17 @@ from twin_sim.robot import RightArmRobot
 from twin_sim.tasks.chop import ChopConfig, _preflight, run_chop
 
 
-def test_one_chop_completes_and_logs_all_phases(tmp_path):
+def test_one_chop_starts_ready_and_logs_cutting_phases(tmp_path):
     path = tmp_path / "chop.csv"
 
     result = run_chop(ChopConfig(control_dt_s=0.01), log_path=path)
 
     assert result.completed
-    phases = {row["phase"] for row in csv.DictReader(path.open())}
-    assert phases >= {"APPROACH", "DESCEND", "HOLD", "RETRACT", "COMPLETE"}
+    rows = list(csv.DictReader(path.open()))
+    phases = {row["phase"] for row in rows}
+    assert phases >= {"READY", "DESCEND", "HOLD", "RETRACT", "COMPLETE"}
+    assert phases.isdisjoint({"ORIENT", "APPROACH"})
+    assert rows[0]["phase"] == "READY"
     assert result.final_tip_z_m >= result.safe_tip_z_m - 0.005
 
 
@@ -37,10 +40,10 @@ def test_force_warning_does_not_cancel_task(tmp_path):
 def test_chop_force_has_contact_and_lift_trend(tmp_path):
     result = run_chop(ChopConfig(), log_path=tmp_path / "trend.csv")
 
-    approach = [sample.filtered_force_n for sample in result.samples if sample.phase == "APPROACH"]
+    ready = [sample.filtered_force_n for sample in result.samples if sample.phase == "READY"]
     hold = [sample.filtered_force_n for sample in result.samples if sample.phase == "HOLD"]
     retract = [sample.filtered_force_n for sample in result.samples if sample.phase == "RETRACT"]
-    baseline = median(approach)
+    baseline = median(ready)
     contact = median(hold)
     lifted = median(retract[len(retract) // 2 :])
     assert contact > baseline
@@ -101,6 +104,18 @@ def test_chop_ready_pose_levels_edge_with_only_wrist_rotation():
         assert abs(float(edge_direction[2])) <= np.sin(np.deg2rad(2.0))
     finally:
         robot.close()
+
+
+def test_full_motion_keeps_orientation_and_approach_phases(tmp_path):
+    result = run_chop(
+        ChopConfig(full_motion=True),
+        log_path=tmp_path / "full.csv",
+    )
+
+    phases = [sample.phase for sample in result.samples]
+    assert "ORIENT" in phases
+    assert "APPROACH" in phases
+    assert phases[0] == "ORIENT"
 
 
 def test_viewer_presentation_sets_camera_and_waits(monkeypatch):
