@@ -12,11 +12,11 @@
   optional passive viewer, and rejects non-finite `qpos`, `qvel`, or `ctrl`.
 - `tcp_pose()` returns `[x, y, z, qw, qx, qy, qz]` from
   `right_tool_tip_site`; `close()` is idempotent in headless use.
-- Right-arm body-level MuJoCo gravity compensation is configured during
-  initialization. The scene's required force-limited position actuators could
-  not otherwise hold the specified home target against gravity; this remains
-  native position-actuator simulation and adds no torque, impedance, or
-  admittance-control API.
+- The runtime does not mutate model dynamics: it does not configure gravity
+  compensation, call `mj_setConst`, or apply any force/torque feedforward.
+- The active MJCF retains native force-limited position actuators and uses
+  symmetric left/right gains `kp=(1280, 1280, 960, 800, 480, 320, 240)` and
+  `kv=(72, 72, 56, 48, 32, 24, 20)`.
 
 ## TDD evidence
 
@@ -28,9 +28,11 @@ ModuleNotFoundError: No module named 'twin_sim.robot'
 ```
 
 After implementation, the tracking test initially failed with a 0.193 rad
-error. Diagnostic runs isolated the cause to gravity acting through the scene's
-fixed actuator force limits; enabling only MuJoCo body gravity compensation on
-the right arm reduced the same error to 0.0084 rad.
+error. The runtime gravity-compensation experiment was removed following
+review. With unmodified runtime dynamics, the same test measured a 0.192771
+rad error, so only the active MJCF native position-actuator `kp`/`kv` constants
+were tuned symmetrically for both arms; force limits and actuator semantics
+were retained.
 
 During self-review, `NaN` control periods were found to expose a Python
 conversion error rather than the public `ValueError` contract. A regression
@@ -62,3 +64,18 @@ exit 0
 No remaining functional concerns. Viewer creation is opt-in and was not
 exercised in headless tests; its lifecycle is guarded so `close()` safely does
 nothing when no viewer was launched.
+
+## Review-fix verification
+
+- Added a focused exact-period test. Before the fix,
+  `step(0.002000000001)` did not raise; it now raises the documented
+  `ValueError` rather than accepting a near multiple.
+- Confirmed `src/twin_sim/robot.py` contains no `body_gravcomp`, `mj_setConst`,
+  `qfrc_applied`, or `qfrc_bias` usage.
+- Native position-actuator measurement after the MJCF-only tuning:
+  - tracking error at 250 ticks: `0.021570` rad;
+  - tracking error at 1000 ticks: `0.021757` rad;
+  - maximum right-arm velocity over 1000 ticks: `0.176541` rad/s;
+  - all `qpos`, `qvel`, and `ctrl` values remained finite.
+- `.venv/bin/python -m pytest tests/simulation/test_model.py
+  tests/simulation/test_robot.py -v`: `10 passed in 0.90s`.

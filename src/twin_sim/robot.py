@@ -20,7 +20,6 @@ class RightArmRobot:
     def __init__(self, model_path: Path | None = None, viewer: bool = False):
         self.sim = SimulationModel.load(model_path)
         self._viewer = None
-        self._enable_right_arm_gravity_compensation()
         self._tcp_site_id = self.sim.require_site("right_tool_tip_site")
         self._left_hold = np.zeros(7)
         self._right_target = RIGHT_HOME_RAD.copy()
@@ -95,10 +94,7 @@ class RightArmRobot:
             raise ValueError("control_dt_s must be a positive integer multiple of timestep")
         ratio = duration / timestep
         substeps = round(ratio)
-        if (
-            substeps < 1
-            or not np.isclose(duration, substeps * timestep, rtol=1e-9, atol=1e-12)
-        ):
+        if substeps < 1 or ratio != substeps:
             raise ValueError("control_dt_s must be a positive integer multiple of timestep")
         return substeps
 
@@ -108,20 +104,6 @@ class RightArmRobot:
             for values in (self.sim.data.qpos, self.sim.data.qvel, self.sim.data.ctrl)
         ):
             raise NumericalSafetyError("MuJoCo state contains non-finite values")
-
-    def _enable_right_arm_gravity_compensation(self) -> None:
-        body_ids = [
-            mujoco.mj_name2id(
-                self.sim.model, mujoco.mjtObj.mjOBJ_BODY, f"right_link{index}"
-            )
-            for index in range(1, 8)
-        ]
-        body_ids.extend(
-            mujoco.mj_name2id(self.sim.model, mujoco.mjtObj.mjOBJ_BODY, name)
-            for name in ("right_force_sensor_body", "right_tool_body")
-        )
-        self.sim.model.body_gravcomp[body_ids] = 1.0
-        mujoco.mj_setConst(self.sim.model, self.sim.data)
 
     def _sync_viewer(self) -> None:
         if self._viewer is not None:
