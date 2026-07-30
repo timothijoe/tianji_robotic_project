@@ -6,7 +6,7 @@ import numpy as np
 
 from twin_sim.force_monitor import ForceMonitor
 from twin_sim.kinematics import Kinematics
-from twin_sim.logging import SimulationSample, write_csv
+from twin_sim.logging import CsvLogger, SimulationSample
 from twin_sim.robot import RIGHT_HOME_RAD, RightArmRobot
 from twin_sim.trajectory import TrajectoryPoint, cartesian_trajectory
 
@@ -37,33 +37,38 @@ def run_chop(
     config: ChopConfig, *, log_path: Path, viewer: bool = False
 ) -> ChopResult:
     destination = Path(log_path)
-    if not destination.parent.is_dir():
-        raise ValueError(f"CSV parent directory does not exist: {destination.parent}")
-    _validate_config(config)
-    robot = RightArmRobot(viewer=viewer)
-    try:
-        kinematics = Kinematics(robot.sim)
-        force_monitor = ForceMonitor(
-            robot.sim,
-            alpha=config.force_filter_alpha,
-            warning_threshold_n=config.force_warning_threshold_n,
-        )
-        trajectories, safe_tip_z = _preflight(robot, kinematics, config)
-        samples: list[SimulationSample] = []
-        warning_count = 0
-        was_over_threshold = False
+    with CsvLogger(destination) as csv_logger:
+        _validate_config(config)
+        robot = RightArmRobot(viewer=viewer)
+        try:
+            kinematics = Kinematics(robot.sim)
+            force_monitor = ForceMonitor(
+                robot.sim,
+                alpha=config.force_filter_alpha,
+                warning_threshold_n=config.force_warning_threshold_n,
+            )
+            trajectories, safe_tip_z = _preflight(robot, kinematics, config)
+            robot.validate_targets(
+                [
+                    point.joints_rad
+                    for phase in ("APPROACH", "DESCEND", "RETRACT")
+                    for point in trajectories[phase]
+                ]
+            )
+            samples: list[SimulationSample] = []
+            warning_count = 0
+            was_over_threshold = False
 
-        def execute(phase: str, points: Iterable[TrajectoryPoint]) -> None:
-            nonlocal warning_count, was_over_threshold
-            for point in points:
-                robot.command(point.joints_rad)
-                robot.step(config.control_dt_s)
-                force = force_monitor.sample()
-                if force.over_threshold and not was_over_threshold:
-                    warning_count += 1
-                was_over_threshold = force.over_threshold
-                samples.append(
-                    SimulationSample(
+            def execute(phase: str, points: Iterable[TrajectoryPoint]) -> None:
+                nonlocal warning_count, was_over_threshold
+                for point in points:
+                    robot.command(point.joints_rad)
+                    robot.step(config.control_dt_s)
+                    force = force_monitor.sample()
+                    if force.over_threshold and not was_over_threshold:
+                        warning_count += 1
+                    was_over_threshold = force.over_threshold
+                    sample = SimulationSample(
                         time_s=float(robot.sim.data.time),
                         phase=phase,
                         target_joints_rad=point.joints_rad.copy(),
@@ -74,18 +79,18 @@ def run_chop(
                         filtered_force_n=force.filtered_force_n,
                         force_over_threshold=force.over_threshold,
                     )
-                )
+                    samples.append(sample)
+                    csv_logger.write(sample)
 
-        execute("APPROACH", trajectories["APPROACH"])
-        execute("DESCEND", trajectories["DESCEND"])
-        hold_count = int(round(config.hold_duration_s / config.control_dt_s))
-        execute("HOLD", [trajectories["DESCEND"][-1]] * hold_count)
-        execute("RETRACT", trajectories["RETRACT"])
-        final_pose = kinematics.fk(robot.joint_positions)
-        final_force = force_monitor.sample()
-        final_target = trajectories["RETRACT"][-1]
-        samples.append(
-            SimulationSample(
+            execute("APPROACH", trajectories["APPROACH"][1:])
+            execute("DESCEND", trajectories["DESCEND"][1:])
+            hold_count = int(round(config.hold_duration_s / config.control_dt_s))
+            execute("HOLD", [trajectories["DESCEND"][-1]] * hold_count)
+            execute("RETRACT", trajectories["RETRACT"][1:])
+            final_pose = kinematics.fk(robot.joint_positions)
+            final_force = force_monitor.sample()
+            final_target = trajectories["RETRACT"][-1]
+            complete = SimulationSample(
                 time_s=float(robot.sim.data.time),
                 phase="COMPLETE",
                 target_joints_rad=final_target.joints_rad.copy(),
@@ -96,17 +101,17 @@ def run_chop(
                 filtered_force_n=final_force.filtered_force_n,
                 force_over_threshold=final_force.over_threshold,
             )
-        )
-        write_csv(destination, samples)
-        return ChopResult(
-            True,
-            tuple(samples),
-            warning_count,
-            float(final_pose[2, 3]),
-            safe_tip_z,
-        )
-    finally:
-        robot.close()
+            samples.append(complete)
+            csv_logger.write(complete)
+            return ChopResult(
+                True,
+                tuple(samples),
+                warning_count,
+                float(final_pose[2, 3]),
+                safe_tip_z,
+            )
+        finally:
+            robot.close()
 
 
 def _preflight(
@@ -157,4 +162,3 @@ def _validate_config(config: ChopConfig) -> None:
         config.hold_duration_s / config.control_dt_s
     ):
         raise ValueError("hold_duration_s must be an integer multiple of control_dt_s")
-

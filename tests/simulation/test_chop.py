@@ -1,4 +1,5 @@
 import csv
+from statistics import median
 
 import pytest
 
@@ -26,3 +27,22 @@ def test_force_warning_does_not_cancel_task(tmp_path):
 
     assert result.completed
     assert result.warning_count > 0
+
+
+def test_chop_force_has_contact_and_lift_trend(tmp_path):
+    with pytest.warns(RuntimeWarning):
+        result = run_chop(ChopConfig(), log_path=tmp_path / "trend.csv")
+
+    approach = [sample.filtered_force_n for sample in result.samples if sample.phase == "APPROACH"]
+    descent = [sample.filtered_force_n for sample in result.samples if sample.phase == "DESCEND"]
+    retract = [sample.filtered_force_n for sample in result.samples if sample.phase == "RETRACT"]
+    baseline = median(approach)
+    contact = median(descent[len(descent) // 2 :])
+    lifted = median(retract[len(retract) // 2 :])
+    assert contact > baseline
+    assert lifted < contact
+
+
+def test_chop_validates_actual_log_destination_before_config_or_motion(tmp_path):
+    with pytest.raises(IsADirectoryError):
+        run_chop(ChopConfig(control_dt_s=0.0), log_path=tmp_path)

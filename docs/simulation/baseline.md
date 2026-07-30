@@ -37,3 +37,7 @@ authorized change deliberately modifies one of the protected files.
 With the pinned clean environment installed, `pytest --collect-only -q`
 successfully collects 210 tests. This is the legacy collection count to
 preserve during the rebuild.
+
+该记录只证明旧测试在依赖安装后能够完整收集，不声称 210 项旧测试全部运行通过。
+旧仿真随后按设计归档；新系统的可运行基线由 `tests/simulation/` 和
+`twin-sim` smoke commands 单独验证。

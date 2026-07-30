@@ -23,6 +23,9 @@ class RightArmRobot:
         self._tcp_site_id = self.sim.require_site("right_tool_tip_site")
         self._left_hold = np.zeros(7)
         self._right_target = RIGHT_HOME_RAD.copy()
+        self._joint_limits = self.sim.model.jnt_range[
+            self.sim.right.joint_ids
+        ].copy()
         self.reset()
 
         if viewer:
@@ -31,7 +34,7 @@ class RightArmRobot:
             self._viewer = mujoco_viewer.launch_passive(self.sim.model, self.sim.data)
 
     def reset(self, joints_rad: Sequence[float] = RIGHT_HOME_RAD) -> None:
-        joints = self._validated_joints(joints_rad)
+        joints = self._validated_target(joints_rad)
         mujoco.mj_resetData(self.sim.model, self.sim.data)
         self._left_hold = self.sim.data.qpos[self.sim.left.qpos_ids].copy()
         self.sim.data.qpos[self.sim.right.qpos_ids] = joints
@@ -44,7 +47,14 @@ class RightArmRobot:
         self._sync_viewer()
 
     def command(self, joints_rad: Sequence[float]) -> None:
-        self._right_target = self._validated_joints(joints_rad)
+        self._right_target = self._validated_target(joints_rad)
+
+    def validate_targets(self, targets: Sequence[Sequence[float]]) -> None:
+        for index, target in enumerate(targets):
+            try:
+                self._validated_target(target)
+            except ValueError as error:
+                raise ValueError(f"invalid target at sample {index}: {error}") from error
 
     def step(self, control_dt_s: float) -> None:
         substeps = self._substeps(control_dt_s)
@@ -97,6 +107,21 @@ class RightArmRobot:
         if substeps < 1 or ratio != substeps:
             raise ValueError("control_dt_s must be a positive integer multiple of timestep")
         return substeps
+
+    def _validated_target(self, joints_rad: Sequence[float]) -> np.ndarray:
+        joints = self._validated_joints(joints_rad)
+        outside = np.flatnonzero(
+            (joints < self._joint_limits[:, 0])
+            | (joints > self._joint_limits[:, 1])
+        )
+        if outside.size:
+            index = int(outside[0])
+            lower, upper = self._joint_limits[index]
+            raise ValueError(
+                f"joint {index + 1} target {joints[index]:.6g} is outside "
+                f"range [{lower:.6g}, {upper:.6g}]"
+            )
+        return joints
 
     def _require_finite_state(self) -> None:
         if not all(

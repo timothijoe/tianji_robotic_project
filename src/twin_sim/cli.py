@@ -44,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
             points = cartesian_trajectory(
                 kinematics, start, goal, RIGHT_HOME_RAD, 0.5, 0.01
             )
+        robot.validate_targets([point.joints_rad for point in points])
         for point in points:
             robot.command(point.joints_rad)
             robot.step(0.01)
@@ -72,4 +73,3 @@ def _parser() -> argparse.ArgumentParser:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

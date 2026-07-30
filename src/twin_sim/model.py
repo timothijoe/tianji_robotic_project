@@ -43,6 +43,7 @@ class SimulationModel:
         simulation.require_sensor("right_tool_torque")
         simulation.require_geom("right_knife_blade")
         simulation.require_geom("chopping_board")
+        simulation.validate_actuator_contract()
         mujoco.mj_forward(model, data)
         return simulation
 
@@ -83,3 +84,51 @@ class SimulationModel:
 
     def require_sensor(self, name: str) -> int:
         return self._require_id(self.model, mujoco.mjtObj.mjOBJ_SENSOR, "sensor", name)
+
+    def validate_actuator_contract(self) -> None:
+        for names, arm in ((LEFT_ARM, self.left), (RIGHT_ARM, self.right)):
+            for index, (name, joint_id, actuator_id) in enumerate(
+                zip(names.actuators, arm.joint_ids, arm.actuator_ids, strict=True)
+            ):
+                if (
+                    self.model.actuator_trntype[actuator_id]
+                    != mujoco.mjtTrn.mjTRN_JOINT
+                    or self.model.actuator_trnid[actuator_id, 0] != joint_id
+                ):
+                    raise ModelValidationError(
+                        f"invalid transmission for actuator {name}"
+                    )
+                if (
+                    self.model.jnt_type[joint_id] != mujoco.mjtJoint.mjJNT_HINGE
+                    or not self.model.jnt_limited[joint_id]
+                ):
+                    raise ModelValidationError(f"invalid scalar ranged joint for {name}")
+                gain = float(self.model.actuator_gainprm[actuator_id, 0])
+                bias = self.model.actuator_biasprm[actuator_id]
+                if (
+                    self.model.actuator_gaintype[actuator_id]
+                    != mujoco.mjtGain.mjGAIN_FIXED
+                    or self.model.actuator_biastype[actuator_id]
+                    != mujoco.mjtBias.mjBIAS_AFFINE
+                    or gain <= 0.0
+                    or not np.isclose(bias[1], -gain)
+                    or bias[2] >= 0.0
+                ):
+                    raise ModelValidationError(f"actuator is not position servo: {name}")
+                if (
+                    not self.model.actuator_ctrllimited[actuator_id]
+                    or not np.array_equal(
+                        self.model.actuator_ctrlrange[actuator_id],
+                        self.model.jnt_range[joint_id],
+                    )
+                ):
+                    raise ModelValidationError(f"invalid control range for {name}")
+                if (
+                    not self.model.actuator_forcelimited[actuator_id]
+                    or not self.model.jnt_actfrclimited[joint_id]
+                    or not np.array_equal(
+                        self.model.actuator_forcerange[actuator_id],
+                        self.model.jnt_actfrcrange[joint_id],
+                    )
+                ):
+                    raise ModelValidationError(f"invalid force range for {name}")

@@ -1,4 +1,5 @@
 import mujoco
+import numpy as np
 import pytest
 
 from twin_sim.model import ModelValidationError, SimulationModel
@@ -29,3 +30,21 @@ def test_missing_model_object_has_clear_error():
     sim = SimulationModel.load()
     with pytest.raises(ModelValidationError, match="missing site: absent"):
         sim.require_site("absent")
+
+
+def test_model_rejects_an_actuator_transmitted_to_the_wrong_joint():
+    sim = SimulationModel.load()
+    actuator_id = sim.right.actuator_ids[0]
+    sim.model.actuator_trnid[actuator_id, 0] = sim.right.joint_ids[1]
+
+    with pytest.raises(ModelValidationError, match="transmission.*act_right_joint1"):
+        sim.validate_actuator_contract()
+
+
+def test_active_wrist_force_limits_match_canonical_model():
+    sim = SimulationModel.load()
+    wrist_ids = sim.right.actuator_ids[4:]
+    np.testing.assert_array_equal(
+        sim.model.actuator_forcerange[wrist_ids],
+        np.tile((-18.0, 18.0), (3, 1)),
+    )

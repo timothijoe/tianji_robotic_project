@@ -22,6 +22,28 @@ def test_invalid_command_is_rejected():
     robot.close()
 
 
+def test_command_rejects_a_joint_outside_model_range():
+    robot = RightArmRobot()
+    target = RIGHT_HOME_RAD.copy()
+    target[5] = 99.0
+
+    with pytest.raises(ValueError, match="joint 6.*range"):
+        robot.command(target)
+    robot.close()
+
+
+def test_validate_targets_rejects_complete_path_before_stepping():
+    robot = RightArmRobot()
+    invalid = RIGHT_HOME_RAD.copy()
+    invalid[5] = 99.0
+
+    with pytest.raises(ValueError, match="sample 1.*joint 6.*range"):
+        robot.validate_targets([RIGHT_HOME_RAD, invalid])
+
+    assert robot.sim.data.time == 0.0
+    robot.close()
+
+
 def test_nonfinite_state_stops():
     robot = RightArmRobot()
     robot.sim.data.qpos[robot.sim.right.qpos_ids[0]] = np.nan

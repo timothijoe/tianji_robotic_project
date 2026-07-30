@@ -32,6 +32,11 @@ def test_joint_trajectory_rejects_invalid_timing(duration_s, control_dt_s, messa
         joint_trajectory(np.zeros(7), np.ones(7), duration_s, control_dt_s)
 
 
+def test_joint_trajectory_rejects_motion_above_default_velocity_limit():
+    with pytest.raises(ValueError, match="velocity limit"):
+        joint_trajectory(np.zeros(7), np.ones(7), 0.01, 0.01)
+
+
 def test_cartesian_trajectory_preserves_pose_endpoints_and_preflights_ik():
     robot = RightArmRobot()
     kinematics = Kinematics(robot.sim)

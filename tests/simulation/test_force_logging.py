@@ -65,3 +65,7 @@ def test_csv_rejects_missing_parent_before_opening(tmp_path):
     with pytest.raises(ValueError, match="parent directory"):
         write_csv(tmp_path / "missing" / "run.csv", [])
 
+
+def test_csv_rejects_a_directory_destination_immediately(tmp_path):
+    with pytest.raises(IsADirectoryError):
+        write_csv(tmp_path, [])

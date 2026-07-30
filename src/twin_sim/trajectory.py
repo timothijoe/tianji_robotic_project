@@ -6,6 +6,8 @@ import numpy as np
 
 from twin_sim.kinematics import Kinematics
 
+DEFAULT_MAX_VELOCITY_RAD_S = 2.0
+DEFAULT_MAX_ACCELERATION_RAD_S2 = 10.0
 
 @dataclass(frozen=True)
 class TrajectoryPoint:
@@ -40,6 +42,7 @@ def joint_trajectory(
     joints[0] = start_joints
     joints[-1] = goal_joints
     velocities[[0, -1]] = 0.0
+    _validate_motion(joints, control_dt_s)
     return [
         TrajectoryPoint(float(time_s), q.copy(), qd.copy(), None)
         for time_s, q, qd in zip(times, joints, velocities, strict=True)
@@ -77,6 +80,7 @@ def cartesian_trajectory(
     else:
         velocities = np.gradient(joints, control_dt_s, axis=0, edge_order=2)
     velocities[[0, -1]] = 0.0
+    _validate_motion(joints, control_dt_s)
     return [
         TrajectoryPoint(float(time_s), q.copy(), qd.copy(), pose.copy())
         for time_s, q, qd, pose in zip(
@@ -98,6 +102,23 @@ def _sample_times(duration_s: float, control_dt_s: float) -> np.ndarray:
     if ratio != steps:
         raise ValueError("duration_s must be an integer multiple of control_dt_s")
     return np.linspace(0.0, duration_s, steps + 1)
+
+
+def _validate_motion(joints: np.ndarray, control_dt_s: float) -> None:
+    segment_velocity = np.diff(joints, axis=0) / control_dt_s
+    if segment_velocity.size and np.max(np.abs(segment_velocity)) > DEFAULT_MAX_VELOCITY_RAD_S:
+        raise ValueError(
+            f"trajectory exceeds velocity limit {DEFAULT_MAX_VELOCITY_RAD_S:g} rad/s"
+        )
+    segment_acceleration = np.diff(segment_velocity, axis=0) / control_dt_s
+    if (
+        segment_acceleration.size
+        and np.max(np.abs(segment_acceleration)) > DEFAULT_MAX_ACCELERATION_RAD_S2
+    ):
+        raise ValueError(
+            "trajectory exceeds acceleration limit "
+            f"{DEFAULT_MAX_ACCELERATION_RAD_S2:g} rad/s^2"
+        )
 
 
 def _joints(values: Sequence[float], name: str) -> np.ndarray:

@@ -7,9 +7,8 @@
 
 This is the historical snapshot of the superseded torque- and
 impedance-control MuJoCo simulation. It is intentionally outside the active
-source tree, package configuration, and pytest test paths. The active
-simulator surface is deliberately empty until the replacement `twin_sim`
-implementation arrives in subsequent tasks.
+source tree, package configuration, and pytest test paths. The replacement
+position-actuator simulator is active under `src/twin_sim/`.
 
 ## Contents and former entrypoints
 

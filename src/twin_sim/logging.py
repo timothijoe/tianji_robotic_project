@@ -33,14 +33,37 @@ _FIELDS = (
 
 
 def write_csv(path: str | Path, samples: Iterable[SimulationSample]) -> None:
-    destination = Path(path)
-    if not destination.parent.is_dir():
-        raise ValueError(f"CSV parent directory does not exist: {destination.parent}")
-    rows = [_row(sample) for sample in samples]
-    with destination.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=_FIELDS)
-        writer.writeheader()
-        writer.writerows(rows)
+    with CsvLogger(path) as logger:
+        for sample in samples:
+            logger.write(sample)
+
+
+class CsvLogger:
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+        if not self.path.parent.is_dir():
+            raise ValueError(f"CSV parent directory does not exist: {self.path.parent}")
+        self._stream = None
+        self._writer = None
+
+    def __enter__(self) -> "CsvLogger":
+        self._stream = self.path.open("w", newline="", encoding="utf-8")
+        self._writer = csv.DictWriter(self._stream, fieldnames=_FIELDS)
+        self._writer.writeheader()
+        self._stream.flush()
+        return self
+
+    def write(self, sample: SimulationSample) -> None:
+        if self._writer is None or self._stream is None:
+            raise RuntimeError("CsvLogger must be opened before writing")
+        self._writer.writerow(_row(sample))
+        self._stream.flush()
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        if self._stream is not None:
+            self._stream.close()
+        self._stream = None
+        self._writer = None
 
 
 def _row(sample: SimulationSample) -> dict[str, object]:
@@ -87,4 +110,3 @@ def _array(value: np.ndarray, shape: tuple[int, ...], name: str) -> np.ndarray:
     if array.shape != shape or not np.isfinite(array).all():
         raise ValueError(f"{name} must have shape {shape} and finite values")
     return array
-
