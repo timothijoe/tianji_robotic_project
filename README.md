@@ -1,42 +1,18 @@
-# twin_joint_ws
+# tianji_robotic_project
 
-Pure MuJoCo phase-one workspace for a dual-arm Marvin model. The source robot
-asset is kept under `MarvinCCS/marvin_final_fixed.xml`; phase-one task geometry
-lives in `src/twin_description/twin_description/assets/robot/mujoco/right_chopping_scene.xml`.
+The legacy MuJoCo torque/impedance simulator has been archived while the
+approved position-control rebuild is in progress. The active `twin_sim`
+implementation arrives in subsequent tasks; this repository does not yet
+provide an active simulator CLI.
 
-## Setup
+The approved rebuild documents are:
 
-```bash
-python3 -m pip install -e .[test]
-```
+- [Design](docs/superpowers/specs/2026-07-30-mujoco-position-simulation-rebuild-design.md)
+- [Implementation plan](docs/superpowers/plans/2026-07-30-mujoco-position-simulation-rebuild.md)
 
-## Test
+Historical code, examples, tests, and documentation are available in
+[archive/legacy_simulation](archive/legacy_simulation/README.md).
 
-```bash
-# 进入项目目录后运行全部测试（45 项）
-PYTHONPATH="src/twin_core:src/twin_description:src/twin_mujoco" python3 -m pytest -v
-```
-
-测试覆盖：
-
-- 源模型加载（14 关节 / 14 执行器）
-- 切菜场景加载（砧板、刀、力传感器、site）
-- 刀-法兰朝向一致性（quat 对齐验证）
-- 双臂运行时（ArmView、力矩施加）
-- 力控制器（Cartesian impedance、力矩限幅）
-- 切菜状态机（3 周期 headless demo、CSV 日志）
-
-## Headless right-arm chopping
-
-```bash
-PYTHONPATH="src/twin_core:src/twin_description:src/twin_mujoco" twin-chop --cycles 3 --headless --log /tmp/twin_right_chop.csv
-```
-
-## Visual right-arm chopping
-
-```bash
-PYTHONPATH="src/twin_core:src/twin_description:src/twin_mujoco" twin-chop --cycles 3 --viewer --log /tmp/twin_right_chop.csv
-```
-
-The first phase is pure MuJoCo. ROS2 nodes and launch files are intentionally
-out of scope.
+The following real-robot and vendor paths are protected during the rebuild:
+`SDK_PYTHON/`, `test/`, `real_robot_debug/`, `MarvinCCS/`, and
+`MarvinCCS_mujoco.zip`.
