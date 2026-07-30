@@ -17,15 +17,11 @@ test = [
   "pytest>=7.4",
 ]
 
-[project.scripts]
-twin-sim = "twin_sim.cli:main"
-
 [tool.setuptools]
-packages = ["twin_sim", "twin_sim.tasks"]
+packages = ["twin_sim"]
 
 [tool.setuptools.package-dir]
 twin_sim = "src/twin_sim"
-"twin_sim.tasks" = "src/twin_sim/tasks"
 
 [tool.pytest.ini_options]
 testpaths = ["tests/simulation"]

@@ -6,12 +6,15 @@ from twin_sim.model import ModelValidationError, SimulationModel
 
 def test_active_scene_has_fourteen_position_actuators():
     sim = SimulationModel.load()
+    actuator_ids = (*sim.left.actuator_ids, *sim.right.actuator_ids)
     assert sim.model.njnt == 14
     assert sim.model.nu == 14
+    assert len(actuator_ids) == 14
+    assert sim.left.actuator_ids.shape == (7,)
     assert sim.right.actuator_ids.shape == (7,)
     assert all(
         sim.model.actuator_biastype[i] == mujoco.mjtBias.mjBIAS_AFFINE
-        for i in sim.right.actuator_ids
+        for i in actuator_ids
     )
 
 
