@@ -18,20 +18,15 @@ test = [
 ]
 
 [project.scripts]
-twin-chop = "twin_mujoco.cli:main"
-twin-trajectory = "twin_control.trajectory_demo:main"
-twin-chop-sdk = "twin_control.chopping_cli:main"
-twin-ik = "twin_control.ik_cli:main"
+twin-sim = "twin_sim.cli:main"
 
 [tool.setuptools]
-packages = ["twin_control", "twin_core", "twin_description", "twin_mujoco"]
+packages = ["twin_sim", "twin_sim.tasks"]
 
 [tool.setuptools.package-dir]
-twin_control = "src/twin_control"
-twin_core = "src/twin_core/twin_core"
-twin_description = "src/twin_description/twin_description"
-twin_mujoco = "src/twin_mujoco/twin_mujoco"
+twin_sim = "src/twin_sim"
+"twin_sim.tasks" = "src/twin_sim/tasks"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src", "src/twin_core", "src/twin_description", "src/twin_mujoco"]
+testpaths = ["tests/simulation"]
+pythonpath = ["src"]
