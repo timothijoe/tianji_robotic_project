@@ -98,6 +98,14 @@ class SimulationModel:
                     raise ModelValidationError(
                         f"invalid transmission for actuator {name}"
                     )
+                expected_gear = np.zeros(self.model.actuator_gear.shape[1])
+                expected_gear[0] = 1.0
+                if not np.array_equal(
+                    self.model.actuator_gear[actuator_id], expected_gear
+                ):
+                    raise ModelValidationError(
+                        f"actuator must use unit gear: {name}"
+                    )
                 if (
                     self.model.jnt_type[joint_id] != mujoco.mjtJoint.mjJNT_HINGE
                     or not self.model.jnt_limited[joint_id]

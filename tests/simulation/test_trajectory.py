@@ -61,7 +61,7 @@ def test_cartesian_trajectory_preserves_pose_endpoints_and_preflights_ik():
         )
 
 
-def test_cartesian_trajectory_supports_one_control_interval():
+def test_cartesian_trajectory_rejects_undersampled_nonzero_motion():
     robot = RightArmRobot()
     kinematics = Kinematics(robot.sim)
     start = kinematics.fk(RIGHT_HOME_RAD)
@@ -69,10 +69,17 @@ def test_cartesian_trajectory_supports_one_control_interval():
         RIGHT_HOME_RAD + np.array((0.01, 0, 0, 0, 0, 0, 0))
     )
 
-    points = cartesian_trajectory(
-        kinematics, start, goal, RIGHT_HOME_RAD, duration_s=0.01, control_dt_s=0.01
-    )
+    with pytest.raises(ValueError, match="acceleration limit"):
+        cartesian_trajectory(
+            kinematics,
+            start,
+            goal,
+            RIGHT_HOME_RAD,
+            duration_s=0.01,
+            control_dt_s=0.01,
+        )
 
-    assert len(points) == 2
-    np.testing.assert_array_equal(points[0].velocity_rad_s, np.zeros(7))
-    np.testing.assert_array_equal(points[-1].velocity_rad_s, np.zeros(7))
+
+def test_joint_trajectory_acceleration_includes_zero_endpoint_velocities():
+    with pytest.raises(ValueError, match="acceleration limit"):
+        joint_trajectory(np.zeros(7), np.ones(7) * 0.01, 0.01, 0.01)

@@ -41,6 +41,15 @@ def test_model_rejects_an_actuator_transmitted_to_the_wrong_joint():
         sim.validate_actuator_contract()
 
 
+def test_model_rejects_non_unit_actuator_gear():
+    sim = SimulationModel.load()
+    actuator_id = sim.right.actuator_ids[0]
+    sim.model.actuator_gear[actuator_id, 0] = 2.0
+
+    with pytest.raises(ModelValidationError, match="unit gear.*act_right_joint1"):
+        sim.validate_actuator_contract()
+
+
 def test_active_wrist_force_limits_match_canonical_model():
     sim = SimulationModel.load()
     wrist_ids = sim.right.actuator_ids[4:]

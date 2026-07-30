@@ -110,7 +110,11 @@ def _validate_motion(joints: np.ndarray, control_dt_s: float) -> None:
         raise ValueError(
             f"trajectory exceeds velocity limit {DEFAULT_MAX_VELOCITY_RAD_S:g} rad/s"
         )
-    segment_acceleration = np.diff(segment_velocity, axis=0) / control_dt_s
+    endpoint_velocity = np.zeros((1, joints.shape[1]))
+    velocity_with_endpoints = np.vstack(
+        (endpoint_velocity, segment_velocity, endpoint_velocity)
+    )
+    segment_acceleration = np.diff(velocity_with_endpoints, axis=0) / control_dt_s
     if (
         segment_acceleration.size
         and np.max(np.abs(segment_acceleration)) > DEFAULT_MAX_ACCELERATION_RAD_S2
