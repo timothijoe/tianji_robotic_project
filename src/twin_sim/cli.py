@@ -12,8 +12,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command == "chop":
+        config = (
+            ChopConfig(
+                control_dt_s=args.control_dt,
+                approach_duration_s=3.0,
+                descent_duration_s=3.0,
+                hold_duration_s=1.0,
+                retract_duration_s=3.0,
+                viewer_start_hold_s=5.0,
+                viewer_end_hold_s=8.0,
+            )
+            if args.slow
+            else ChopConfig(control_dt_s=args.control_dt)
+        )
         run_chop(
-            ChopConfig(control_dt_s=args.control_dt),
+            config,
             log_path=args.log,
             viewer=not args.headless,
         )
@@ -68,6 +81,7 @@ def _parser() -> argparse.ArgumentParser:
     chop.add_argument("--headless", action="store_true")
     chop.add_argument("--log", type=Path, required=True)
     chop.add_argument("--control-dt", type=float, default=0.01)
+    chop.add_argument("--slow", action="store_true")
     return parser
 
 

@@ -108,12 +108,12 @@
                       <body name="right_tool_body">
                         <inertial pos="0 -0.02 0.14" mass="0.22" diaginertia="0.00022 0.00022 0.00003" />
                         <!-- 刀面可视化: 刀柄在 Y=0, 刀面中心 Y=-0.02, 刀刃 -Y 侧突出 -->
-                        <geom name="right_blade_visual" type="box" pos="0 -0.02 0.18" size="0.003 0.05 0.10" rgba="0.78 0.80 0.82 1" contype="0" conaffinity="0" />
+                        <geom name="right_blade_visual" type="box" pos="-0.003 -0.02 0.09" size="0.003 0.05 0.10" rgba="0.78 0.80 0.82 1" contype="0" conaffinity="0" />
                         <!-- 刀柄可视化: 和力传感器共线 Y=0 -->
                         <geom name="right_handle_visual" type="box" pos="0 0 0.04" size="0.006 0.02 0.04" rgba="0.15 0.13 0.12 1" contype="0" conaffinity="0" />
                         <!-- 碰撞体: 不可见 (rgba alpha=0) -->
                         <geom name="right_knife_handle" type="box" pos="0 0 0.04" size="0.012 0.02 0.04" rgba="0.06 0.06 0.065 0" contype="0" conaffinity="0" />
-                        <geom name="right_knife_blade" type="box" pos="0 -0.02 0.18" size="0.006 0.05 0.10" rgba="0.72 0.74 0.76 0" friction="0.9 0.02 0.002" solref="0.04 1" solimp="0.85 0.95 0.005" />
+                        <geom name="right_knife_blade" type="box" pos="-0.006 -0.02 0.09" size="0.006 0.05 0.10" rgba="0.72 0.74 0.76 0" friction="0.9 0.02 0.002" solref="0.04 1" solimp="0.85 0.95 0.005" />
                         <!-- 刀刃分布标记: 都在刀刃 Y=-0.07, 沿 Z 方向均匀分布 -->
                         <site name="right_blade_edge_top" type="sphere" pos="0 -0.07 0.10" size="0.008" rgba="0 1 1 0.9" />
                         <site name="right_blade_edge_bot" type="sphere" pos="0 -0.07 0.19" size="0.008" rgba="0 1 1 0.9" />
@@ -136,20 +136,20 @@
     <exclude body1="right_link5" body2="right_link7" />
   </contact>
   <actuator>
-    <position name="act_left_joint1" joint="left_joint1" kp="1280" kv="72" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-108 108" />
-    <position name="act_left_joint2" joint="left_joint2" kp="1280" kv="72" ctrllimited="true" ctrlrange="-2.093 2.093" forcelimited="true" forcerange="-108 108" />
-    <position name="act_left_joint3" joint="left_joint3" kp="960" kv="56" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-66 66" />
-    <position name="act_left_joint4" joint="left_joint4" kp="800" kv="48" ctrllimited="true" ctrlrange="-2.531 1.047" forcelimited="true" forcerange="-66 66" />
-    <position name="act_left_joint5" joint="left_joint5" kp="480" kv="32" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-18 18" />
-    <position name="act_left_joint6" joint="left_joint6" kp="320" kv="24" ctrllimited="true" ctrlrange="-1.0467 1.0467" forcelimited="true" forcerange="-18 18" />
-    <position name="act_left_joint7" joint="left_joint7" kp="240" kv="20" ctrllimited="true" ctrlrange="-1.57 1.57" forcelimited="true" forcerange="-18 18" />
-    <position name="act_right_joint1" joint="right_joint1" kp="1280" kv="72" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-108 108" />
-    <position name="act_right_joint2" joint="right_joint2" kp="1280" kv="72" ctrllimited="true" ctrlrange="-2.093 2.093" forcelimited="true" forcerange="-108 108" />
-    <position name="act_right_joint3" joint="right_joint3" kp="960" kv="56" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-66 66" />
-    <position name="act_right_joint4" joint="right_joint4" kp="800" kv="48" ctrllimited="true" ctrlrange="-2.531 1.047" forcelimited="true" forcerange="-66 66" />
-    <position name="act_right_joint5" joint="right_joint5" kp="480" kv="32" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-18 18" />
-    <position name="act_right_joint6" joint="right_joint6" kp="320" kv="24" ctrllimited="true" ctrlrange="-1.0467 1.0467" forcelimited="true" forcerange="-18 18" />
-    <position name="act_right_joint7" joint="right_joint7" kp="240" kv="20" ctrllimited="true" ctrlrange="-1.57 1.57" forcelimited="true" forcerange="-18 18" />
+    <position name="act_left_joint1" joint="left_joint1" kp="5120" kv="144" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-108 108" />
+    <position name="act_left_joint2" joint="left_joint2" kp="5120" kv="144" ctrllimited="true" ctrlrange="-2.093 2.093" forcelimited="true" forcerange="-108 108" />
+    <position name="act_left_joint3" joint="left_joint3" kp="3840" kv="112" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-66 66" />
+    <position name="act_left_joint4" joint="left_joint4" kp="3200" kv="96" ctrllimited="true" ctrlrange="-2.531 1.047" forcelimited="true" forcerange="-66 66" />
+    <position name="act_left_joint5" joint="left_joint5" kp="1920" kv="64" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-18 18" />
+    <position name="act_left_joint6" joint="left_joint6" kp="1280" kv="48" ctrllimited="true" ctrlrange="-1.0467 1.0467" forcelimited="true" forcerange="-18 18" />
+    <position name="act_left_joint7" joint="left_joint7" kp="960" kv="40" ctrllimited="true" ctrlrange="-1.57 1.57" forcelimited="true" forcerange="-18 18" />
+    <position name="act_right_joint1" joint="right_joint1" kp="5120" kv="144" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-108 108" />
+    <position name="act_right_joint2" joint="right_joint2" kp="5120" kv="144" ctrllimited="true" ctrlrange="-2.093 2.093" forcelimited="true" forcerange="-108 108" />
+    <position name="act_right_joint3" joint="right_joint3" kp="3840" kv="112" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-66 66" />
+    <position name="act_right_joint4" joint="right_joint4" kp="3200" kv="96" ctrllimited="true" ctrlrange="-2.531 1.047" forcelimited="true" forcerange="-66 66" />
+    <position name="act_right_joint5" joint="right_joint5" kp="1920" kv="64" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-18 18" />
+    <position name="act_right_joint6" joint="right_joint6" kp="1280" kv="48" ctrllimited="true" ctrlrange="-1.0467 1.0467" forcelimited="true" forcerange="-18 18" />
+    <position name="act_right_joint7" joint="right_joint7" kp="960" kv="40" ctrllimited="true" ctrlrange="-1.57 1.57" forcelimited="true" forcerange="-18 18" />
   </actuator>
   <sensor>
     <force name="right_tool_force" site="right_force_sensor_site" />

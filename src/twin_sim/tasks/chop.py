@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Iterable
 
 import numpy as np
@@ -22,6 +23,8 @@ class ChopConfig:
     force_filter_alpha: float = 0.2
     force_warning_threshold_n: float = 30.0
     safe_clearance_m: float = 0.03
+    viewer_start_hold_s: float = 0.0
+    viewer_end_hold_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,7 @@ def run_chop(
                     for point in trajectories[phase]
                 ]
             )
+            _prepare_viewer_presentation(robot, config)
             samples: list[SimulationSample] = []
             warning_count = 0
             was_over_threshold = False
@@ -103,6 +107,7 @@ def run_chop(
             )
             samples.append(complete)
             csv_logger.write(complete)
+            _finish_viewer_presentation(robot, config)
             return ChopResult(
                 True,
                 tuple(samples),
@@ -162,3 +167,33 @@ def _validate_config(config: ChopConfig) -> None:
         config.hold_duration_s / config.control_dt_s
     ):
         raise ValueError("hold_duration_s must be an integer multiple of control_dt_s")
+    viewer_holds = (config.viewer_start_hold_s, config.viewer_end_hold_s)
+    if not all(np.isfinite(value) and value >= 0.0 for value in viewer_holds):
+        raise ValueError("viewer hold values must be non-negative and finite")
+
+
+def _prepare_viewer_presentation(
+    robot: RightArmRobot, config: ChopConfig
+) -> None:
+    viewer = robot._viewer
+    if viewer is None or not viewer.is_running():
+        return
+    viewer.cam.azimuth = 135.0
+    viewer.cam.elevation = -20.0
+    viewer.cam.distance = 1.6
+    viewer.cam.lookat[:] = (0.48, 0.0, 0.48)
+    viewer.sync()
+    if config.viewer_start_hold_s:
+        time.sleep(config.viewer_start_hold_s)
+
+
+def _finish_viewer_presentation(
+    robot: RightArmRobot, config: ChopConfig
+) -> None:
+    viewer = robot._viewer
+    if (
+        viewer is not None
+        and viewer.is_running()
+        and config.viewer_end_hold_s
+    ):
+        time.sleep(config.viewer_end_hold_s)
