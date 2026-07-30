@@ -46,6 +46,17 @@ def test_unreachable_path_fails_before_execution():
         kin.solve_path([pose], RIGHT_HOME_RAD)
 
 
+def test_malformed_path_pose_reports_its_sample_index_and_cause():
+    robot = RightArmRobot()
+    kin = Kinematics(robot.sim)
+    valid_pose = kin.fk(RIGHT_HOME_RAD)
+
+    with pytest.raises(PathIkError, match="sample 1") as error:
+        kin.solve_path([valid_pose, np.eye(3)], RIGHT_HOME_RAD)
+
+    assert isinstance(error.value.__cause__, ValueError)
+
+
 @pytest.mark.parametrize(
     "pose",
     (

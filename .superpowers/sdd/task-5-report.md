@@ -82,3 +82,24 @@ No remaining functional concerns. Full `MjData` copies intentionally trade a
 small amount of preflight computation and allocation for exact preservation of
 the shared runtime state; kinematics probes remained fast for the current
 14-DOF model.
+
+## Indexed path-validation review fix
+
+`solve_path()` now translates per-sample pose-validation `ValueError`s into
+`PathIkError` with the exact failing sample index and preserves the validation
+exception through Python exception chaining.
+
+The regression uses a valid first pose followed by a malformed 3-by-3 pose.
+Before the fix, sample 1 leaked `ValueError: target must be a finite rigid 4x4
+pose`; afterward it raises indexed `PathIkError` whose `__cause__` is that
+`ValueError`.
+
+Fresh verification after the fix:
+
+```text
+.venv/bin/python -m pytest tests/simulation/test_kinematics.py -v
+15 passed
+
+.venv/bin/python -m pytest -v
+27 passed
+```

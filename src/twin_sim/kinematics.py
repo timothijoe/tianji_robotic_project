@@ -112,7 +112,10 @@ class Kinematics:
         previous = self._validated_joints(seed)
         solutions = []
         for index, pose in enumerate(poses):
-            result = self.ik(pose, previous)
+            try:
+                result = self.ik(pose, previous)
+            except ValueError as error:
+                raise PathIkError(f"invalid pose at sample {index}: {error}") from error
             if not result.success:
                 raise PathIkError(
                     f"inverse kinematics failed at sample {index} "
