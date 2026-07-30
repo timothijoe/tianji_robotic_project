@@ -1,0 +1,28 @@
+import csv
+
+import pytest
+
+from twin_sim.tasks.chop import ChopConfig, run_chop
+
+
+def test_one_chop_completes_and_logs_all_phases(tmp_path):
+    path = tmp_path / "chop.csv"
+
+    with pytest.warns(RuntimeWarning):
+        result = run_chop(ChopConfig(control_dt_s=0.01), log_path=path)
+
+    assert result.completed
+    phases = {row["phase"] for row in csv.DictReader(path.open())}
+    assert phases >= {"APPROACH", "DESCEND", "HOLD", "RETRACT", "COMPLETE"}
+    assert result.final_tip_z_m >= result.safe_tip_z_m - 0.005
+
+
+def test_force_warning_does_not_cancel_task(tmp_path):
+    with pytest.warns(RuntimeWarning):
+        result = run_chop(
+            ChopConfig(control_dt_s=0.01, force_warning_threshold_n=0.0),
+            log_path=tmp_path / "warning.csv",
+        )
+
+    assert result.completed
+    assert result.warning_count > 0
