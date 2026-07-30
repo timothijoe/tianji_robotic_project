@@ -82,6 +82,24 @@ def test_contact_target_limits_blade_penetration():
         robot.close()
 
 
+def test_cleaver_cutting_edge_is_horizontal_at_home():
+    robot = RightArmRobot()
+    try:
+        data = robot.sim.data
+        edge_start = data.site_xpos[
+            robot.sim.require_site("right_blade_edge_top")
+        ]
+        edge_end = data.site_xpos[
+            robot.sim.require_site("right_blade_edge_bot")
+        ]
+        edge_direction = edge_end - edge_start
+        edge_direction /= np.linalg.norm(edge_direction)
+
+        assert abs(float(edge_direction[2])) <= np.sin(np.deg2rad(2.0))
+    finally:
+        robot.close()
+
+
 def test_viewer_presentation_sets_camera_and_waits(monkeypatch):
     class FakeCamera:
         azimuth = 0.0

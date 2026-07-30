@@ -107,6 +107,7 @@
                       <site name="right_force_sensor_site" size="0.012" rgba="1 0.7 0 1" />
                       <body name="right_tool_body">
                         <inertial pos="0 -0.02 0.14" mass="0.22" diaginertia="0.00022 0.00022 0.00003" />
+                        <body name="right_knife_mount" quat="0.71639228 -0.49338655 0.44002783 -0.22299624">
                         <!-- 刀面可视化: 刀柄在 Y=0, 刀面中心 Y=-0.02, 刀刃 -Y 侧突出 -->
                         <geom name="right_blade_visual" type="box" pos="-0.003 -0.02 0.09" size="0.003 0.05 0.10" rgba="0.78 0.80 0.82 1" contype="0" conaffinity="0" />
                         <!-- 刀柄可视化: 和力传感器共线 Y=0 -->
@@ -118,6 +119,7 @@
                         <site name="right_blade_edge_top" type="sphere" pos="0 -0.07 0.10" size="0.008" rgba="0 1 1 0.9" />
                         <site name="right_blade_edge_bot" type="sphere" pos="0 -0.07 0.19" size="0.008" rgba="0 1 1 0.9" />
                         <site name="right_tool_tip_site" pos="0 -0.07 0.28" size="0.009" rgba="0 1 1 0.7" />
+                        </body>
                       </body>
                     </body>
                   </body>
