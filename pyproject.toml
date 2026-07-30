@@ -6,10 +6,10 @@ build-backend = "setuptools.build_meta"
 name = "twin-joint-ws"
 version = "0.1.0"
 description = "Pure MuJoCo dual-arm chopping MVP for twin_joint_ws"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
 dependencies = [
-  "mujoco>=3.1",
-  "numpy>=1.24",
+  "mujoco==3.10.0",
+  "numpy==2.5.1",
 ]
 
 [project.scripts]
@@ -17,7 +17,7 @@ twin-sim = "twin_sim.cli:main"
 
 [project.optional-dependencies]
 test = [
-  "pytest>=7.4",
+  "pytest==9.1.1",
 ]
 
 [tool.setuptools]

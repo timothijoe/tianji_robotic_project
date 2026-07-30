@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 
@@ -14,3 +15,19 @@ def test_pytest_does_not_collect_archive():
     assert "archive" not in {
         part for path in (ROOT / "tests").rglob("*.py") for part in path.parts
     }
+
+
+def test_new_simulator_does_not_import_real_sdk():
+    forbidden = {"SDK_PYTHON", "fx_robot", "fx_kine"}
+    for path in (ROOT / "src" / "twin_sim").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        imported = {
+            node.names[0].name.split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+        } | {
+            (node.module or "").split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+        }
+        assert imported.isdisjoint(forbidden), path

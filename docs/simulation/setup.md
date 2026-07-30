@@ -23,13 +23,14 @@ Expected output is:
 3.10.0 2.5.1
 ```
 
-To verify test discovery after installation, run:
+运行当前仿真测试：
 
 ```bash
-.venv/bin/python -m pytest --collect-only -q
+.venv/bin/python -m pytest -q
 ```
 
-The baseline environment collects 210 tests.
+旧系统归档前的 210 项收集结果记录在 `baseline.md`；当前命令只运行
+`tests/simulation/` 中的新仿真测试。
 
 Before simulation work, also verify the protected real-robot and SDK files:
 
