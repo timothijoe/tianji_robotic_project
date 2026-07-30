@@ -23,9 +23,17 @@ Failing collection node IDs:
 - `tests/test_source_model.py`
 - `tests/test_twin_control_chopping.py`
 
-The protected-file hash manifest contained 91 files across `SDK_PYTHON`,
-`test`, and `real_robot_debug` before this task.
+The committed [protected-file manifest](protected-files.sha256) contains 91
+SHA-256 hashes across `SDK_PYTHON`, `test`, and `real_robot_debug`. Before a
+simulation rebuild task, verify these files from the repository root with:
+
+```bash
+sha256sum --check docs/simulation/protected-files.sha256
+```
+
+Every entry must report `OK`. Do not regenerate the manifest unless an
+authorized change deliberately modifies one of the protected files.
 
 With the pinned clean environment installed, `pytest --collect-only -q`
-successfully collects 210 tests in 0.45s. This is the legacy collection count
-to preserve during the rebuild.
+successfully collects 210 tests. This is the legacy collection count to
+preserve during the rebuild.

@@ -30,3 +30,12 @@ To verify test discovery after installation, run:
 ```
 
 The baseline environment collects 210 tests.
+
+Before simulation work, also verify the protected real-robot and SDK files:
+
+```bash
+sha256sum --check docs/simulation/protected-files.sha256
+```
+
+Run this command from the repository root; every manifest entry must report
+`OK`.
