@@ -57,18 +57,22 @@ Python API 的最小示例位于 `examples/simulation_demo.py`。
 ## 双臂猫爪倒手切菜
 
 ```bash
+.venv/bin/twin-sim guarded-chop
 .venv/bin/twin-sim guarded-chop --headless --final-hold 0
-.venv/bin/twin-sim guarded-chop --final-hold 10
+.venv/bin/twin-sim guarded-chop --scene object
 ```
 
-任务对砧板上的固定红色方块演示 5 次右刀下切；每次抬刀并横移后，左臂和
-Wuji Hand 保持猫爪姿态后退 2 cm，共倒手 4 次。刀面到所有手部碰撞代理的
-最近距离始终至少保留 2 cm，中指第二指节 site 用于显示护手轨迹；刀未抬到
-安全高度时左手不能移动，左手移动时右刀保持静止。方块不会被切分、抓起或
-推动。
+默认 `plane` 场景在砧板平面上从屏幕右侧向左侧完成 5 刀。每次右刀抬起并
+横移到下一刀安全位后，Wuji Hand 都显式执行
+`HAND_OPEN`、`HAND_SHIFT`、`HAND_CLOSE`；前 4 刀之后各完成一次开手、后退
+2 cm、重新合拢的倒手循环，总倒手 0.08 m。刀未抬到安全高度时左手不能移动，
+左手移动时右刀保持静止。
 
-Viewer 中蓝色为右刀规划轨迹、青色为右刀实际轨迹、紫色为左手护手指关节
-实际轨迹、黄色为左手目标点；右上角显示刀数、阶段、刀手距离和下切许可。
+Viewer 中蓝线是右刀规划路径，青线是右刀实际轨迹，紫线是左手护手实际轨迹，
+并在砧板上保留 5 个紧凑的 cut marks；右上角显示刀数、阶段、刀手距离和下切
+许可。`--scene object` 保留先前固定红色方块的接触标定，供回归验证使用，
+但不是默认演示。方块不会被切分、抓起或推动。
+
 该命令只运行 MuJoCo，不会向实体机械臂或 Wuji Hand 发送命令。
 
 ## 灵巧手控制

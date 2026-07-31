@@ -3,7 +3,21 @@ from types import SimpleNamespace
 import pytest
 
 import twin_sim.cli as cli
-from twin_sim.cli import main
+from twin_sim.cli import build_parser, main
+
+
+def test_guarded_chop_cli_defaults_to_plane_scene():
+    args = build_parser().parse_args(["guarded-chop", "--headless"])
+
+    assert args.scene == "plane"
+
+
+def test_guarded_chop_cli_accepts_object_scene():
+    args = build_parser().parse_args(
+        ["guarded-chop", "--scene", "object", "--headless"]
+    )
+
+    assert args.scene == "object"
 
 
 def test_guarded_chop_cli_prints_coordination_metrics(
@@ -25,11 +39,19 @@ def test_guarded_chop_cli_prints_coordination_metrics(
     monkeypatch.setattr(cli, "run_guarded_chop", fake_run)
 
     status = cli.main(
-        ["guarded-chop", "--headless", "--final-hold", "0"]
+        [
+            "guarded-chop",
+            "--scene",
+            "object",
+            "--headless",
+            "--final-hold",
+            "0",
+        ]
     )
 
     assert status == 0
     assert captured["viewer"] is False
+    assert captured["config"].scene_mode == "object"
     assert captured["config"].final_hold_s == 0.0
     output = capsys.readouterr().out
     assert "cuts=5" in output

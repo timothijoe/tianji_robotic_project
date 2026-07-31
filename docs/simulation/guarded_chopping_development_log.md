@@ -3,6 +3,25 @@
 日期：2026-07-31
 分支：`feature/left-wuji-pick-place`
 
+## 2026-08-01：默认平面演示
+
+`guarded-chop` 现在默认使用 `plane` 场景，在砧板平面上从屏幕右侧向左侧
+完成 5 刀和 4 次倒手。每次换位都明确经过 `HAND_OPEN`、`HAND_SHIFT`、
+`HAND_CLOSE`，即开手、后退 0.02 m、重新合拢；总目标位移仍为 0.08 m。
+
+Viewer 用蓝线显示右刀规划路径、青线显示右刀实际轨迹、紫线显示左手护手
+实际轨迹，并保留 5 个紧凑的 cut marks。命令入口为：
+
+```bash
+.venv/bin/twin-sim guarded-chop
+.venv/bin/twin-sim guarded-chop --headless --final-hold 0
+.venv/bin/twin-sim guarded-chop --scene object
+```
+
+`--scene object` 保留下面记录的固定红色方块接触标定，作为回归场景；它不再
+是默认演示。两个场景都只运行 MuJoCo，不会连接或控制实体机械臂、ROS 或
+Wuji Hand SDK。
+
 ## 目标
 
 右臂持刀对固定方块演示 5 次下切，左臂和 Wuji Hand 以猫爪姿态护住方块，
