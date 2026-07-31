@@ -148,6 +148,22 @@ def test_abort_reason_replaces_live_phase():
     assert "clearance lost" in viewer.texts[3]
 
 
+def test_overlay_displays_coupled_shift_phase():
+    viewer = FakeViewer()
+    trace = GuardedChopTrace(viewer)
+
+    trace.append(
+        actual_knife=(0.7, 0.04, 0.36),
+        actual_guard=(0.6, 0.10, 0.36),
+        phase="coupled_shift",
+        cut_index=2,
+        minimum_distance_m=0.04,
+        cut_allowed=False,
+    )
+
+    assert "phase=coupled_shift" in viewer.texts[3]
+
+
 def test_overlay_keeps_cumulative_minimum_distance():
     viewer = FakeViewer()
     trace = GuardedChopTrace(viewer, marker_stride=1)
