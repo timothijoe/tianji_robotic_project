@@ -18,12 +18,12 @@ def test_guarded_chop_defaults_match_approved_motion():
     assert config.final_hold_s == 10.0
 
 
-def test_plane_mode_and_coupled_phases_are_defaults():
+def test_plane_mode_and_low_guard_phases_are_defaults():
     config = GuardedChopConfig()
 
     assert config.scene_mode == "plane"
-    assert GuardedChopPhase.COUPLED_OPEN.value == "coupled_open"
-    assert GuardedChopPhase.COUPLED_CLOSE.value == "coupled_close"
+    assert GuardedChopPhase.LOW_GUARD_OPEN.value == "low_guard_open"
+    assert GuardedChopPhase.KNIFE_LIFT_SHIFT.value == "knife_lift_shift"
 
 
 @pytest.mark.parametrize(
@@ -52,11 +52,12 @@ def test_phase_order_contains_interlocked_actions():
         "initialize",
         "guard_ready",
         "cut_down",
-        "knife_clear",
-        "coupled_open",
-        "coupled_shift",
-        "coupled_close",
+        "low_guard_open",
+        "low_guard_shift",
+        "low_guard_close",
         "guard_settle",
+        "knife_lift_shift",
+        "knife_clear",
         "complete",
         "aborted",
     ]

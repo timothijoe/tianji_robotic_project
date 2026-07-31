@@ -43,11 +43,12 @@ class GuardedChopPhase(str, Enum):
     INITIALIZE = "initialize"
     GUARD_READY = "guard_ready"
     CUT_DOWN = "cut_down"
-    KNIFE_CLEAR = "knife_clear"
-    COUPLED_OPEN = "coupled_open"
-    COUPLED_SHIFT = "coupled_shift"
-    COUPLED_CLOSE = "coupled_close"
+    LOW_GUARD_OPEN = "low_guard_open"
+    LOW_GUARD_SHIFT = "low_guard_shift"
+    LOW_GUARD_CLOSE = "low_guard_close"
     GUARD_SETTLE = "guard_settle"
+    KNIFE_LIFT_SHIFT = "knife_lift_shift"
+    KNIFE_CLEAR = "knife_clear"
     COMPLETE = "complete"
     ABORTED = "aborted"
 
@@ -173,6 +174,7 @@ class _GuardedChopPlan:
     right_ready_rad: np.ndarray
     left_ready_rad: np.ndarray
     cuts: tuple[_CutTrajectories, ...]
+    knife_lift_shifts: tuple[tuple[TrajectoryPoint, ...], ...]
     cut_points_xy: np.ndarray
     guard_shifts: tuple[tuple[TrajectoryPoint, ...], ...]
     guard_targets: np.ndarray
@@ -295,6 +297,7 @@ def _preflight_guarded_chop(
             cube_top - board_top + 0.008,
             config,
         )
+        knife_lift_shifts = _diagonal_lift_shifts(robot, cuts, config)
         left_ready, guard_targets, guard_shifts = _guard_plan(
             robot,
             cut_points_xy,
@@ -319,6 +322,7 @@ def _preflight_guarded_chop(
             right_ready_rad=right_ready.copy(),
             left_ready_rad=left_ready.copy(),
             cuts=cuts,
+            knife_lift_shifts=knife_lift_shifts,
             cut_points_xy=cut_points_xy,
             guard_shifts=guard_shifts,
             guard_targets=guard_targets,
@@ -388,6 +392,29 @@ def _translate_right_cuts(
             _CutTrajectories(tuple(descent), tuple(retract), shift)
         )
     return tuple(translated)
+
+
+def _diagonal_lift_shifts(
+    robot: RightArmRobot,
+    cuts: tuple[_CutTrajectories, ...],
+    config: GuardedChopConfig,
+) -> tuple[tuple[TrajectoryPoint, ...], ...]:
+    duration_s = config.knife_up_duration_s + config.hand_shift_duration_s
+    paths = []
+    for current, following in zip(cuts[:-1], cuts[1:], strict=True):
+        paths.append(
+            tuple(
+                cartesian_trajectory(
+                    robot.right_kinematics,
+                    current.descent[-1].target_pose,
+                    following.descent[0].target_pose,
+                    current.descent[-1].joints_rad,
+                    duration_s,
+                    config.control_dt_s,
+                )
+            )
+        )
+    return tuple(paths)
 
 
 def _right_to_left_indices(points_xy: np.ndarray) -> np.ndarray:

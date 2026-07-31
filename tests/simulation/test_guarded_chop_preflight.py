@@ -54,6 +54,29 @@ def test_preflight_builds_five_cuts_and_four_guard_shifts():
     robot.close()
 
 
+def test_preflight_builds_four_diagonal_lift_shift_paths():
+    robot = RightArmRobot(viewer=False)
+    try:
+        plan = _preflight_guarded_chop(robot, GuardedChopConfig())
+    finally:
+        robot.close()
+
+    assert len(plan.knife_lift_shifts) == 4
+    for index, path in enumerate(plan.knife_lift_shifts):
+        start = path[0].target_pose[:3, 3]
+        end = path[-1].target_pose[:3, 3]
+        assert end[2] > start[2] + 0.05
+        assert np.linalg.norm(end[:2] - start[:2]) > 0.01
+        np.testing.assert_allclose(
+            path[0].target_pose,
+            plan.cuts[index].descent[-1].target_pose,
+        )
+        np.testing.assert_allclose(
+            path[-1].target_pose,
+            plan.cuts[index + 1].descent[0].target_pose,
+        )
+
+
 def test_point_to_oriented_blade_box_distance_uses_surface_not_center():
     center = np.array((0.0, 0.0, 0.0))
     rotation = np.eye(3)
