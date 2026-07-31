@@ -40,15 +40,17 @@ def test_cut_requires_stationary_guard_and_clearance():
 
 
 @pytest.mark.parametrize(
-    "phase", ("HAND_OPEN", "HAND_SHIFT", "HAND_CLOSE")
+    "phase", ("COUPLED_OPEN", "COUPLED_SHIFT", "COUPLED_CLOSE")
 )
-def test_left_hand_phase_requires_raised_stationary_knife(phase):
+def test_coupled_phase_requires_raised_knife(phase):
     coordinator = SafetyCoordinator(minimum_distance_m=0.02)
     allowed = observation(
         phase=phase,
         knife_height_m=0.36,
-        right_target_stationary=True,
+        right_target_stationary=False,
         left_target_stationary=False,
+        left_speed_rad_s=0.2,
+        right_speed_rad_s=0.2,
     )
 
     assert coordinator.evaluate(allowed).allowed
@@ -56,16 +58,10 @@ def test_left_hand_phase_requires_raised_stationary_knife(phase):
         observation(
             phase=phase,
             knife_height_m=0.33,
-            right_target_stationary=True,
-            left_target_stationary=False,
-        )
-    ).allowed
-    assert not coordinator.evaluate(
-        observation(
-            phase=phase,
-            knife_height_m=0.36,
             right_target_stationary=False,
             left_target_stationary=False,
+            left_speed_rad_s=0.2,
+            right_speed_rad_s=0.2,
         )
     ).allowed
 
@@ -90,10 +86,7 @@ def test_excessive_guard_contact_is_rejected():
     ).allowed
 
 
-@pytest.mark.parametrize(
-    "phase", ("HAND_OPEN", "HAND_SHIFT", "HAND_CLOSE")
-)
-def test_actual_arm_motion_blocks_interlocked_phase(phase):
+def test_actual_guard_motion_blocks_cut_phase():
     coordinator = SafetyCoordinator()
 
     assert not coordinator.evaluate(
@@ -101,12 +94,4 @@ def test_actual_arm_motion_blocks_interlocked_phase(phase):
     ).allowed
     assert not coordinator.evaluate(
         observation(hand_speed_rad_s=0.06)
-    ).allowed
-    assert not coordinator.evaluate(
-        observation(
-            phase=phase,
-            right_target_stationary=True,
-            left_target_stationary=False,
-            right_speed_rad_s=0.06,
-        )
     ).allowed

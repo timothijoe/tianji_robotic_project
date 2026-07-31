@@ -15,7 +15,7 @@ from twin_sim.tasks.guarded_chop import (
 )
 
 
-def test_plane_mode_visibly_opens_shifts_and_closes_each_time():
+def test_plane_mode_couples_knife_recovery_and_guard_handover():
     robot = RightArmRobot(viewer=False)
     try:
         plan = _preflight_guarded_chop(robot, GuardedChopConfig())
@@ -58,15 +58,10 @@ def test_plane_mode_visibly_opens_shifts_and_closes_each_time():
         for sample in result.samples
         if sample.phase is GuardedChopPhase.CUT_DOWN
     ) <= 0.05
-    assert max(
-        sample.right_speed_rad_s
-        for sample in result.samples
-        if sample.phase is GuardedChopPhase.HAND_SHIFT
-    ) <= 0.05
     for phase in (
-        GuardedChopPhase.HAND_OPEN,
-        GuardedChopPhase.HAND_SHIFT,
-        GuardedChopPhase.HAND_CLOSE,
+        GuardedChopPhase.COUPLED_OPEN,
+        GuardedChopPhase.COUPLED_SHIFT,
+        GuardedChopPhase.COUPLED_CLOSE,
     ):
         heights = [
             sample.knife_height_m
@@ -87,37 +82,32 @@ def test_plane_mode_visibly_opens_shifts_and_closes_each_time():
         targets = np.asarray([sample.left_target_rad for sample in cut])
         assert np.max(np.ptp(targets, axis=0)) <= 1e-12
 
-    shifts = [
-        sample
-        for sample in result.samples
-        if sample.phase is GuardedChopPhase.HAND_SHIFT
+    clear = [
+        sample for sample in result.samples
+        if sample.phase is GuardedChopPhase.KNIFE_CLEAR
     ]
-    for index in range(1, 5):
-        shift = [sample for sample in shifts if sample.cut_index == index]
-        targets = np.asarray([sample.right_target_rad for sample in shift])
-        assert np.max(np.ptp(targets, axis=0)) <= 1e-12
+    assert clear
+    assert max(sample.left_speed_rad_s for sample in clear) <= 0.05
+    assert max(sample.hand_speed_rad_s for sample in clear) <= 0.05
 
-    phases = [sample.phase for sample in result.samples]
-    assert phases.count(GuardedChopPhase.HAND_OPEN) > 0
-    assert phases.count(GuardedChopPhase.HAND_CLOSE) > 0
     for index in range(1, 5):
         opened = [
             sample
             for sample in result.samples
             if sample.cut_index == index
-            and sample.phase is GuardedChopPhase.HAND_OPEN
+            and sample.phase is GuardedChopPhase.COUPLED_OPEN
         ]
         shifted = [
             sample
             for sample in result.samples
             if sample.cut_index == index
-            and sample.phase is GuardedChopPhase.HAND_SHIFT
+            and sample.phase is GuardedChopPhase.COUPLED_SHIFT
         ]
         closed = [
             sample
             for sample in result.samples
             if sample.cut_index == index
-            and sample.phase is GuardedChopPhase.HAND_CLOSE
+            and sample.phase is GuardedChopPhase.COUPLED_CLOSE
         ]
         assert opened and shifted and closed
         assert opened[-1].time_s < shifted[0].time_s
@@ -142,14 +132,16 @@ def test_plane_mode_visibly_opens_shifts_and_closes_each_time():
             rtol=0.0,
             atol=1e-9,
         )
-        for hand_phase in (opened, shifted, closed):
-            right_targets = np.asarray(
-                [sample.right_target_rad for sample in hand_phase]
-            )
-            assert np.max(np.ptp(right_targets, axis=0)) <= 1e-12
-            assert max(
-                sample.right_speed_rad_s for sample in hand_phase
-            ) <= 0.05
+        assert any(
+            sample.right_speed_rad_s > 0.005
+            and sample.hand_speed_rad_s > 0.005
+            for sample in opened
+        )
+        assert any(
+            sample.right_speed_rad_s > 0.005
+            and sample.left_speed_rad_s > 0.005
+            for sample in shifted
+        )
 
 
 def test_plane_scene_keeps_guard_cube_hidden_and_collision_disabled():
@@ -185,7 +177,7 @@ def test_object_mode_retains_contact_latched_hand():
     shifts = [
         sample
         for sample in result.samples
-        if sample.phase is GuardedChopPhase.HAND_SHIFT
+        if sample.phase is GuardedChopPhase.COUPLED_SHIFT
     ]
     assert shifts
     assert max(
