@@ -9,7 +9,7 @@ from twin_sim.hand_names import HAND_ACTUATORS, HAND_JOINTS
 def test_active_scene_has_arm_and_hand_position_actuators():
     sim = SimulationModel.load()
     actuator_ids = (*sim.left.actuator_ids, *sim.right.actuator_ids)
-    assert sim.model.njnt == 34
+    assert sim.model.njnt == 35
     assert sim.model.nu == 34
     assert len(actuator_ids) == 14
     assert sim.left.actuator_ids.shape == (7,)

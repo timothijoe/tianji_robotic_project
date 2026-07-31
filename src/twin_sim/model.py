@@ -115,6 +115,9 @@ class SimulationModel:
     def require_site(self, name: str) -> int:
         return self._require_id(self.model, mujoco.mjtObj.mjOBJ_SITE, "site", name)
 
+    def require_body(self, name: str) -> int:
+        return self._require_id(self.model, mujoco.mjtObj.mjOBJ_BODY, "body", name)
+
     def require_geom(self, name: str) -> int:
         return self._require_id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "geom", name)
 
