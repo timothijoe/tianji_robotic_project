@@ -42,10 +42,11 @@ class GuardedChopPhase(str, Enum):
     INITIALIZE = "initialize"
     GUARD_READY = "guard_ready"
     CUT_DOWN = "cut_down"
-    KNIFE_UP = "knife_up"
-    HAND_OPEN = "hand_open"
-    HAND_SHIFT = "hand_shift"
-    HAND_CLOSE = "hand_close"
+    KNIFE_CLEAR = "knife_clear"
+    COUPLED_OPEN = "coupled_open"
+    COUPLED_SHIFT = "coupled_shift"
+    COUPLED_CLOSE = "coupled_close"
+    GUARD_SETTLE = "guard_settle"
     COMPLETE = "complete"
     ABORTED = "aborted"
 
@@ -222,6 +223,30 @@ def _joint_trajectory(
     start = np.asarray(start_rad, dtype=float)
     goal = np.asarray(goal_rad, dtype=float)
     return tuple(start + value * (goal - start) for value in smooth)
+
+
+def _resample_trajectory(
+    points: Sequence[np.ndarray], count: int
+) -> tuple[np.ndarray, ...]:
+    if count <= 0:
+        raise ValueError("count must be positive")
+    values = tuple(np.asarray(point, dtype=float) for point in points)
+    if not values:
+        raise ValueError("trajectory must not be empty")
+    if len(values) == 1:
+        return tuple(values[0].copy() for _ in range(count))
+    source = np.linspace(0.0, 1.0, len(values))
+    target = np.linspace(0.0, 1.0, count)
+    stacked = np.asarray(values)
+    return tuple(
+        np.asarray(
+            [
+                np.interp(progress, source, stacked[:, axis])
+                for axis in range(stacked.shape[1])
+            ]
+        )
+        for progress in target
+    )
 
 
 def _preflight_guarded_chop(
@@ -403,6 +428,17 @@ def _blade_bottom_height(robot: RightArmRobot, joints_rad: np.ndarray) -> float:
             np.abs(rotation[2]) @ robot.sim.model.geom_size[blade]
         )
         return float(robot.sim.data.geom_xpos[blade, 2] - radius)
+
+
+def _first_safe_retract_index(
+    robot: RightArmRobot,
+    retract: Sequence[TrajectoryPoint],
+    safe_height_m: float,
+) -> int:
+    for index, point in enumerate(retract):
+        if _blade_bottom_height(robot, point.joints_rad) >= safe_height_m:
+            return index
+    raise ValueError("retract never reaches safe knife height")
 
 
 def _guard_plan(

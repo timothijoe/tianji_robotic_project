@@ -5,6 +5,7 @@ import twin_sim.tasks.guarded_chop as guarded_chop
 from twin_sim.tasks.guarded_chop import (
     GuardedChopConfig,
     GuardedChopPhase,
+    _resample_trajectory,
 )
 
 
@@ -17,12 +18,12 @@ def test_guarded_chop_defaults_match_approved_motion():
     assert config.final_hold_s == 10.0
 
 
-def test_plane_mode_and_open_close_phases_are_defaults():
+def test_plane_mode_and_coupled_phases_are_defaults():
     config = GuardedChopConfig()
 
     assert config.scene_mode == "plane"
-    assert GuardedChopPhase.HAND_OPEN.value == "hand_open"
-    assert GuardedChopPhase.HAND_CLOSE.value == "hand_close"
+    assert GuardedChopPhase.COUPLED_OPEN.value == "coupled_open"
+    assert GuardedChopPhase.COUPLED_CLOSE.value == "coupled_close"
 
 
 @pytest.mark.parametrize(
@@ -51,13 +52,31 @@ def test_phase_order_contains_interlocked_actions():
         "initialize",
         "guard_ready",
         "cut_down",
-        "knife_up",
-        "hand_open",
-        "hand_shift",
-        "hand_close",
+        "knife_clear",
+        "coupled_open",
+        "coupled_shift",
+        "coupled_close",
+        "guard_settle",
         "complete",
         "aborted",
     ]
+
+
+def test_resample_trajectory_matches_endpoints_and_requested_count():
+    points = (np.asarray([0.0, 2.0]), np.asarray([1.0, 4.0]))
+
+    result = _resample_trajectory(points, 5)
+
+    assert len(result) == 5
+    np.testing.assert_allclose(result[0], points[0])
+    np.testing.assert_allclose(result[-1], points[-1])
+    np.testing.assert_allclose(result[2], [0.5, 3.0])
+
+
+@pytest.mark.parametrize("count", (0, -1))
+def test_resample_trajectory_rejects_non_positive_count(count):
+    with pytest.raises(ValueError, match="count must be positive"):
+        _resample_trajectory((np.zeros(2),), count)
 
 
 def test_guarded_chop_viewer_sync_is_limited_to_display_rate():
