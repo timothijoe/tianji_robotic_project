@@ -624,10 +624,16 @@ def _activate_guarded_scene(robot: RightArmRobot) -> None:
         geom = robot.sim.require_geom(name)
         robot.sim.model.geom_contype[geom] |= guard_contact_bit
         robot.sim.model.geom_conaffinity[geom] |= guard_contact_bit
+        if name == "right_knife_blade":
+            robot.sim.model.geom_contype[geom] |= 2
+            robot.sim.model.geom_conaffinity[geom] |= 2
         body = int(robot.sim.model.geom_bodyid[geom])
         while body:
             robot.sim.model.body_contype[body] |= guard_contact_bit
             robot.sim.model.body_conaffinity[body] |= guard_contact_bit
+            if name == "right_knife_blade":
+                robot.sim.model.body_contype[body] |= 2
+                robot.sim.model.body_conaffinity[body] |= 2
             body = int(robot.sim.model.body_parentid[body])
     for name in (
         "pick_source_pedestal",

@@ -67,3 +67,36 @@ def test_cube_collision_is_paired_only_with_middle_finger_pad():
         assert partners == {"left_finger3_pad"}
     finally:
         robot.close()
+
+
+def test_blade_collision_is_paired_with_every_named_hand_proxy():
+    robot = RightArmRobot(viewer=False)
+    try:
+        _activate_guarded_scene(robot)
+        model = robot.sim.model
+        blade = robot.sim.require_geom("right_knife_blade")
+        palm = robot.sim.require_body("left_palm_link")
+        expected = set()
+        partners = set()
+        for geom in range(model.ngeom):
+            name = mujoco.mj_id2name(
+                model, mujoco.mjtObj.mjOBJ_GEOM, geom
+            )
+            if (
+                name is None
+                or not _geom_belongs_to_body_tree(robot, geom, palm)
+                or model.geom_contype[geom] == 0
+            ):
+                continue
+            expected.add(name)
+            compatible = (
+                model.geom_contype[blade] & model.geom_conaffinity[geom]
+            ) or (
+                model.geom_contype[geom] & model.geom_conaffinity[blade]
+            )
+            if compatible:
+                partners.add(name)
+
+        assert partners == expected
+    finally:
+        robot.close()
