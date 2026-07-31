@@ -10,6 +10,13 @@ CAT_PAW_RAD = np.asarray(
 )
 
 
+CAT_PAW_OPEN_RAD = np.asarray(
+    (0.80, -0.02, 0.55, 0.55)
+    + (0.20, 0.00, 0.55, 0.55) * 4,
+    dtype=float,
+)
+
+
 @dataclass(frozen=True)
 class SafetyObservation:
     phase: str

@@ -16,6 +16,14 @@ def test_guarded_chop_defaults_match_approved_motion():
     assert config.final_hold_s == 10.0
 
 
+def test_plane_mode_and_open_close_phases_are_defaults():
+    config = GuardedChopConfig()
+
+    assert config.scene_mode == "plane"
+    assert GuardedChopPhase.HAND_OPEN.value == "hand_open"
+    assert GuardedChopPhase.HAND_CLOSE.value == "hand_close"
+
+
 @pytest.mark.parametrize(
     "changes",
     (
@@ -26,6 +34,10 @@ def test_guarded_chop_defaults_match_approved_motion():
         {"minimum_distance_m": np.nan},
         {"maximum_guard_penetration_m": -0.001},
         {"maximum_guard_force_n": np.nan},
+        {"scene_mode": "unsupported"},
+        {"hand_open_duration_s": 0.0},
+        {"hand_close_duration_s": np.inf},
+        {"hand_close_duration_s": 0.605},
     ),
 )
 def test_invalid_config_is_rejected(changes):
@@ -39,7 +51,9 @@ def test_phase_order_contains_interlocked_actions():
         "guard_ready",
         "cut_down",
         "knife_up",
+        "hand_open",
         "hand_shift",
+        "hand_close",
         "complete",
         "aborted",
     ]

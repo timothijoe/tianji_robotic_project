@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Sequence
+from typing import Literal, Sequence
 
 import mujoco
 import numpy as np
@@ -22,18 +22,21 @@ from twin_sim.tasks.pick_place import LEFT_GRASP_READY_RAD
 from twin_sim.trajectory import TrajectoryPoint, cartesian_trajectory
 
 
-class GuardedChopPhase(Enum):
+class GuardedChopPhase(str, Enum):
     INITIALIZE = "initialize"
     GUARD_READY = "guard_ready"
     CUT_DOWN = "cut_down"
     KNIFE_UP = "knife_up"
+    HAND_OPEN = "hand_open"
     HAND_SHIFT = "hand_shift"
+    HAND_CLOSE = "hand_close"
     COMPLETE = "complete"
     ABORTED = "aborted"
 
 
 @dataclass(frozen=True)
 class GuardedChopConfig:
+    scene_mode: Literal["plane", "object"] = "plane"
     cuts: int = 5
     hand_shift_m: float = 0.02
     minimum_distance_m: float = 0.02
@@ -43,12 +46,16 @@ class GuardedChopConfig:
     guard_ready_duration_s: float = 2.0
     cut_duration_s: float = 1.0
     knife_up_duration_s: float = 1.0
+    hand_open_duration_s: float = 0.6
     hand_shift_duration_s: float = 3.0
+    hand_close_duration_s: float = 0.6
     interlock_settle_s: float = 0.3
     stability_timeout_s: float = 4.0
     final_hold_s: float = 10.0
 
     def validated(self) -> "GuardedChopConfig":
+        if self.scene_mode not in {"plane", "object"}:
+            raise ValueError("scene_mode must be 'plane' or 'object'")
         if (
             isinstance(self.cuts, bool)
             or not isinstance(self.cuts, (int, np.integer))
@@ -73,7 +80,9 @@ class GuardedChopConfig:
             self.guard_ready_duration_s,
             self.cut_duration_s,
             self.knife_up_duration_s,
+            self.hand_open_duration_s,
             self.hand_shift_duration_s,
+            self.hand_close_duration_s,
             self.interlock_settle_s,
             self.stability_timeout_s,
         )
