@@ -408,19 +408,33 @@ def _diagonal_lift_shifts(
     duration_s = config.knife_up_duration_s + config.hand_shift_duration_s
     paths = []
     for current, following in zip(cuts[:-1], cuts[1:], strict=True):
-        paths.append(
-            tuple(
-                cartesian_trajectory(
-                    robot.right_kinematics,
-                    current.descent[-1].target_pose,
-                    following.descent[0].target_pose,
-                    current.descent[-1].joints_rad,
-                    duration_s,
-                    config.control_dt_s,
-                )
-            )
+        path = cartesian_trajectory(
+            robot.right_kinematics,
+            current.descent[-1].target_pose,
+            following.descent[0].target_pose,
+            current.descent[-1].joints_rad,
+            duration_s,
+            config.control_dt_s,
         )
+        endpoint = path[-1]
+        path[-1] = TrajectoryPoint(
+            endpoint.time_s,
+            following.descent[0].joints_rad.copy(),
+            endpoint.velocity_rad_s.copy(),
+            endpoint.target_pose.copy(),
+        )
+        paths.append(tuple(path))
     return tuple(paths)
+
+
+def _validate_nonapproaching_retreat(
+    distances_m: Sequence[float], *, tolerance_m: float = 1e-6
+) -> None:
+    values = np.asarray(distances_m, dtype=float)
+    if values.ndim != 1 or not np.isfinite(values).all():
+        raise ValueError("guard retreat distances must be finite and 1-D")
+    if np.any(np.diff(values) < -tolerance_m):
+        raise ValueError("guard retreat moved closer to knife")
 
 
 def _right_to_left_indices(points_xy: np.ndarray) -> np.ndarray:
@@ -596,15 +610,20 @@ def _planned_clearances(
         for hand in opening:
             measure(contact_right, left, hand)
 
-        start_distance = measure(
-            contact_right, left, CAT_PAW_OPEN_RAD
-        )
+        retreat_distances = [
+            measure(contact_right, left, CAT_PAW_OPEN_RAD)
+        ]
         for point in guard_shifts[index]:
-            measure(contact_right, point.joints_rad, CAT_PAW_OPEN_RAD)
+            retreat_distances.append(
+                measure(
+                    contact_right, point.joints_rad, CAT_PAW_OPEN_RAD
+                )
+            )
         left = guard_shifts[index][-1].joints_rad
-        end_distance = measure(contact_right, left, CAT_PAW_OPEN_RAD)
-        if end_distance + 1e-6 < start_distance:
-            raise ValueError("guard retreat moved closer to knife")
+        retreat_distances.append(
+            measure(contact_right, left, CAT_PAW_OPEN_RAD)
+        )
+        _validate_nonapproaching_retreat(retreat_distances)
 
         closing = _joint_trajectory(
             CAT_PAW_OPEN_RAD,
@@ -785,6 +804,16 @@ def run_guarded_chop(
                     stable_time = 0.0
             raise RuntimeError("knife did not settle before guard shift")
 
+        def wait_for_knife_clearance(cut_index: int) -> None:
+            maximum_steps = int(
+                round(config.stability_timeout_s / config.control_dt_s)
+            )
+            for _ in range(maximum_steps):
+                if _current_blade_bottom(robot) >= plan.safe_knife_height_m:
+                    return
+                step_and_record(GuardedChopPhase.KNIFE_CLEAR, cut_index)
+            raise RuntimeError("knife did not reach safe height")
+
         phase = GuardedChopPhase.GUARD_READY
         for _ in range(
             int(round(config.guard_ready_duration_s / config.control_dt_s))
@@ -849,7 +878,20 @@ def run_guarded_chop(
                     step_and_record(phase, index)
             else:
                 phase = GuardedChopPhase.KNIFE_CLEAR
-                for point in (*cut.retract[1:], *cut.shift[1:]):
+                safe_index = _first_safe_retract_index(
+                    robot,
+                    cut.retract,
+                    plan.safe_knife_height_m
+                    + _KNIFE_CLEAR_TARGET_HEADROOM_M,
+                )
+                for point in cut.retract[1 : safe_index + 1]:
+                    robot.command(point.joints_rad)
+                    step_and_record(phase, index)
+                wait_for_knife_clearance(index)
+                for point in (
+                    *cut.retract[safe_index + 1 :],
+                    *cut.shift[1:],
+                ):
                     robot.command(point.joints_rad)
                     step_and_record(phase, index)
                 wait_for_knife_stability(phase, index)

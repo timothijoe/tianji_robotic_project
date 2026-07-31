@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from twin_sim.robot import RightArmRobot
 from twin_sim.tasks.guarded_chop import (
@@ -6,6 +7,7 @@ from twin_sim.tasks.guarded_chop import (
     _default_view_screen_x,
     _point_to_box_distance,
     _preflight_guarded_chop,
+    _validate_nonapproaching_retreat,
 )
 
 
@@ -75,6 +77,15 @@ def test_preflight_builds_four_diagonal_lift_shift_paths():
             path[-1].target_pose,
             plan.cuts[index + 1].descent[0].target_pose,
         )
+        np.testing.assert_array_equal(
+            path[-1].joints_rad,
+            plan.cuts[index + 1].descent[0].joints_rad,
+        )
+
+
+def test_retreat_validation_rejects_any_intermediate_approach():
+    with pytest.raises(ValueError, match="guard retreat moved closer"):
+        _validate_nonapproaching_retreat((0.050, 0.051, 0.0505))
 
 
 def test_point_to_oriented_blade_box_distance_uses_surface_not_center():

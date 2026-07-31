@@ -58,7 +58,13 @@ def test_knife_clear_rejects_guard_motion_below_safe_height():
 
 
 @pytest.mark.parametrize(
-    "phase", ("LOW_GUARD_OPEN", "LOW_GUARD_SHIFT", "LOW_GUARD_CLOSE")
+    "phase",
+    (
+        "LOW_GUARD_OPEN",
+        "LOW_GUARD_SHIFT",
+        "LOW_GUARD_CLOSE",
+        "GUARD_SETTLE",
+    ),
 )
 def test_low_guard_motion_requires_stationary_knife(phase):
     coordinator = SafetyCoordinator()

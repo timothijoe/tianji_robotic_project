@@ -107,6 +107,7 @@ class SafetyCoordinator:
             "LOW_GUARD_OPEN",
             "LOW_GUARD_SHIFT",
             "LOW_GUARD_CLOSE",
+            "GUARD_SETTLE",
         } and (
             not value.right_target_stationary
             or value.right_speed_rad_s > 0.05

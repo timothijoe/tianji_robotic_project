@@ -194,6 +194,13 @@ def test_object_preflight_keeps_conservative_serial_trajectory(monkeypatch):
 
 
 def test_object_mode_retains_contact_latched_hand():
+    robot = RightArmRobot(viewer=False)
+    try:
+        plan = _preflight_guarded_chop(
+            robot, GuardedChopConfig(scene_mode="object")
+        )
+    finally:
+        robot.close()
     result = run_guarded_chop(
         GuardedChopConfig(scene_mode="object", final_hold_s=0.0),
         viewer=False,
@@ -213,6 +220,21 @@ def test_object_mode_retains_contact_latched_hand():
         np.linalg.norm(sample.hand_target_rad - CAT_PAW_RAD)
         for sample in shifts
     ) > 1e-3
+    for index in range(1, 5):
+        clear = [
+            sample for sample in result.samples
+            if sample.cut_index == index
+            and sample.phase is GuardedChopPhase.KNIFE_CLEAR
+        ]
+        origin_xy = clear[0].knife_position[:2]
+        lateral = [
+            sample for sample in clear
+            if np.linalg.norm(sample.knife_position[:2] - origin_xy) > 0.001
+        ]
+        assert lateral
+        assert min(sample.knife_height_m for sample in lateral) >= (
+            plan.safe_knife_height_m
+        )
 
 
 def test_rejected_safety_decision_aborts_both_arm_sequence():
