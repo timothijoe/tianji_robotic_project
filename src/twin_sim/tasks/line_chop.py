@@ -171,12 +171,12 @@ def _preflight_line_chop(
         tip_id,
     )
     with kinematics._configuration(CHOP_READY_RAD):
-        edge = data.site_xpos[tip_id, :2] - data.site_xpos[top_id, :2]
         marker_xy = data.site_xpos[np.asarray(marker_ids), :2].copy()
-    edge_norm = float(np.linalg.norm(edge))
-    if not np.isfinite(edge_norm) or edge_norm <= 1e-9:
-        raise ValueError("blade direction has no finite XY projection")
-    direction_xy = -edge / edge_norm
+    blade_normal_xy = initial_safe.target_pose[:2, 0]
+    normal_norm = float(np.linalg.norm(blade_normal_xy))
+    if not np.isfinite(normal_norm) or normal_norm <= 1e-9:
+        raise ValueError("blade normal has no finite XY projection")
+    direction_xy = -blade_normal_xy / normal_norm
     offsets = (
         np.arange(config.cuts, dtype=float)[:, None]
         * config.spacing_m

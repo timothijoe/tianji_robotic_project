@@ -37,6 +37,8 @@ def test_default_cut_points_are_three_centimetres_apart(tmp_path):
         rtol=0.0,
         atol=0.001,
     )
+    np.testing.assert_allclose(deltas[:, 0], 0.0, atol=0.001)
+    assert np.all(deltas[:, 1] < 0.0)
 
 
 @pytest.mark.parametrize("cuts", [0, -1, 1.5, True])
