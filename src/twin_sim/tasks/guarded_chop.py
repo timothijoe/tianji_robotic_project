@@ -37,13 +37,15 @@ class GuardedChopConfig:
     cuts: int = 5
     hand_shift_m: float = 0.02
     minimum_distance_m: float = 0.02
+    maximum_guard_penetration_m: float = 0.003
+    maximum_guard_force_n: float = 35.0
     control_dt_s: float = 0.01
     guard_ready_duration_s: float = 2.0
     cut_duration_s: float = 1.0
     knife_up_duration_s: float = 1.0
-    hand_shift_duration_s: float = 0.8
+    hand_shift_duration_s: float = 3.0
     interlock_settle_s: float = 0.3
-    stability_timeout_s: float = 2.0
+    stability_timeout_s: float = 4.0
     final_hold_s: float = 10.0
 
     def validated(self) -> "GuardedChopConfig":
@@ -59,6 +61,13 @@ class GuardedChopConfig:
             self.minimum_distance_m, 0.02, rtol=0.0, atol=1e-12
         ):
             raise ValueError("minimum_distance_m must equal 0.02")
+        if (
+            not np.isfinite(self.maximum_guard_penetration_m)
+            or self.maximum_guard_penetration_m <= 0.0
+            or not np.isfinite(self.maximum_guard_force_n)
+            or self.maximum_guard_force_n <= 0.0
+        ):
+            raise ValueError("guard contact limits must be positive and finite")
         durations = (
             self.control_dt_s,
             self.guard_ready_duration_s,
@@ -98,6 +107,8 @@ class GuardedChopSample:
     cut_allowed: bool
     safety_allowed: bool
     guard_cube_contact_count: int
+    guard_cube_penetration_m: float
+    guard_cube_normal_force_n: float
     blade_hand_contact_count: int
     left_speed_rad_s: float
     right_speed_rad_s: float
@@ -327,7 +338,7 @@ def _guard_plan(
         (cut_points_xy[0, 0], cut_points_xy[0, 1], 0.367), dtype=float
     )
     desired_knuckle[:2] -= (
-        config.minimum_distance_m + 0.036
+        config.minimum_distance_m + 0.080
     ) * direction
     ready_pose = palm_pose.copy()
     ready_pose[:3, 3] = (
@@ -405,7 +416,11 @@ def run_guarded_chop(
     coordinator: SafetyCoordinator | None = None,
 ) -> GuardedChopResult:
     config = config.validated()
-    safety = coordinator or SafetyCoordinator(config.minimum_distance_m)
+    safety = coordinator or SafetyCoordinator(
+        config.minimum_distance_m,
+        config.maximum_guard_penetration_m,
+        config.maximum_guard_force_n,
+    )
     robot = RightArmRobot(viewer=viewer)
     if trace is None and viewer:
         from twin_sim.guarded_chop_visualization import GuardedChopTrace
@@ -472,10 +487,7 @@ def run_guarded_chop(
                 decision = safety.evaluate(observation)
                 raise RuntimeError(decision.reason)
 
-        def wait_for_guard_stability(
-            current_phase: GuardedChopPhase,
-            cut_index: int,
-        ) -> None:
+        def latch_hand_pose() -> None:
             hand_position = robot.sim.data.qpos[
                 robot.sim.hand.qpos_ids
             ].copy()
@@ -485,6 +497,12 @@ def run_guarded_chop(
             robot.hand.command(
                 np.clip(hand_position, hand_ranges[:, 0], hand_ranges[:, 1])
             )
+
+        def wait_for_guard_stability(
+            current_phase: GuardedChopPhase,
+            cut_index: int,
+        ) -> None:
+            latch_hand_pose()
             stable_time = 0.0
             maximum_steps = int(
                 round(config.stability_timeout_s / config.control_dt_s)
@@ -534,6 +552,7 @@ def run_guarded_chop(
                 phase = GuardedChopPhase.HAND_SHIFT
                 for point in plan.guard_shifts[index - 1][1:]:
                     robot.command_left(point.joints_rad)
+                    latch_hand_pose()
                     step_and_record(phase, index)
                 wait_for_guard_stability(phase, index)
                 completed_shifts += 1
@@ -593,10 +612,23 @@ def _activate_guarded_scene(robot: RightArmRobot) -> None:
     cube = robot.sim.require_geom("guarded_chop_cube")
     cube_body = int(robot.sim.model.geom_bodyid[cube])
     robot.sim.model.geom_rgba[cube] = (0.75, 0.18, 0.12, 1.0)
-    robot.sim.model.geom_contype[cube] = 1
-    robot.sim.model.geom_conaffinity[cube] = 1
-    robot.sim.model.body_contype[cube_body] = 1
-    robot.sim.model.body_conaffinity[cube_body] = 1
+    guard_contact_bit = 2
+    robot.sim.model.geom_contype[cube] = guard_contact_bit
+    robot.sim.model.geom_conaffinity[cube] = guard_contact_bit
+    robot.sim.model.body_contype[cube_body] = guard_contact_bit
+    robot.sim.model.body_conaffinity[cube_body] = guard_contact_bit
+    for name in (
+        "left_finger3_pad",
+        "right_knife_blade",
+    ):
+        geom = robot.sim.require_geom(name)
+        robot.sim.model.geom_contype[geom] |= guard_contact_bit
+        robot.sim.model.geom_conaffinity[geom] |= guard_contact_bit
+        body = int(robot.sim.model.geom_bodyid[geom])
+        while body:
+            robot.sim.model.body_contype[body] |= guard_contact_bit
+            robot.sim.model.body_conaffinity[body] |= guard_contact_bit
+            body = int(robot.sim.model.body_parentid[body])
     for name in (
         "pick_source_pedestal",
         "pick_target_pedestal",
@@ -628,6 +660,7 @@ def _safety_observation(
     left_stationary: bool,
     right_stationary: bool,
 ) -> SafetyObservation:
+    _, penetration_m, normal_force_n = _hand_cube_contact_metrics(robot)
     finite = all(
         np.isfinite(values).all()
         for values in (
@@ -652,6 +685,8 @@ def _safety_observation(
                 robot.sim.data.qvel[robot.sim.hand.dof_ids]
             )
         ),
+        guard_cube_penetration_m=penetration_m,
+        guard_cube_normal_force_n=normal_force_n,
         finite_state=finite,
     )
 
@@ -698,6 +733,8 @@ def _observe_sample(
         ),
         safety_allowed=decision.allowed,
         guard_cube_contact_count=_hand_cube_contact_count(robot),
+        guard_cube_penetration_m=observation.guard_cube_penetration_m,
+        guard_cube_normal_force_n=observation.guard_cube_normal_force_n,
         blade_hand_contact_count=_blade_hand_contact_count(robot),
         left_speed_rad_s=observation.left_speed_rad_s,
         right_speed_rad_s=observation.right_speed_rad_s,
@@ -743,10 +780,18 @@ def _knuckle_for_left_target(robot: RightArmRobot) -> np.ndarray:
 
 
 def _hand_cube_contact_count(robot: RightArmRobot) -> int:
+    return _hand_cube_contact_metrics(robot)[0]
+
+
+def _hand_cube_contact_metrics(
+    robot: RightArmRobot,
+) -> tuple[int, float, float]:
     cube = robot.sim.require_geom("guarded_chop_cube")
     palm = robot.sim.require_body("left_palm_link")
 
     count = 0
+    maximum_penetration = 0.0
+    maximum_normal_force = 0.0
     for index in range(robot.sim.data.ncon):
         contact = robot.sim.data.contact[index]
         geom1, geom2 = int(contact.geom1), int(contact.geom2)
@@ -758,7 +803,17 @@ def _hand_cube_contact_count(robot: RightArmRobot) -> int:
             and _geom_belongs_to_body_tree(robot, geom1, palm)
         ):
             count += 1
-    return count
+            maximum_penetration = max(
+                maximum_penetration, max(0.0, -float(contact.dist))
+            )
+            contact_force = np.zeros(6)
+            mujoco.mj_contactForce(
+                robot.sim.model, robot.sim.data, index, contact_force
+            )
+            maximum_normal_force = max(
+                maximum_normal_force, abs(float(contact_force[0]))
+            )
+    return count, maximum_penetration, maximum_normal_force
 
 
 def _blade_hand_distance(robot: RightArmRobot) -> float:

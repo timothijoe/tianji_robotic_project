@@ -15,6 +15,8 @@ def observation(**overrides):
         left_speed_rad_s=0.0,
         right_speed_rad_s=0.0,
         hand_speed_rad_s=0.0,
+        guard_cube_penetration_m=0.0,
+        guard_cube_normal_force_n=0.0,
         finite_state=True,
     )
     values.update(overrides)
@@ -62,6 +64,17 @@ def test_nonfinite_state_is_rejected():
 
     assert not decision.allowed
     assert "non-finite" in decision.reason
+
+
+def test_excessive_guard_contact_is_rejected():
+    coordinator = SafetyCoordinator()
+
+    assert not coordinator.evaluate(
+        observation(guard_cube_penetration_m=0.0031)
+    ).allowed
+    assert not coordinator.evaluate(
+        observation(guard_cube_normal_force_n=35.1)
+    ).allowed
 
 
 def test_actual_arm_motion_blocks_interlocked_phase():

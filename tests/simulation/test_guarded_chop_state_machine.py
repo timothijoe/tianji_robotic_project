@@ -24,6 +24,8 @@ def test_guarded_chop_defaults_match_approved_motion():
         {"hand_shift_m": 0.0},
         {"hand_shift_m": 0.03},
         {"minimum_distance_m": np.nan},
+        {"maximum_guard_penetration_m": -0.001},
+        {"maximum_guard_force_n": np.nan},
     ),
 )
 def test_invalid_config_is_rejected(changes):

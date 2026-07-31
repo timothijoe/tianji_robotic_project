@@ -22,6 +22,12 @@ def test_guarded_chop_executes_five_cuts_and_four_safe_shifts():
     assert max(
         sample.guard_cube_contact_count for sample in result.samples
     ) >= 1
+    assert max(
+        sample.guard_cube_penetration_m for sample in result.samples
+    ) <= 0.003
+    assert max(
+        sample.guard_cube_normal_force_n for sample in result.samples
+    ) <= 35.0
     assert all(
         not sample.cut_allowed
         for sample in result.samples

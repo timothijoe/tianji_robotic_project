@@ -21,6 +21,8 @@ class SafetyObservation:
     left_speed_rad_s: float
     right_speed_rad_s: float
     hand_speed_rad_s: float
+    guard_cube_penetration_m: float
+    guard_cube_normal_force_n: float
     finite_state: bool
 
 
@@ -31,7 +33,12 @@ class SafetyDecision:
 
 
 class SafetyCoordinator:
-    def __init__(self, minimum_distance_m: float = 0.02):
+    def __init__(
+        self,
+        minimum_distance_m: float = 0.02,
+        maximum_guard_penetration_m: float = 0.003,
+        maximum_guard_force_n: float = 35.0,
+    ):
         if (
             not np.isfinite(minimum_distance_m)
             or minimum_distance_m <= 0.0
@@ -39,7 +46,16 @@ class SafetyCoordinator:
             raise ValueError(
                 "minimum_distance_m must be positive and finite"
             )
+        if (
+            not np.isfinite(maximum_guard_penetration_m)
+            or maximum_guard_penetration_m <= 0.0
+            or not np.isfinite(maximum_guard_force_n)
+            or maximum_guard_force_n <= 0.0
+        ):
+            raise ValueError("guard contact limits must be positive and finite")
         self.minimum_distance_m = float(minimum_distance_m)
+        self.maximum_guard_penetration_m = float(maximum_guard_penetration_m)
+        self.maximum_guard_force_n = float(maximum_guard_force_n)
 
     def evaluate(self, value: SafetyObservation) -> SafetyDecision:
         scalars = (
@@ -49,6 +65,8 @@ class SafetyCoordinator:
             value.left_speed_rad_s,
             value.right_speed_rad_s,
             value.hand_speed_rad_s,
+            value.guard_cube_penetration_m,
+            value.guard_cube_normal_force_n,
         )
         if not value.finite_state or not np.isfinite(scalars).all():
             return SafetyDecision(False, "non-finite simulation state")
@@ -56,6 +74,12 @@ class SafetyCoordinator:
             return SafetyDecision(
                 False, "knife-guard distance below limit"
             )
+        if (
+            value.guard_cube_penetration_m
+            > self.maximum_guard_penetration_m
+            or value.guard_cube_normal_force_n > self.maximum_guard_force_n
+        ):
+            return SafetyDecision(False, "left guard contact exceeds limit")
 
         phase = str(getattr(value.phase, "value", value.phase)).upper()
         if phase == "CUT_DOWN" and (
