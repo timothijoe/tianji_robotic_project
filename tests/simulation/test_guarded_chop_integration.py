@@ -15,7 +15,7 @@ from twin_sim.tasks.guarded_chop import (
 )
 
 
-def test_plane_mode_couples_knife_recovery_and_guard_handover():
+def test_plane_mode_retreats_guard_before_diagonal_knife_shift():
     robot = RightArmRobot(viewer=False)
     try:
         plan = _preflight_guarded_chop(robot, GuardedChopConfig())
@@ -58,19 +58,6 @@ def test_plane_mode_couples_knife_recovery_and_guard_handover():
         for sample in result.samples
         if sample.phase is GuardedChopPhase.CUT_DOWN
     ) <= 0.05
-    for phase in (
-        GuardedChopPhase.COUPLED_OPEN,
-        GuardedChopPhase.COUPLED_SHIFT,
-        GuardedChopPhase.COUPLED_CLOSE,
-    ):
-        heights = [
-            sample.knife_height_m
-            for sample in result.samples
-            if sample.phase is phase
-        ]
-        assert heights
-        assert min(heights) >= plan.safe_knife_height_m
-
     down = [
         sample
         for sample in result.samples
@@ -95,23 +82,30 @@ def test_plane_mode_couples_knife_recovery_and_guard_handover():
             sample
             for sample in result.samples
             if sample.cut_index == index
-            and sample.phase is GuardedChopPhase.COUPLED_OPEN
+            and sample.phase is GuardedChopPhase.LOW_GUARD_OPEN
         ]
         shifted = [
             sample
             for sample in result.samples
             if sample.cut_index == index
-            and sample.phase is GuardedChopPhase.COUPLED_SHIFT
+            and sample.phase is GuardedChopPhase.LOW_GUARD_SHIFT
         ]
         closed = [
             sample
             for sample in result.samples
             if sample.cut_index == index
-            and sample.phase is GuardedChopPhase.COUPLED_CLOSE
+            and sample.phase is GuardedChopPhase.LOW_GUARD_CLOSE
         ]
-        assert opened and shifted and closed
+        lift = [
+            sample
+            for sample in result.samples
+            if sample.cut_index == index
+            and sample.phase is GuardedChopPhase.KNIFE_LIFT_SHIFT
+        ]
+        assert opened and shifted and closed and lift
         assert opened[-1].time_s < shifted[0].time_s
         assert shifted[-1].time_s < closed[0].time_s
+        assert closed[-1].time_s < lift[0].time_s
         np.testing.assert_allclose(
             opened[-1].hand_target_rad,
             CAT_PAW_OPEN_RAD,
@@ -132,16 +126,33 @@ def test_plane_mode_couples_knife_recovery_and_guard_handover():
             rtol=0.0,
             atol=1e-9,
         )
-        assert any(
-            sample.right_speed_rad_s > 0.005
-            and sample.hand_speed_rad_s > 0.005
-            for sample in opened
+        low = (*opened, *shifted, *closed)
+        right_targets = np.asarray(
+            [sample.right_target_rad for sample in low]
         )
-        assert any(
-            sample.right_speed_rad_s > 0.005
-            and sample.left_speed_rad_s > 0.005
-            for sample in shifted
+        assert np.max(np.ptp(right_targets, axis=0)) <= 1e-12
+        assert max(sample.right_speed_rad_s for sample in low) <= 0.05
+        assert shifted[-1].knife_guard_distance_m >= (
+            shifted[0].knife_guard_distance_m - 1e-6
         )
+
+        left_targets = np.asarray(
+            [sample.left_target_rad for sample in lift]
+        )
+        hand_targets = np.asarray(
+            [sample.hand_target_rad for sample in lift]
+        )
+        assert np.max(np.ptp(left_targets, axis=0)) <= 1e-12
+        assert np.max(np.ptp(hand_targets, axis=0)) <= 1e-12
+        assert max(sample.left_speed_rad_s for sample in lift) <= 0.05
+        assert max(sample.hand_speed_rad_s for sample in lift) <= 0.05
+        knife_positions = np.asarray(
+            [sample.knife_position for sample in lift]
+        )
+        assert np.ptp(knife_positions[:, 2]) > 0.05
+        assert np.linalg.norm(
+            knife_positions[-1, :2] - knife_positions[0, :2]
+        ) > 0.01
 
 
 def test_plane_scene_keeps_guard_cube_hidden_and_collision_disabled():
@@ -195,7 +206,7 @@ def test_object_mode_retains_contact_latched_hand():
     shifts = [
         sample
         for sample in result.samples
-        if sample.phase is GuardedChopPhase.COUPLED_SHIFT
+        if sample.phase is GuardedChopPhase.LOW_GUARD_SHIFT
     ]
     assert shifts
     assert max(

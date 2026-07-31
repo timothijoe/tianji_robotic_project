@@ -306,7 +306,13 @@ def _preflight_guarded_chop(
             - line.cut_points_xy[0],
         )
         distances = _planned_clearances(
-            robot, cuts, guard_targets, guard_shifts, left_ready, config
+            robot,
+            cuts,
+            knife_lift_shifts,
+            guard_targets,
+            guard_shifts,
+            left_ready,
+            config,
         )
         if np.any(distances < config.minimum_distance_m):
             raise ValueError(
@@ -542,6 +548,7 @@ def _guard_plan(
 def _planned_clearances(
     robot: RightArmRobot,
     cuts: tuple[_CutTrajectories, ...],
+    knife_lift_shifts: tuple[tuple[TrajectoryPoint, ...], ...],
     guard_targets: np.ndarray,
     guard_shifts: tuple[tuple[TrajectoryPoint, ...], ...],
     left_ready_rad: np.ndarray,
@@ -552,12 +559,14 @@ def _planned_clearances(
 
     def measure(
         right: np.ndarray, left: np.ndarray, hand: np.ndarray = CAT_PAW_RAD
-    ) -> None:
+    ) -> float:
         data.qpos[robot.sim.right.qpos_ids] = right
         data.qpos[robot.sim.left.qpos_ids] = left
         data.qpos[robot.sim.hand.qpos_ids] = hand
         mujoco.mj_forward(model, data)
-        distances.append(_blade_hand_distance(robot))
+        distance = _blade_hand_distance(robot)
+        distances.append(distance)
+        return distance
 
     left = left_ready_rad
     for index, cut in enumerate(cuts):
@@ -577,43 +586,25 @@ def _planned_clearances(
                 measure(point.joints_rad, left)
             continue
 
-        safe_index = _first_safe_retract_index(
-            robot,
-            cut.retract,
-            _blade_bottom_height(robot, cut.retract[-1].joints_rad)
-            - _KNIFE_SAFE_TRACKING_HEADROOM_M
-            + _KNIFE_CLEAR_TARGET_HEADROOM_M,
-        )
-        for point in cut.retract[: safe_index + 1]:
-            measure(point.joints_rad, left)
-
+        contact_right = cut.descent[-1].joints_rad
         opening = _joint_trajectory(
             CAT_PAW_RAD,
             CAT_PAW_OPEN_RAD,
             config.hand_open_duration_s,
             config.control_dt_s,
         )
-        remaining_right = tuple(
-            point.joints_rad for point in cut.retract[safe_index:]
-        )
-        open_count = max(len(remaining_right), len(opening))
-        for right, hand in zip(
-            _resample_trajectory(remaining_right, open_count),
-            _resample_trajectory(opening, open_count),
-            strict=True,
-        ):
-            measure(right, left, hand)
+        for hand in opening:
+            measure(contact_right, left, hand)
 
-        right_shift = tuple(point.joints_rad for point in cut.shift)
-        left_shift = tuple(point.joints_rad for point in guard_shifts[index])
-        shift_count = max(len(right_shift), len(left_shift))
-        paired_right = _resample_trajectory(right_shift, shift_count)
-        paired_left = _resample_trajectory(left_shift, shift_count)
-        for right, shifted_left in zip(
-            paired_right, paired_left, strict=True
-        ):
-            measure(right, shifted_left, CAT_PAW_OPEN_RAD)
-        left = paired_left[-1]
+        start_distance = measure(
+            contact_right, left, CAT_PAW_OPEN_RAD
+        )
+        for point in guard_shifts[index]:
+            measure(contact_right, point.joints_rad, CAT_PAW_OPEN_RAD)
+        left = guard_shifts[index][-1].joints_rad
+        end_distance = measure(contact_right, left, CAT_PAW_OPEN_RAD)
+        if end_distance + 1e-6 < start_distance:
+            raise ValueError("guard retreat moved closer to knife")
 
         closing = _joint_trajectory(
             CAT_PAW_OPEN_RAD,
@@ -622,7 +613,9 @@ def _planned_clearances(
             config.control_dt_s,
         )
         for hand in closing:
-            measure(paired_right[-1], left, hand)
+            measure(contact_right, left, hand)
+        for point in knife_lift_shifts[index]:
+            measure(point.joints_rad, left)
     return np.asarray(distances)
 
 
@@ -774,6 +767,24 @@ def run_guarded_chop(
                     stable_time = 0.0
             raise RuntimeError("left guard did not settle before cut")
 
+        def wait_for_knife_stability(
+            current_phase: GuardedChopPhase,
+            cut_index: int,
+        ) -> None:
+            stable_time = 0.0
+            maximum_steps = int(
+                round(config.stability_timeout_s / config.control_dt_s)
+            )
+            for _ in range(maximum_steps):
+                step_and_record(current_phase, cut_index)
+                if np.linalg.norm(robot.joint_velocities) <= 0.05:
+                    stable_time += config.control_dt_s
+                    if stable_time + 1e-12 >= config.interlock_settle_s:
+                        return
+                else:
+                    stable_time = 0.0
+            raise RuntimeError("knife did not settle before guard shift")
+
         phase = GuardedChopPhase.GUARD_READY
         for _ in range(
             int(round(config.guard_ready_duration_s / config.control_dt_s))
@@ -792,83 +803,33 @@ def run_guarded_chop(
                 step_and_record(phase, index)
             completed_cuts += 1
 
-            phase = GuardedChopPhase.KNIFE_CLEAR
             if index > len(plan.guard_shifts):
+                phase = GuardedChopPhase.KNIFE_CLEAR
                 for point in cut.retract[1:]:
                     robot.command(point.joints_rad)
                     step_and_record(phase, index)
                 continue
 
-            safe_index = _first_safe_retract_index(
-                robot,
-                cut.retract,
-                plan.safe_knife_height_m + _KNIFE_CLEAR_TARGET_HEADROOM_M,
-            )
-            for point in cut.retract[1 : safe_index + 1]:
-                robot.command(point.joints_rad)
-                step_and_record(phase, index)
-            maximum_clear_steps = int(
-                round(config.stability_timeout_s / config.control_dt_s)
-            )
-            for _ in range(maximum_clear_steps):
-                if _current_blade_bottom(robot) >= plan.safe_knife_height_m:
-                    break
-                step_and_record(phase, index)
-            else:
-                raise RuntimeError("knife did not reach safe height")
-
             if config.scene_mode == "plane":
-                opening = _joint_trajectory(
+                wait_for_knife_stability(phase, index)
+
+                phase = GuardedChopPhase.LOW_GUARD_OPEN
+                for target in _joint_trajectory(
                     CAT_PAW_RAD,
                     CAT_PAW_OPEN_RAD,
                     config.hand_open_duration_s,
                     config.control_dt_s,
-                )
-                remaining_right = tuple(
-                    point.joints_rad
-                    for point in cut.retract[safe_index:]
-                )
-                open_count = max(len(remaining_right), len(opening))
-                paired_open_right = _resample_trajectory(
-                    remaining_right, open_count
-                )
-                paired_open_hand = _resample_trajectory(
-                    opening, open_count
-                )
-                phase = GuardedChopPhase.COUPLED_OPEN
-                for right, hand in zip(
-                    paired_open_right[1:],
-                    paired_open_hand[1:],
-                    strict=True,
-                ):
-                    robot.command(right)
-                    robot.hand.command(hand)
+                )[1:]:
+                    robot.hand.command(target)
                     step_and_record(phase, index)
 
-                right_shift = tuple(
-                    point.joints_rad for point in cut.shift
-                )
-                left_shift = tuple(
-                    point.joints_rad
-                    for point in plan.guard_shifts[index - 1]
-                )
-                shift_count = max(len(right_shift), len(left_shift))
-                paired_right = _resample_trajectory(
-                    right_shift, shift_count
-                )
-                paired_left = _resample_trajectory(
-                    left_shift, shift_count
-                )
-                phase = GuardedChopPhase.COUPLED_SHIFT
-                for right, left in zip(
-                    paired_right[1:], paired_left[1:], strict=True
-                ):
-                    robot.command(right)
-                    robot.command_left(left)
+                phase = GuardedChopPhase.LOW_GUARD_SHIFT
+                for point in plan.guard_shifts[index - 1][1:]:
+                    robot.command_left(point.joints_rad)
                     robot.hand.command(CAT_PAW_OPEN_RAD)
                     step_and_record(phase, index)
 
-                phase = GuardedChopPhase.COUPLED_CLOSE
+                phase = GuardedChopPhase.LOW_GUARD_CLOSE
                 for target in _joint_trajectory(
                     CAT_PAW_OPEN_RAD,
                     CAT_PAW_RAD,
@@ -881,14 +842,18 @@ def run_guarded_chop(
                 wait_for_guard_stability(
                     phase, index, latch_contact=False
                 )
-            else:
-                for point in (
-                    *cut.retract[safe_index + 1 :],
-                    *cut.shift[1:],
-                ):
+
+                phase = GuardedChopPhase.KNIFE_LIFT_SHIFT
+                for point in plan.knife_lift_shifts[index - 1][1:]:
                     robot.command(point.joints_rad)
                     step_and_record(phase, index)
-                phase = GuardedChopPhase.COUPLED_SHIFT
+            else:
+                phase = GuardedChopPhase.KNIFE_CLEAR
+                for point in (*cut.retract[1:], *cut.shift[1:]):
+                    robot.command(point.joints_rad)
+                    step_and_record(phase, index)
+                wait_for_knife_stability(phase, index)
+                phase = GuardedChopPhase.LOW_GUARD_SHIFT
                 for point in plan.guard_shifts[index - 1][1:]:
                     robot.command_left(point.joints_rad)
                     latch_hand_pose()
