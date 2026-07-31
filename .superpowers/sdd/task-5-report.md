@@ -1,105 +1,207 @@
-# Task 5 Report: SI-Only Kinematics and Continuous IK
+# Task 5 Report: CLI, Documentation, and Final Verification
 
 ## Delivered
 
-- Added `src/twin_sim/kinematics.py` with:
-  - `IkResult`;
-  - TCP-site `Kinematics.fk()` and 6-by-7 `jacobian()`;
-  - damped least-squares `ik()` using translation and rotation-vector error;
-  - MJCF joint-limit clipping on the initial seed and every update;
-  - continuous `solve_path()` preflight seeded from each preceding solution;
-  - indexed `PathIkError` failures for unreachable samples and joint-step
-    violations.
-- Added `tests/simulation/test_kinematics.py` covering reachable and
-  unreachable IK, continuous path solving, joint-step rejection, rigid-pose
-  validation, parameter validation, and shared MuJoCo state preservation.
-- All values and APIs are SI-only: metres, radians, seconds, and native MuJoCo
-  arrays. No SDK-unit conversion or impedance behavior was introduced.
-
-## State-safety design
-
-Every FK and Jacobian query first copies the complete shared `MjData`, performs
-the temporary right-arm configuration and MuJoCo query, and restores the full
-copy in a `finally` block. IK is composed only from those guarded queries.
-
-This preserves `qpos`, `qvel`, `ctrl`, `time`, and derived state exactly,
-including state immediately after `mj_step` and failures raised during
-`mj_forward`. Regression tests compare site transforms, accelerations, bias
-and constraint forces, and sensor data before and after FK, Jacobian, and IK.
+- Added `twin-sim guarded-chop --scene {plane,object}` with default
+  `plane`.
+- Passed the selected scene to
+  `GuardedChopConfig(scene_mode=args.scene, final_hold_s=args.final_hold)`.
+- Preserved the existing result summary fields: success, cuts, shifts, total
+  shift, minimum distance, and reason.
+- Documented the default plane demonstration and the retained, non-default
+  object contact-calibration scene.
+- Documented the right-to-left cutting direction, blue planned knife path,
+  cyan actual knife trail, purple actual guard trail, five compact cut marks,
+  and explicit `HAND_OPEN` → `HAND_SHIFT` → `HAND_CLOSE` sequence.
+- Did not modify real-robot, ROS, or SDK files.
 
 ## TDD evidence
 
-The initial focused test run failed during collection as required:
+The parser tests were added before production changes. The required RED run
+failed for the intended missing feature:
 
 ```text
-ModuleNotFoundError: No module named 'twin_sim.kinematics'
+.venv/bin/pytest tests/simulation/test_cli.py -q
+FAILED test_guarded_chop_cli_defaults_to_plane_scene
+  AttributeError: 'Namespace' object has no attribute 'scene'
+FAILED test_guarded_chop_cli_accepts_object_scene
+  twin-sim: error: unrecognized arguments: --scene object
+2 failed, 8 passed
 ```
 
-The first implementation run exposed a frame mismatch on nontrivial path
-samples. A numerical derivative showed that `mju_subQuat` produced a
-current-site-local rotation vector while `mj_jacSite` produced world-frame
-angular rows. Converting the error through the current TCP rotation made both
-path regressions pass.
+The handler test was also extended to invoke `--scene object` and assert that
+the resulting `GuardedChopConfig.scene_mode` is `object`. After the minimal CLI
+implementation:
 
-Self-review then added three further RED cases before their fixes:
-
-- post-step derived state changed when restoration only re-ran `mj_forward`;
-- malformed homogeneous transforms and reflections were silently accepted;
-- fractional `max_iterations` leaked an incidental `TypeError`.
-
-The fixes respectively use full `MjData` copy/restore, validate proper rigid
-4-by-4 transforms, and require a non-negative integral iteration count.
-
-## Review
-
-Independent code review found no Critical or Important issues and assessed the
-implementation ready. Its rigid-transform validation finding and minor
-iteration-validation finding were both addressed test-first. The remaining
-test-coverage suggestion is already exercised by the multi-sample path test,
-which requires nontrivial translational and rotational DLS updates; an
-additional finite-difference probe measured a maximum Jacobian error of
-`2.11e-08`.
+```text
+.venv/bin/pytest tests/simulation/test_cli.py -q
+10 passed in 1.87s
+```
 
 ## Verification
 
 ```text
-.venv/bin/python -m pytest tests/simulation/test_kinematics.py -v
-14 passed
+.venv/bin/pytest tests/simulation/test_guarded_chop_*.py \
+  tests/simulation/test_cli.py -q
+51 passed in 93.19s
 
-.venv/bin/python -m pytest -v
-26 passed
-
-.venv/bin/python -m compileall -q src tests
-exit 0
-
-git diff --check
-exit 0
+.venv/bin/pytest -q
+165 passed, 1 warning in 132.36s
 ```
 
-## Concerns
-
-No remaining functional concerns. Full `MjData` copies intentionally trade a
-small amount of preflight computation and allocation for exact preservation of
-the shared runtime state; kinematics probes remained fast for the current
-14-DOF model.
-
-## Indexed path-validation review fix
-
-`solve_path()` now translates per-sample pose-validation `ValueError`s into
-`PathIkError` with the exact failing sample index and preserves the validation
-exception through Python exception chaining.
-
-The regression uses a valid first pose followed by a malformed 3-by-3 pose.
-Before the fix, sample 1 leaked `ValueError: target must be a finite rigid 4x4
-pose`; afterward it raises indexed `PathIkError` whose `__cause__` is that
-`ValueError`.
-
-Fresh verification after the fix:
+The only warning was the pre-existing chop force-monitor warning:
 
 ```text
-.venv/bin/python -m pytest tests/simulation/test_kinematics.py -v
-15 passed
-
-.venv/bin/python -m pytest -v
-27 passed
+RuntimeWarning: contact force 39.611 N exceeds warning threshold 30.000 N
 ```
+
+Default plane headless acceptance:
+
+```text
+.venv/bin/twin-sim guarded-chop --headless --final-hold 0
+success=True cuts=5 shifts=4 total_shift_m=0.080 min_distance_m=0.044 reason=-
+```
+
+Additional checks:
+
+```text
+sha256sum -c docs/simulation/protected-files.sha256
+all protected files: OK; exit 0
+
+git diff --check
+no output; exit 0
+
+.venv/bin/twin-sim guarded-chop --help
+shows --scene {plane,object}; exit 0
+```
+
+## Viewer acceptance facts
+
+`DISPLAY=:0` was available, so
+`.venv/bin/twin-sim guarded-chop --final-hold 10` was launched. The Viewer
+process started without a launch error and continued running without output
+for approximately 120 seconds, but it did not automatically finish within the
+available acceptance window. It was stopped with Ctrl-C and exited 130 from
+`guarded_chop_visualization.py` while updating the overlay.
+
+No desktop pixels were visible through this agent interface. Therefore this
+run does **not** claim visual acceptance of the right-to-left cuts, hand
+cycles, trails, or cut marks, and it does not confirm automatic success exit.
+Those visual items remain for a human-visible Viewer check.
+
+## Commit
+
+The functional commit contains only:
+
+- `src/twin_sim/cli.py`
+- `tests/simulation/test_cli.py`
+- `docs/simulation/usage.md`
+- `docs/simulation/guarded_chopping_development_log.md`
+
+Commit: `3d79089` (`docs: expose plane guarded chopping demo`). This report
+and the existing uncommitted Task 4 report are intentionally excluded from
+that commit.
+
+## Concerns at the initial Task 5 handoff
+
+At the initial handoff, automated, headless, hash, and diff verification had
+passed, while Viewer performance and human-visible inspection were still open.
+The following review-repair section supersedes the automatic-exit concern:
+the repaired Viewer completed successfully in 87.11 seconds, and a later
+parent-run demonstration completed in approximately 62 seconds. The user then
+requested branch integration after the visible demonstration.
+
+## Review repair: bounded Viewer work and automatic exit
+
+The first Viewer acceptance result above was investigated as a performance
+failure rather than accepted with a larger timeout. A temporary wrapper timed
+the real Viewer methods without changing production code. After 85.852 seconds
+the task had reached only 2,410 samples:
+
+```text
+draw_calls=243 overlay_calls=242 max_segments_per_draw=9 final_ngeom=433
+draw ngeom 0-249:   mean 1.475 ms, max 5.859 ms
+draw ngeom 250-499: mean 1.421 ms, max 1.979 ms
+overlay ngeom 0-249:   mean 100.825 ms, max 156.836 ms
+overlay ngeom 250-499: mean 166.050 ms, max 228.296 ms
+```
+
+The initial plan was the only nine-segment draw; each runtime draw contained
+at most two new segments. Capsule construction was therefore already
+incremental and constant-time. The expensive operation was repeated
+`set_texts`, whose Viewer-lock cost increased as the accumulated user scene
+grew. A real Viewer run with a no-op trace completed successfully in 86.238
+seconds, excluding a state-machine deadlock and showing that the unbounded
+trace consumed the remaining runtime budget.
+
+### TDD repair evidence
+
+The first RED regression appended 100 samples with `max_points=4` and expected
+the five cut marks, four planned-path segments, and at most six actual trail
+segments. Before the fix the fake scene filled all 64 slots. It also expected
+one `set_texts` call for 100 identical status strings; the old implementation
+submitted all 100.
+
+The fix uses a fixed-size ring of Viewer geometry slots, reusing old actual
+knife/guard trail capsules instead of increasing `scene.ngeom`. The default
+trace stores 16 points, so the nine permanent plan/cut-mark geometries plus 30
+rolling actual segments cap the scene at 39 geometries. Identical formatted
+overlay strings are not resubmitted.
+
+The second RED regression verified that a Viewer physics step could defer
+`sync()` without changing its pacing. `RightArmRobot.step()` now has an
+optional `sync_viewer` keyword whose default remains `True`. Guarded chopping
+uses it to retain 100 Hz physics and safety observation while limiting Viewer
+state synchronization to the display rate. A pure regression verifies strides
+of 3, 2, and 1 for control periods of 0.01, 0.02, and 0.05 seconds.
+
+```text
+tests/simulation/test_guarded_chop_visualization.py
+7 passed
+
+tests/simulation/test_robot.py + visualization + state-machine
+34 passed
+
+tests/simulation/test_guarded_chop_integration.py
+4 passed in 57.72s
+```
+
+### Fresh final verification
+
+```text
+.venv/bin/pytest -q
+169 passed, 1 pre-existing contact-force warning in 131.45s
+
+.venv/bin/twin-sim guarded-chop --headless --final-hold 0
+success=True cuts=5 shifts=4 total_shift_m=0.080 min_distance_m=0.044 reason=-
+
+sha256sum -c docs/simulation/protected-files.sha256
+all protected files: OK; exit 0
+
+git diff --check
+no output; exit 0
+```
+
+The repaired Viewer command completed automatically below the 90-second
+acceptance limit:
+
+```text
+.venv/bin/twin-sim guarded-chop --final-hold 10
+success=True cuts=5 shifts=4 total_shift_m=0.080 min_distance_m=0.044 reason=-
+viewer_wall_s=87.11 viewer_exit=0
+```
+
+This agent could not see desktop pixels, so the run verifies automatic success
+exit and absence of Viewer errors only. Visual appearance of the right-to-left
+cuts, four hand cycles, trails, and cut marks still requires a human-visible
+Viewer check.
+
+The parent agent subsequently launched the same Viewer command in the user's
+visible session. It completed automatically in approximately 62 seconds with
+the same `success=True`, five-cut, four-shift result. The user proceeded to
+request local branch integration after that demonstration; no further visual
+change request was made.
+
+Review-repair commit: `70d2a4d` (`fix: bound guarded chop viewer work`). This
+report and the existing Task 4 report remain excluded from the functional
+commit.
