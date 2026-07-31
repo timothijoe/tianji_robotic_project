@@ -7,6 +7,7 @@ import numpy as np
 
 from twin_sim.model import SimulationModel
 from twin_sim.hand import DEFAULT_OPEN_RAD, LeftHandController
+from twin_sim.kinematics import Kinematics
 
 
 RIGHT_HOME_RAD = np.array(
@@ -23,6 +24,12 @@ class RightArmRobot:
         self.sim = SimulationModel.load(model_path)
         self._viewer = None
         self.hand = LeftHandController(self.sim)
+        self.right_kinematics = Kinematics(
+            self.sim, self.sim.right, "right_tool_tip_site"
+        )
+        self.left_kinematics = Kinematics(
+            self.sim, self.sim.left, "left_palm_tcp_site"
+        )
         self._tcp_site_id = self.sim.require_site("right_tool_tip_site")
         self._left_hold = np.zeros(7)
         self._right_target = RIGHT_HOME_RAD.copy()

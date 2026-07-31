@@ -5,7 +5,7 @@ from typing import Iterator, Sequence
 import mujoco
 import numpy as np
 
-from twin_sim.model import SimulationModel
+from twin_sim.model import ArmIndices, SimulationModel
 
 
 @dataclass(frozen=True)
@@ -21,13 +21,22 @@ class PathIkError(RuntimeError):
 
 
 class Kinematics:
-    def __init__(self, simulation: SimulationModel):
+    def __init__(
+        self,
+        simulation: SimulationModel,
+        arm: ArmIndices | None = None,
+        tcp_site: str = "right_tool_tip_site",
+    ):
         self._model = simulation.model
         self._data = simulation.data
-        self._right = simulation.right
-        self._tcp_site_id = simulation.require_site("right_tool_tip_site")
-        self._lower_limits = self._model.jnt_range[self._right.joint_ids, 0].copy()
-        self._upper_limits = self._model.jnt_range[self._right.joint_ids, 1].copy()
+        self._arm = simulation.right if arm is None else arm
+        self._tcp_site_id = simulation.require_site(tcp_site)
+        self._lower_limits = self._model.jnt_range[
+            self._arm.joint_ids, 0
+        ].copy()
+        self._upper_limits = self._model.jnt_range[
+            self._arm.joint_ids, 1
+        ].copy()
 
     def fk(self, joints_rad: Sequence[float]) -> np.ndarray:
         joints = self._validated_joints(joints_rad)
@@ -51,8 +60,8 @@ class Kinematics:
             )
             return np.vstack(
                 (
-                    jacobian_position[:, self._right.dof_ids],
-                    jacobian_rotation[:, self._right.dof_ids],
+                    jacobian_position[:, self._arm.dof_ids],
+                    jacobian_rotation[:, self._arm.dof_ids],
                 )
             )
 
@@ -131,7 +140,7 @@ class Kinematics:
             previous = result.joints_rad
 
         if not solutions:
-            return np.empty((0, self._right.joint_ids.size))
+            return np.empty((0, self._arm.joint_ids.size))
         return np.asarray(solutions)
 
     @contextmanager
@@ -139,7 +148,7 @@ class Kinematics:
         saved_data = mujoco.MjData(self._model)
         mujoco.mj_copyData(saved_data, self._model, self._data)
         try:
-            self._data.qpos[self._right.qpos_ids] = joints
+            self._data.qpos[self._arm.qpos_ids] = joints
             mujoco.mj_forward(self._model, self._data)
             yield
         finally:
