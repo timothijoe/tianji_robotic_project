@@ -104,11 +104,22 @@ class SafetyCoordinator:
                 False, "guard moved before knife clearance"
             )
         if phase in {
-            "COUPLED_OPEN",
-            "COUPLED_SHIFT",
-            "COUPLED_CLOSE",
-        } and value.knife_height_m < value.safe_knife_height_m:
+            "LOW_GUARD_OPEN",
+            "LOW_GUARD_SHIFT",
+            "LOW_GUARD_CLOSE",
+        } and (
+            not value.right_target_stationary
+            or value.right_speed_rad_s > 0.05
+        ):
             return SafetyDecision(
-                False, "knife is not safely raised for hand shift"
+                False, "knife moved during low guard shift"
+            )
+        if phase == "KNIFE_LIFT_SHIFT" and (
+            not value.left_target_stationary
+            or value.left_speed_rad_s > 0.05
+            or value.hand_speed_rad_s > 0.05
+        ):
+            return SafetyDecision(
+                False, "guard moved during knife lift shift"
             )
         return SafetyDecision(True)

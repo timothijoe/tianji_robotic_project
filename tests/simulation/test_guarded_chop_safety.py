@@ -58,21 +58,21 @@ def test_knife_clear_rejects_guard_motion_below_safe_height():
 
 
 @pytest.mark.parametrize(
-    "phase", ("COUPLED_OPEN", "COUPLED_SHIFT", "COUPLED_CLOSE")
+    "phase", ("LOW_GUARD_OPEN", "LOW_GUARD_SHIFT", "LOW_GUARD_CLOSE")
 )
-def test_coupled_phase_requires_raised_knife(phase):
-    coordinator = SafetyCoordinator(minimum_distance_m=0.02)
+def test_low_guard_motion_requires_stationary_knife(phase):
+    coordinator = SafetyCoordinator()
     allowed = observation(
         phase=phase,
-        knife_height_m=0.36,
-        right_target_stationary=False,
+        knife_height_m=0.33,
+        right_target_stationary=True,
         left_target_stationary=False,
         left_speed_rad_s=0.2,
-        right_speed_rad_s=0.2,
+        right_speed_rad_s=0.0,
     )
 
     assert coordinator.evaluate(allowed).allowed
-    assert not coordinator.evaluate(
+    decision = coordinator.evaluate(
         observation(
             phase=phase,
             knife_height_m=0.33,
@@ -81,7 +81,23 @@ def test_coupled_phase_requires_raised_knife(phase):
             left_speed_rad_s=0.2,
             right_speed_rad_s=0.2,
         )
-    ).allowed
+    )
+    assert not decision.allowed
+    assert "knife moved during low guard shift" in decision.reason
+
+
+def test_lift_shift_requires_stationary_guard():
+    decision = SafetyCoordinator().evaluate(
+        observation(
+            phase="KNIFE_LIFT_SHIFT",
+            left_target_stationary=False,
+            left_speed_rad_s=0.2,
+            hand_speed_rad_s=0.2,
+        )
+    )
+
+    assert not decision.allowed
+    assert "guard moved during knife lift shift" in decision.reason
 
 
 def test_nonfinite_state_is_rejected():
