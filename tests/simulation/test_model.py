@@ -5,11 +5,11 @@ import pytest
 from twin_sim.model import ModelValidationError, SimulationModel
 
 
-def test_active_scene_has_fourteen_position_actuators():
+def test_active_scene_has_arm_and_hand_position_actuators():
     sim = SimulationModel.load()
     actuator_ids = (*sim.left.actuator_ids, *sim.right.actuator_ids)
-    assert sim.model.njnt == 14
-    assert sim.model.nu == 14
+    assert sim.model.njnt == 34
+    assert sim.model.nu == 34
     assert len(actuator_ids) == 14
     assert sim.left.actuator_ids.shape == (7,)
     assert sim.right.actuator_ids.shape == (7,)
@@ -17,6 +17,27 @@ def test_active_scene_has_fourteen_position_actuators():
         sim.model.actuator_biastype[i] == mujoco.mjtBias.mjBIAS_AFFINE
         for i in actuator_ids
     )
+
+
+def test_left_hand_is_mounted_below_left_wrist():
+    sim = SimulationModel.load()
+    mount_id = mujoco.mj_name2id(
+        sim.model, mujoco.mjtObj.mjOBJ_BODY, "left_hand_mount"
+    )
+    palm_id = mujoco.mj_name2id(
+        sim.model, mujoco.mjtObj.mjOBJ_BODY, "left_palm_link"
+    )
+    wrist_id = mujoco.mj_name2id(
+        sim.model, mujoco.mjtObj.mjOBJ_BODY, "left_link7"
+    )
+    assert min(mount_id, palm_id, wrist_id) >= 0
+    ancestors = []
+    body_id = palm_id
+    while body_id:
+        ancestors.append(body_id)
+        body_id = int(sim.model.body_parentid[body_id])
+    assert mount_id in ancestors
+    assert wrist_id in ancestors
 
 
 def test_active_scene_has_task_objects():

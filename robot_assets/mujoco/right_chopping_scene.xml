@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <mujoco model="Twin right-arm chopping scene">
-  <compiler angle="radian" />
+  <compiler angle="radian" conflict="merge" />
   <asset>
     <mesh name="Base_Marvin_M6_S" content_type="model/stl" file="../../MarvinCCS/meshes/arm_meshes/Base_Marvin_M6_S.STL" />
     <mesh name="S_Arm_Marvin_M6_S" content_type="model/stl" file="../../MarvinCCS/meshes/arm_meshes/S_Arm_Marvin_M6_S.STL" />
@@ -13,6 +13,7 @@
     <mesh name="BASE" content_type="model/stl" file="../../MarvinCCS/meshes/SRS/BASE.STL" />
     <mesh name="right_cleaver_mesh" file="meshes/right_cleaver.obj" scale="1 1 1" />
     <mesh name="right_cleaver_handle_mesh" file="meshes/right_cleaver_handle.obj" scale="1 1 1" />
+    <model name="left_wuji_hand" file="wuji_hand/left_hand.xml" />
   </asset>
   <option timestep="0.002" integrator="implicitfast" gravity="0 0 -9.81" />
   <asset>
@@ -62,6 +63,9 @@
                     <inertial pos="0.044988 -4.226e-05 0.0055581" mass="0.31658" fullinertia="0.00038289 0.00133 0.0011774 -7.4e-07 -1.403e-05 -6.1e-07" />
                     <joint name="left_joint7" pos="0 0 0" axis="1 0 0" range="-1.57 1.57" actuatorfrcrange="-18 18" damping="0.5" frictionloss="0.3" />
                     <geom quat="0.000563312 0.706825 -0.000562864 0.707388" type="mesh" rgba="0.8 0.8 0.8 1" mesh="T_Arm_Marvin_M6_S_R_CCS" />
+                    <body name="left_hand_mount" pos="0 0 0.095">
+                      <attach model="left_wuji_hand" body="left_palm_link" prefix="" />
+                    </body>
                   </body>
                 </body>
               </body>
