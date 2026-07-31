@@ -10,6 +10,7 @@ from twin_sim.robot import RIGHT_HOME_RAD, RightArmRobot
 from twin_sim.tasks.chop import ChopConfig, run_chop
 from twin_sim.tasks.line_chop import LineChopConfig, run_line_chop
 from twin_sim.tasks.hand_demo import HandDemoConfig, run_hand_demo
+from twin_sim.tasks.guarded_chop import GuardedChopConfig, run_guarded_chop
 from twin_sim.tasks.pick_place import PickPlaceConfig, PickPlaceTask
 from twin_sim.trajectory import cartesian_trajectory, joint_trajectory
 
@@ -128,6 +129,19 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result.success else 1
         finally:
             robot.close()
+    if args.command == "guarded-chop":
+        result = run_guarded_chop(
+            GuardedChopConfig(final_hold_s=args.final_hold),
+            viewer=not args.headless,
+        )
+        print(
+            f"success={result.success} cuts={result.completed_cuts} "
+            f"shifts={result.completed_shifts} "
+            f"total_shift_m={result.total_shift_m:.3f} "
+            f"min_distance_m={result.minimum_distance_m:.3f} "
+            f"reason={result.reason or '-'}"
+        )
+        return 0 if result.success else 1
     if args.command == "view":
         robot = RightArmRobot(viewer=True)
         try:
@@ -195,6 +209,9 @@ def build_parser() -> argparse.ArgumentParser:
     pick_place.add_argument("--headless", action="store_true")
     pick_place.add_argument("--slow", action="store_true")
     pick_place.add_argument("--final-hold", type=float)
+    guarded_chop = commands.add_parser("guarded-chop")
+    guarded_chop.add_argument("--headless", action="store_true")
+    guarded_chop.add_argument("--final-hold", type=float, default=10.0)
     return parser
 
 

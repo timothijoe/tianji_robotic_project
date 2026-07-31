@@ -406,6 +406,10 @@ def run_guarded_chop(
     config = config.validated()
     safety = coordinator or SafetyCoordinator(config.minimum_distance_m)
     robot = RightArmRobot(viewer=viewer)
+    if trace is None and viewer:
+        from twin_sim.guarded_chop_visualization import GuardedChopTrace
+
+        trace = GuardedChopTrace(robot._viewer)
     samples: list[GuardedChopSample] = []
     phase = GuardedChopPhase.INITIALIZE
     completed_cuts = 0

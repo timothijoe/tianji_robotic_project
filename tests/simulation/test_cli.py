@@ -1,7 +1,41 @@
+from types import SimpleNamespace
+
 import pytest
 
 import twin_sim.cli as cli
 from twin_sim.cli import main
+
+
+def test_guarded_chop_cli_prints_coordination_metrics(
+    monkeypatch, capsys
+):
+    captured = {}
+
+    def fake_run(config, *, viewer):
+        captured.update(config=config, viewer=viewer)
+        return SimpleNamespace(
+            success=True,
+            completed_cuts=5,
+            completed_shifts=4,
+            total_shift_m=0.08,
+            minimum_distance_m=0.0234,
+            reason="",
+        )
+
+    monkeypatch.setattr(cli, "run_guarded_chop", fake_run)
+
+    status = cli.main(
+        ["guarded-chop", "--headless", "--final-hold", "0"]
+    )
+
+    assert status == 0
+    assert captured["viewer"] is False
+    assert captured["config"].final_hold_s == 0.0
+    output = capsys.readouterr().out
+    assert "cuts=5" in output
+    assert "shifts=4" in output
+    assert "total_shift_m=0.080" in output
+    assert "min_distance_m=0.023" in output
 
 
 def test_headless_chop_cli(tmp_path):

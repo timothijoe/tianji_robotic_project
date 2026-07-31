@@ -54,6 +54,22 @@ Python API 的最小示例位于 `examples/simulation_demo.py`。
 `cut_index` 标明刀次；SVG 同时展示目标/实际轨迹的俯视图和侧视图。
 去掉 `--headless` 可打开 Viewer，增加 `--slow` 可慢速播放。
 
+## 双臂猫爪倒手切菜
+
+```bash
+.venv/bin/twin-sim guarded-chop --headless --final-hold 0
+.venv/bin/twin-sim guarded-chop --final-hold 10
+```
+
+任务对砧板上的固定红色方块演示 5 次右刀下切；每次抬刀并横移后，左臂和
+Wuji Hand 保持猫爪姿态后退 2 cm，共倒手 4 次。刀面到中指第二指节参考点
+始终至少保留 2 cm；刀未抬到安全高度时左手不能移动，左手移动时右刀保持
+静止。方块不会被切分、抓起或推动。
+
+Viewer 中蓝色为右刀规划轨迹、青色为右刀实际轨迹、紫色为左手护手指关节
+实际轨迹、黄色为左手目标点；右上角显示刀数、阶段、刀手距离和下切许可。
+该命令只运行 MuJoCo，不会向实体机械臂或 Wuji Hand 发送命令。
+
 ## 灵巧手控制
 
 左臂安装了 20 自由度 Wuji Hand。运行无窗口开合验证：

@@ -71,8 +71,8 @@ class GuardedChopTrace:
         self.cut_index = int(cut_index)
         self.minimum_distance_m = float(minimum_distance_m)
         self.cut_allowed = bool(cut_allowed)
-        self._update_overlay()
         if self._sample_index % self._marker_stride == 0:
+            self._update_overlay()
             self._draw(
                 (
                     (points[0], self.planned_knife_color, 0.006),
