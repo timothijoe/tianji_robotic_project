@@ -20,6 +20,7 @@ class SafetyObservation:
     right_target_stationary: bool
     left_speed_rad_s: float
     right_speed_rad_s: float
+    hand_speed_rad_s: float
     finite_state: bool
 
 
@@ -47,6 +48,7 @@ class SafetyCoordinator:
             value.knife_guard_distance_m,
             value.left_speed_rad_s,
             value.right_speed_rad_s,
+            value.hand_speed_rad_s,
         )
         if not value.finite_state or not np.isfinite(scalars).all():
             return SafetyDecision(False, "non-finite simulation state")
@@ -59,6 +61,7 @@ class SafetyCoordinator:
         if phase == "CUT_DOWN" and (
             not value.left_target_stationary
             or value.left_speed_rad_s > 0.05
+            or value.hand_speed_rad_s > 0.05
         ):
             return SafetyDecision(False, "left guard moved during cut")
         if phase == "HAND_SHIFT" and (

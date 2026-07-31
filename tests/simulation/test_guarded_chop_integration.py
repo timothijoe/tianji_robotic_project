@@ -36,6 +36,11 @@ def test_guarded_chop_executes_five_cuts_and_four_safe_shifts():
         if sample.phase is GuardedChopPhase.CUT_DOWN
     ) <= 0.05
     assert max(
+        sample.hand_speed_rad_s
+        for sample in result.samples
+        if sample.phase is GuardedChopPhase.CUT_DOWN
+    ) <= 0.05
+    assert max(
         sample.right_speed_rad_s
         for sample in result.samples
         if sample.phase is GuardedChopPhase.HAND_SHIFT

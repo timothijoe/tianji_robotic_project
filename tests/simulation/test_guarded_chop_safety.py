@@ -14,6 +14,7 @@ def observation(**overrides):
         right_target_stationary=False,
         left_speed_rad_s=0.0,
         right_speed_rad_s=0.0,
+        hand_speed_rad_s=0.0,
         finite_state=True,
     )
     values.update(overrides)
@@ -68,6 +69,9 @@ def test_actual_arm_motion_blocks_interlocked_phase():
 
     assert not coordinator.evaluate(
         observation(left_speed_rad_s=0.06)
+    ).allowed
+    assert not coordinator.evaluate(
+        observation(hand_speed_rad_s=0.06)
     ).allowed
     assert not coordinator.evaluate(
         observation(

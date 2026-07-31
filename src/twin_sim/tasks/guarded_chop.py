@@ -43,6 +43,7 @@ class GuardedChopConfig:
     knife_up_duration_s: float = 1.0
     hand_shift_duration_s: float = 0.8
     interlock_settle_s: float = 0.3
+    stability_timeout_s: float = 2.0
     final_hold_s: float = 10.0
 
     def validated(self) -> "GuardedChopConfig":
@@ -65,6 +66,7 @@ class GuardedChopConfig:
             self.knife_up_duration_s,
             self.hand_shift_duration_s,
             self.interlock_settle_s,
+            self.stability_timeout_s,
         )
         if not all(np.isfinite(value) and value > 0.0 for value in durations):
             raise ValueError("control durations must be positive and finite")
@@ -99,6 +101,7 @@ class GuardedChopSample:
     blade_hand_contact_count: int
     left_speed_rad_s: float
     right_speed_rad_s: float
+    hand_speed_rad_s: float
 
     def __post_init__(self) -> None:
         for name in (
@@ -469,11 +472,47 @@ def run_guarded_chop(
                 decision = safety.evaluate(observation)
                 raise RuntimeError(decision.reason)
 
+        def wait_for_guard_stability(
+            current_phase: GuardedChopPhase,
+            cut_index: int,
+        ) -> None:
+            hand_position = robot.sim.data.qpos[
+                robot.sim.hand.qpos_ids
+            ].copy()
+            hand_ranges = robot.sim.model.actuator_ctrlrange[
+                robot.sim.hand.actuator_ids
+            ]
+            robot.hand.command(
+                np.clip(hand_position, hand_ranges[:, 0], hand_ranges[:, 1])
+            )
+            stable_time = 0.0
+            maximum_steps = int(
+                round(config.stability_timeout_s / config.control_dt_s)
+            )
+            for _ in range(maximum_steps):
+                step_and_record(current_phase, cut_index)
+                hand_speed = float(
+                    np.linalg.norm(
+                        robot.sim.data.qvel[robot.sim.hand.dof_ids]
+                    )
+                )
+                if (
+                    np.linalg.norm(robot.left_joint_velocities) <= 0.05
+                    and hand_speed <= 0.05
+                ):
+                    stable_time += config.control_dt_s
+                    if stable_time + 1e-12 >= config.interlock_settle_s:
+                        return
+                else:
+                    stable_time = 0.0
+            raise RuntimeError("left guard did not settle before cut")
+
         phase = GuardedChopPhase.GUARD_READY
         for _ in range(
             int(round(config.guard_ready_duration_s / config.control_dt_s))
         ):
             step_and_record(phase, 0)
+        wait_for_guard_stability(phase, 0)
 
         for index, cut in enumerate(plan.cuts, start=1):
             phase = GuardedChopPhase.CUT_DOWN
@@ -496,15 +535,7 @@ def run_guarded_chop(
                 for point in plan.guard_shifts[index - 1][1:]:
                     robot.command_left(point.joints_rad)
                     step_and_record(phase, index)
-                for _ in range(
-                    int(
-                        round(
-                            config.interlock_settle_s
-                            / config.control_dt_s
-                        )
-                    )
-                ):
-                    step_and_record(phase, index)
+                wait_for_guard_stability(phase, index)
                 completed_shifts += 1
 
         phase = GuardedChopPhase.COMPLETE
@@ -616,6 +647,11 @@ def _safety_observation(
             np.linalg.norm(robot.left_joint_velocities)
         ),
         right_speed_rad_s=float(np.linalg.norm(robot.joint_velocities)),
+        hand_speed_rad_s=float(
+            np.linalg.norm(
+                robot.sim.data.qvel[robot.sim.hand.dof_ids]
+            )
+        ),
         finite_state=finite,
     )
 
@@ -665,6 +701,7 @@ def _observe_sample(
         blade_hand_contact_count=_blade_hand_contact_count(robot),
         left_speed_rad_s=observation.left_speed_rad_s,
         right_speed_rad_s=observation.right_speed_rad_s,
+        hand_speed_rad_s=observation.hand_speed_rad_s,
     )
     if trace is not None:
         trace.append(
