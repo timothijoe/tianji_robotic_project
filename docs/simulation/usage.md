@@ -56,6 +56,17 @@ Python API 的最小示例位于 `examples/simulation_demo.py`。
 
 ## 双臂猫爪倒手切菜
 
+直接从任意工作目录打开默认平面场景 Viewer：
+
+```bash
+./scripts/run_guarded_chop.sh
+```
+
+该脚本会自动定位仓库路径，并使用仓库内的 `.venv`。它只运行 MuJoCo 仿真，
+不会向实体机械臂、Wuji Hand 或 ROS 2 硬件接口发送命令。
+
+其他命令行模式：
+
 ```bash
 .venv/bin/twin-sim guarded-chop
 .venv/bin/twin-sim guarded-chop --headless --final-hold 0
