@@ -80,7 +80,7 @@ def test_guard_knuckle_site_belongs_to_left_hand():
 
 - [ ] **Step 2: Run tests and verify missing names fail**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_scene.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_scene.py -q`
 Expected: FAIL because `guarded_chop_cube` and `left_guard_knuckle_site` do not exist.
 
 - [ ] **Step 3: Add the hidden fixed proxy and knuckle site**
@@ -112,7 +112,7 @@ simulation.require_site("left_guard_knuckle_site")
 
 - [ ] **Step 4: Run scene and existing model tests**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_scene.py tests/simulation/test_model.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_scene.py tests/simulation/test_model.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -206,7 +206,7 @@ def test_shift_requires_raised_stationary_knife():
 
 - [ ] **Step 2: Run tests and verify imports fail**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_safety.py tests/simulation/test_guarded_chop_posture.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_safety.py tests/simulation/test_guarded_chop_posture.py -q`
 Expected: FAIL with `ModuleNotFoundError: twin_sim.guarded_chop_safety`.
 
 - [ ] **Step 3: Implement pure posture and safety types**
@@ -271,7 +271,7 @@ class SafetyCoordinator:
 
 Run a short headless pose script that commands the 20 targets, steps 2 s, and prints the knuckle site. Adjust the constants until the thumb is behind the four curled fingers and no hand joint is at a limit; do not change the public shape or test thresholds.
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_safety.py tests/simulation/test_guarded_chop_posture.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_safety.py tests/simulation/test_guarded_chop_posture.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -367,7 +367,7 @@ def test_point_to_oriented_blade_box_distance_uses_surface_not_center():
 
 - [ ] **Step 3: Run tests and verify the task module is missing**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_state_machine.py tests/simulation/test_guarded_chop_preflight.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_state_machine.py tests/simulation/test_guarded_chop_preflight.py -q`
 Expected: FAIL with `ModuleNotFoundError`.
 
 - [ ] **Step 4: Implement types and validation**
@@ -469,7 +469,7 @@ __all__ += [
 ]
 ```
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_state_machine.py tests/simulation/test_guarded_chop_preflight.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_state_machine.py tests/simulation/test_guarded_chop_preflight.py -q`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -524,7 +524,7 @@ Add a second test that snapshots `guarded_chop_cube_center` before/after and req
 
 - [ ] **Step 2: Run integration tests and verify execution is absent**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_integration.py -q -s`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_integration.py -q -s`
 Expected: FAIL because `run_guarded_chop` does not execute the plan yet.
 
 - [ ] **Step 3: Implement task-local scene activation**
@@ -576,7 +576,7 @@ Also compare the fixed cube site's position and orientation before/after with `n
 
 - [ ] **Step 6: Run integration and relevant regression tests**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_integration.py tests/simulation/test_line_chop.py tests/simulation/test_pick_place_integration.py -q -s`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_integration.py tests/simulation/test_line_chop.py tests/simulation/test_pick_place_integration.py -q -s`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -631,7 +631,7 @@ def test_trace_uses_approved_colors_and_overlay():
 
 - [ ] **Step 2: Run and verify the module is missing**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py -q`
 Expected: FAIL with `ModuleNotFoundError`.
 
 - [ ] **Step 3: Implement bounded traces and overlay**
@@ -653,7 +653,7 @@ viewer.set_texts((None, None, "Guarded chop", status))
 
 Call `trace.append(...)` only after the sample passes safety validation. On abort call `trace.set_abort(reason)` before returning the result. Ensure headless operation passes `trace=None` and allocates no Viewer geometry.
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py tests/simulation/test_guarded_chop_integration.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py tests/simulation/test_guarded_chop_integration.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -693,7 +693,7 @@ def test_guarded_chop_cli_prints_coordination_metrics(monkeypatch, capsys):
 
 - [ ] **Step 2: Run and verify parser failure**
 
-Run: `.venv/bin/pytest tests/simulation/test_cli.py::test_guarded_chop_cli_prints_coordination_metrics -q`  
+Run: `.venv/bin/pytest tests/simulation/test_cli.py::test_guarded_chop_cli_prints_coordination_metrics -q`
 Expected: FAIL because `guarded-chop` is not registered.
 
 - [ ] **Step 3: Add CLI parser and execution branch**
@@ -751,7 +751,7 @@ Expected:
 
 - [ ] **Step 6: Run the Viewer acceptance once**
 
-Run: `.venv/bin/twin-sim guarded-chop --final-hold 10`  
+Run: `.venv/bin/twin-sim guarded-chop --final-hold 10`
 Expected: visible sequence `CUT_DOWN → KNIFE_UP → HAND_SHIFT`, repeated five times; no gray pick-place pedestals; fixed red cube stays on the board; overlay ends at `cut=5/5 phase=complete`.
 
 - [ ] **Step 7: Commit**
