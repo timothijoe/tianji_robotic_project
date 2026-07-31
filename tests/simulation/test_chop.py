@@ -85,11 +85,10 @@ def test_contact_target_limits_blade_penetration():
         robot.close()
 
 
-def test_chop_ready_pose_levels_edge_with_only_wrist_rotation():
+def test_chop_ready_pose_points_tip_forward_and_blade_vertical():
     robot = RightArmRobot()
     try:
         ready = chop.CHOP_READY_RAD
-        np.testing.assert_allclose(ready[:6], chop.RIGHT_HOME_RAD[:6])
         robot.reset(ready)
         data = robot.sim.data
         edge_start = data.site_xpos[
@@ -100,8 +99,43 @@ def test_chop_ready_pose_levels_edge_with_only_wrist_rotation():
         ]
         edge_direction = edge_end - edge_start
         edge_direction /= np.linalg.norm(edge_direction)
+        blade_id = robot.sim.require_geom("right_blade_visual")
+        blade_height = data.geom_xmat[blade_id].reshape(3, 3)[:, 1]
 
-        assert abs(float(edge_direction[2])) <= np.sin(np.deg2rad(2.0))
+        assert float(edge_direction[0]) >= np.cos(np.deg2rad(2.0))
+        assert float(blade_height[2]) >= np.cos(np.deg2rad(2.0))
+    finally:
+        robot.close()
+
+
+def test_blade_markers_stay_inside_visual_blade():
+    robot = RightArmRobot()
+    try:
+        model = robot.sim.model
+        blade_id = robot.sim.require_geom("right_blade_visual")
+        center = model.geom_pos[blade_id]
+        half_size = model.geom_size[blade_id]
+
+        for name in (
+            "right_blade_edge_top",
+            "right_blade_edge_bot",
+            "right_tool_tip_site",
+        ):
+            marker = model.site_pos[robot.sim.require_site(name)]
+            assert np.all(marker >= center - half_size - 1e-9)
+            assert np.all(marker <= center + half_size + 1e-9)
+    finally:
+        robot.close()
+
+
+def test_default_chop_has_visible_vertical_stroke():
+    robot = RightArmRobot()
+    try:
+        trajectories, _ = _preflight(robot, Kinematics(robot.sim), ChopConfig())
+        safe_z = trajectories["APPROACH"][-1].target_pose[2, 3]
+        contact_z = trajectories["DESCEND"][-1].target_pose[2, 3]
+
+        assert safe_z - contact_z >= 0.08
     finally:
         robot.close()
 

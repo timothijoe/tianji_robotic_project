@@ -16,14 +16,16 @@ from twin_sim.trajectory import (
 )
 
 
-CHOP_READY_RAD = RIGHT_HOME_RAD.copy()
-CHOP_READY_RAD[6] = 0.36
+CHOP_READY_RAD = np.array(
+    (-0.48059, -1.36174, 0.25146, -1.27547, -0.47263, 1.0085, -0.01899),
+    dtype=float,
+)
 
 
 @dataclass(frozen=True)
 class ChopConfig:
     control_dt_s: float = 0.01
-    orient_duration_s: float = 1.2
+    orient_duration_s: float = 1.5
     approach_duration_s: float = 1.0
     descent_duration_s: float = 1.0
     hold_duration_s: float = 0.2
@@ -31,7 +33,7 @@ class ChopConfig:
     penetration_m: float = 0.003
     force_filter_alpha: float = 0.2
     force_warning_threshold_n: float = 30.0
-    safe_clearance_m: float = 0.03
+    safe_clearance_m: float = 0.08
     viewer_start_hold_s: float = 0.0
     viewer_end_hold_s: float = 0.0
     full_motion: bool = False
