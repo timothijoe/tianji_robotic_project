@@ -49,12 +49,14 @@ def test_csv_contains_force_phase_and_flattened_state(tmp_path):
         raw_force_n=2.0,
         filtered_force_n=1.5,
         force_over_threshold=False,
+        cut_index=3,
     )
 
     write_csv(path, [sample])
 
     row = next(csv.DictReader(path.open()))
     assert row["phase"] == "TEST"
+    assert row["cut_index"] == "3"
     assert row["filtered_force_n"] == "1.5"
     assert row["force_over_threshold"] == "False"
     assert row["target_q_0"] == "0.0"

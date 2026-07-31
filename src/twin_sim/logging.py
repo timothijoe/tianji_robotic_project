@@ -17,11 +17,13 @@ class SimulationSample:
     raw_force_n: float
     filtered_force_n: float
     force_over_threshold: bool
+    cut_index: int = 0
 
 
 _FIELDS = (
     "time_s",
     "phase",
+    "cut_index",
     *(f"target_q_{index}" for index in range(7)),
     *(f"actual_q_{index}" for index in range(7)),
     *(f"target_pose_{index}" for index in range(16)),
@@ -75,11 +77,21 @@ def _row(sample: SimulationSample) -> dict[str, object]:
         raise ValueError("time_s must be non-negative and finite")
     if not isinstance(sample.phase, str) or not sample.phase:
         raise ValueError("phase must be a non-empty string")
+    if (
+        isinstance(sample.cut_index, bool)
+        or not isinstance(sample.cut_index, (int, np.integer))
+        or sample.cut_index < 0
+    ):
+        raise ValueError("cut_index must be a non-negative integer")
     if not np.isfinite(sample.raw_force_n) or not np.isfinite(
         sample.filtered_force_n
     ):
         raise ValueError("force values must be finite")
-    row: dict[str, object] = {"time_s": float(sample.time_s), "phase": sample.phase}
+    row: dict[str, object] = {
+        "time_s": float(sample.time_s),
+        "phase": sample.phase,
+        "cut_index": int(sample.cut_index),
+    }
     row.update(
         {f"target_q_{index}": float(value) for index, value in enumerate(target_joints)}
     )
