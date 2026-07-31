@@ -49,6 +49,20 @@ def test_disabled_backend_rejects_new_commands_and_holds_target():
     hand.close()
 
 
+def test_enabled_joints_remain_commandable_when_one_joint_is_disabled():
+    hand = SimWujiHand()
+    enabled = hand.read_joint_enabled()
+    enabled[0, 0] = False
+    hand.write_joint_enabled(enabled)
+    target = hand.read_joint_target_position()
+    target[0, 1] += 0.05
+    hand.write_joint_target_position(target)
+    target[0, 0] += 0.05
+    with pytest.raises(RuntimeError, match="disabled"):
+        hand.write_joint_target_position(target)
+    hand.close()
+
+
 def test_realtime_controller_context_exposes_supported_subset():
     hand = SimWujiHand()
     with hand.realtime_controller() as controller:

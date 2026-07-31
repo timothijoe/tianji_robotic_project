@@ -28,6 +28,12 @@ Thumbs.db
 # Virtual environments
 venv/
 .venv/
+.venv-ros2/
+.venv-wujihand/
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+log/
 env/
 .worktrees/
 

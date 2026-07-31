@@ -77,8 +77,9 @@ class SimWujiHand:
     def write_joint_target_position(self, target: Any) -> None:
         self._require_open()
         values = self._validated_matrix(target, "joint target")
-        if not self._enabled.all():
-            raise RuntimeError("one or more simulated joints are disabled")
+        current = self.read_joint_target_position()
+        if np.any((values != current) & ~self._enabled):
+            raise RuntimeError("command changes one or more disabled simulated joints")
         self.robot.hand.command(values.reshape(20))
 
     def write_joint_enabled(self, enabled: Any) -> None:

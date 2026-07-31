@@ -34,6 +34,7 @@ Isaac Lab/强化学习依赖，也没有连接实体灵巧手。
 - [新架构](docs/simulation/architecture.md)
 - [使用方法](docs/simulation/usage.md)
 - [Wuji Hand 控制手册](docs/simulation/wuji_hand_control.md)
+- [ROS 2 与 Wuji Hand 仿真桥接](docs/simulation/ros2_wuji_hand_bridge.md)
 - [迁移说明](docs/simulation/migration.md)
 - [旧仿真归档](archive/legacy_simulation/README.md)
 
