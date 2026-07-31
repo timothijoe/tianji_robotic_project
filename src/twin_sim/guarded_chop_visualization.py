@@ -59,12 +59,8 @@ class GuardedChopTrace:
         self.cut_points = points
         self.planned_knife.clear()
         self.planned_knife.extend(point.copy() for point in points)
-        segments = [
-            (start, end, self.planned_knife_color, self.trail_radius_m)
-            for start, end in zip(points[:-1], points[1:], strict=True)
-        ]
         vertical = np.array((0.0, 0.0, self.cut_mark_half_length_m))
-        segments.extend(
+        segments = [
             (
                 point - vertical,
                 point + vertical,
@@ -72,6 +68,10 @@ class GuardedChopTrace:
                 self.cut_mark_radius_m,
             )
             for point in points
+        ]
+        segments.extend(
+            (start, end, self.planned_knife_color, self.trail_radius_m)
+            for start, end in zip(points[:-1], points[1:], strict=True)
         )
         self._draw_segments(segments)
 
@@ -84,10 +84,7 @@ class GuardedChopTrace:
         cut_index: int,
         minimum_distance_m: float,
         cut_allowed: bool,
-        planned_knife: Sequence[float] | None = None,
     ) -> None:
-        if planned_knife is not None:
-            _position(np.asarray(planned_knife, dtype=float))
         knife_point, guard_point = (
             _position(np.asarray(value, dtype=float))
             for value in (actual_knife, actual_guard)

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from twin_sim.guarded_chop_visualization import GuardedChopTrace
 
@@ -57,7 +58,6 @@ def test_trace_draws_three_trails_and_five_compact_cut_marks():
     )
 
     trace.append(
-        planned_knife=(0.7, 0.04, 0.36),
         actual_knife=(0.7, 0.04, 0.35),
         actual_guard=(0.6, 0.10, 0.36),
         phase="hand_open",
@@ -99,11 +99,41 @@ def test_trace_draws_three_trails_and_five_compact_cut_marks():
         )
         == 1
     )
-    cut_marks = viewer.user_scn.geoms[4:9]
+    cut_marks = viewer.user_scn.geoms[:5]
     assert all(mark.size[0] <= 0.0015 for mark in cut_marks)
     assert all(mark.size[2] <= 0.006 for mark in cut_marks)
     assert viewer.texts[2] == "Guarded chop"
     assert "phase=hand_open" in viewer.texts[3]
+
+
+def test_plan_uses_every_limited_scene_slot_for_cut_marks_first():
+    viewer = FakeViewer()
+    viewer.user_scn.maxgeom = 4
+    trace = GuardedChopTrace(viewer)
+
+    trace.set_plan(
+        [(0.7, y, 0.33) for y in (0.04, 0.02, 0.0, -0.02, -0.04)]
+    )
+
+    assert viewer.user_scn.ngeom == 4
+    for geom in viewer.user_scn.geoms[:4]:
+        assert np.isclose(geom.size[0], trace.cut_mark_radius_m)
+        assert np.isclose(geom.size[2], trace.cut_mark_half_length_m)
+
+
+def test_append_rejects_removed_planned_knife_argument():
+    trace = GuardedChopTrace()
+
+    with pytest.raises(TypeError, match="planned_knife"):
+        trace.append(
+            planned_knife=(0.7, 0.04, 0.36),
+            actual_knife=(0.7, 0.04, 0.35),
+            actual_guard=(0.6, 0.10, 0.36),
+            phase="hand_open",
+            cut_index=1,
+            minimum_distance_m=0.06,
+            cut_allowed=False,
+        )
 
 
 def test_abort_reason_replaces_live_phase():
