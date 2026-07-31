@@ -6,12 +6,24 @@ from twin_sim.kinematics import Kinematics
 from twin_sim.robot import RIGHT_HOME_RAD, RightArmRobot
 from twin_sim.tasks.chop import ChopConfig, run_chop
 from twin_sim.tasks.line_chop import LineChopConfig, run_line_chop
+from twin_sim.tasks.hand_demo import HandDemoConfig, run_hand_demo
 from twin_sim.trajectory import cartesian_trajectory, joint_trajectory
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.command == "hand-demo":
+        run_hand_demo(
+            HandDemoConfig(
+                close_duration_s=4.0 if args.slow else 2.0,
+                open_duration_s=4.0 if args.slow else 2.0,
+                viewer_start_hold_s=5.0 if args.slow else 0.0,
+                viewer_end_hold_s=10.0 if args.slow else 0.0,
+            ),
+            viewer=not args.headless,
+        )
+        return 0
     if args.command == "chop":
         config = (
             ChopConfig(
@@ -101,6 +113,9 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="twin-sim")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("view")
+    hand_demo = commands.add_parser("hand-demo")
+    hand_demo.add_argument("--headless", action="store_true")
+    hand_demo.add_argument("--slow", action="store_true")
     joint = commands.add_parser("joint")
     joint.add_argument("--joint", type=int, required=True)
     joint.add_argument("--delta-rad", type=float, required=True)

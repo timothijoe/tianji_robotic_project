@@ -11,6 +11,32 @@ def test_headless_chop_cli(tmp_path):
     assert path.is_file()
 
 
+def test_headless_hand_demo_cli(monkeypatch):
+    captured = {}
+
+    def fake_run(config, *, viewer):
+        captured.update(config=config, viewer=viewer)
+
+    monkeypatch.setattr(cli, "run_hand_demo", fake_run)
+    assert main(["hand-demo", "--headless"]) == 0
+    assert captured["viewer"] is False
+
+
+def test_slow_hand_demo_cli_uses_long_motion(monkeypatch):
+    captured = {}
+
+    def fake_run(config, *, viewer):
+        captured.update(config=config, viewer=viewer)
+
+    monkeypatch.setattr(cli, "run_hand_demo", fake_run)
+    assert main(["hand-demo", "--slow"]) == 0
+    assert captured["config"].close_duration_s == 4.0
+    assert captured["config"].open_duration_s == 4.0
+    assert captured["config"].viewer_start_hold_s == 5.0
+    assert captured["config"].viewer_end_hold_s == 10.0
+    assert captured["viewer"] is True
+
+
 def test_headless_joint_and_cartesian_cli():
     assert main(["joint", "--joint", "1", "--delta-rad", "0.01", "--headless"]) == 0
     assert main(["cartesian", "--dz-m", "0.005", "--headless"]) == 0

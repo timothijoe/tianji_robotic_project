@@ -8,6 +8,7 @@
 - 模型加载与 Viewer；
 - 右臂关节位置运动；
 - Cartesian 路径采样、连续 IK 和关节位置执行；
+- 左臂安装 20 自由度 Wuji Hand，并提供安全的位置目标接口；
 - 一次“接近—下压—停留—抬刀”切菜任务；
 - 接触力观测、阈值 warning 和 CSV 日志。
 
@@ -18,8 +19,14 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements-sim.lock
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m pytest -q
+.venv/bin/twin-sim hand-demo --headless
 .venv/bin/twin-sim chop --headless --log /tmp/twin-sim-chop.csv
 ```
+
+使用 `.venv/bin/twin-sim hand-demo --slow` 可以在 Viewer 中查看左手缓慢
+闭合后重新张开。左手模型来自 `wuji-description` 的原版左手，按 MIT 许可证
+收录在 `robot_assets/mujoco/wuji_hand/`；本项目没有引入 `wuji-mjlab` 的
+Isaac Lab/强化学习依赖，也没有连接实体灵巧手。
 
 详细说明：
 
