@@ -20,7 +20,12 @@ from twin_sim.tasks.line_chop import (
     _preflight_line_chop,
 )
 from twin_sim.tasks.pick_place import LEFT_GRASP_READY_RAD
-from twin_sim.trajectory import TrajectoryPoint, cartesian_trajectory
+from twin_sim.trajectory import (
+    TrajectoryPoint,
+    _validate_motion,
+    cartesian_trajectory,
+    minimum_jerk,
+)
 
 
 _GUARDED_CHOP_VIEW_AZIMUTH_DEG = 135.0
@@ -416,15 +421,46 @@ def _diagonal_lift_shifts(
             duration_s,
             config.control_dt_s,
         )
-        endpoint = path[-1]
-        path[-1] = TrajectoryPoint(
-            endpoint.time_s,
-            following.descent[0].joints_rad.copy(),
-            endpoint.velocity_rad_s.copy(),
-            endpoint.target_pose.copy(),
+        paths.append(
+            _retarget_trajectory_endpoint(
+                path,
+                following.descent[0].joints_rad,
+                config.control_dt_s,
+            )
         )
-        paths.append(tuple(path))
     return tuple(paths)
+
+
+def _retarget_trajectory_endpoint(
+    path: Sequence[TrajectoryPoint],
+    goal_joints_rad: Sequence[float],
+    control_dt_s: float,
+) -> tuple[TrajectoryPoint, ...]:
+    points = tuple(path)
+    if len(points) < 2:
+        raise ValueError("trajectory must contain at least two points")
+    joints = np.asarray([point.joints_rad for point in points])
+    goal = np.asarray(goal_joints_rad, dtype=float)
+    if goal.shape != joints.shape[1:] or not np.isfinite(goal).all():
+        raise ValueError("goal joints must match trajectory shape")
+    phase = np.linspace(0.0, 1.0, len(points))
+    blend, _ = minimum_jerk(phase)
+    joints = joints + blend[:, None] * (goal - joints[-1])
+    joints[-1] = goal
+    _validate_motion(joints, control_dt_s)
+    velocities = np.gradient(joints, control_dt_s, axis=0, edge_order=2)
+    velocities[[0, -1]] = 0.0
+    return tuple(
+        TrajectoryPoint(
+            point.time_s,
+            joint.copy(),
+            velocity.copy(),
+            point.target_pose.copy(),
+        )
+        for point, joint, velocity in zip(
+            points, joints, velocities, strict=True
+        )
+    )
 
 
 def _validate_nonapproaching_retreat(

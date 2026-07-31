@@ -81,6 +81,10 @@ def test_preflight_builds_four_diagonal_lift_shift_paths():
             path[-1].joints_rad,
             plan.cuts[index + 1].descent[0].joints_rad,
         )
+        np.testing.assert_array_equal(
+            path[0].joints_rad,
+            plan.cuts[index].descent[-1].joints_rad,
+        )
 
 
 def test_retreat_validation_rejects_any_intermediate_approach():
