@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from twin_sim.model import ModelValidationError, SimulationModel
+from twin_sim.hand_names import HAND_ACTUATORS, HAND_JOINTS
 
 
 def test_active_scene_has_arm_and_hand_position_actuators():
@@ -38,6 +39,25 @@ def test_left_hand_is_mounted_below_left_wrist():
         body_id = int(sim.model.body_parentid[body_id])
     assert mount_id in ancestors
     assert wrist_id in ancestors
+
+
+def test_left_hand_indices_preserve_upstream_order():
+    sim = SimulationModel.load()
+    expected_joints = tuple(
+        f"left_finger{finger}_joint{joint}"
+        for finger in range(1, 6)
+        for joint in range(1, 5)
+    )
+    assert HAND_JOINTS == expected_joints
+    assert HAND_ACTUATORS == tuple(f"{name}_actuator" for name in expected_joints)
+    assert sim.hand.joint_ids.shape == (20,)
+    assert sim.hand.qpos_ids.shape == (20,)
+    assert sim.hand.dof_ids.shape == (20,)
+    assert sim.hand.actuator_ids.shape == (20,)
+    np.testing.assert_array_equal(
+        sim.model.actuator_trnid[sim.hand.actuator_ids, 0],
+        sim.hand.joint_ids,
+    )
 
 
 def test_active_scene_has_task_objects():
