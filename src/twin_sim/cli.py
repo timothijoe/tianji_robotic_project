@@ -2,16 +2,20 @@ import argparse
 from pathlib import Path
 import time
 
+import numpy as np
+
 from twin_sim.kinematics import Kinematics
+from twin_sim.pick_place_visualization import PickPlaceTrace
 from twin_sim.robot import RIGHT_HOME_RAD, RightArmRobot
 from twin_sim.tasks.chop import ChopConfig, run_chop
 from twin_sim.tasks.line_chop import LineChopConfig, run_line_chop
 from twin_sim.tasks.hand_demo import HandDemoConfig, run_hand_demo
+from twin_sim.tasks.pick_place import PickPlaceConfig, PickPlaceTask
 from twin_sim.trajectory import cartesian_trajectory, joint_trajectory
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = _parser()
+    parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "hand-demo":
         run_hand_demo(
@@ -74,6 +78,56 @@ def main(argv: list[str] | None = None) -> int:
             viewer=not args.headless,
         )
         return 0
+    if args.command == "pick-place":
+        final_hold_s = (
+            args.final_hold
+            if args.final_hold is not None
+            else (5.0 if not args.headless else 0.0)
+        )
+        robot = RightArmRobot(viewer=not args.headless)
+        try:
+            trace = PickPlaceTrace(robot._viewer)
+            result = PickPlaceTask(
+                robot,
+                PickPlaceConfig(final_hold_s=final_hold_s),
+                trace=trace,
+                realtime=args.slow and args.headless,
+            ).run()
+            cube = np.asarray(
+                [sample.cube_position for sample in result.samples],
+                dtype=float,
+            )
+            target = robot.sim.data.site_xpos[
+                robot.sim.require_site("pick_target_site")
+            ]
+            lift = float(cube[:, 2].max() - cube[0, 2]) if len(cube) else 0.0
+            transfer = (
+                float(np.linalg.norm(cube[-1, :2] - cube[0, :2]))
+                if len(cube)
+                else 0.0
+            )
+            target_error = (
+                float(np.linalg.norm(cube[-1, :2] - target[:2]))
+                if len(cube)
+                else float("nan")
+            )
+            max_force = max(
+                (
+                    sample.grasp.max_hand_actuator_force
+                    for sample in result.samples
+                ),
+                default=0.0,
+            )
+            print(
+                f"success={result.success} phase={result.final_phase.value} "
+                f"lift_m={lift:.3f} transfer_m={transfer:.3f} "
+                f"target_error_m={target_error:.3f} "
+                f"max_hand_force={max_force:.3f} "
+                f"reason={result.reason or '-'}"
+            )
+            return 0 if result.success else 1
+        finally:
+            robot.close()
     if args.command == "view":
         robot = RightArmRobot(viewer=True)
         try:
@@ -109,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         robot.close()
 
 
-def _parser() -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="twin-sim")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("view")
@@ -137,7 +191,14 @@ def _parser() -> argparse.ArgumentParser:
     line_chop.add_argument("--plot", type=Path, required=True)
     line_chop.add_argument("--control-dt", type=float, default=0.01)
     line_chop.add_argument("--slow", action="store_true")
+    pick_place = commands.add_parser("pick-place")
+    pick_place.add_argument("--headless", action="store_true")
+    pick_place.add_argument("--slow", action="store_true")
+    pick_place.add_argument("--final-hold", type=float)
     return parser
+
+
+_parser = build_parser
 
 
 if __name__ == "__main__":

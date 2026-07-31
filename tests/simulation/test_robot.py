@@ -108,3 +108,26 @@ def test_viewer_step_is_paced_in_real_time(monkeypatch):
 
     assert sleeps == [0.002]
     robot.close()
+
+
+def test_close_waits_for_passive_viewer_thread():
+    robot = RightArmRobot()
+
+    class FakeViewer:
+        def close(self):
+            pass
+
+    class FakeThread:
+        def __init__(self):
+            self.joined = False
+
+        def join(self):
+            self.joined = True
+
+    thread = FakeThread()
+    robot._viewer = FakeViewer()
+    robot._viewer_thread = thread
+
+    robot.close()
+
+    assert thread.joined

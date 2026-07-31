@@ -1,4 +1,5 @@
 from pathlib import Path
+import threading
 import time
 from typing import Sequence
 
@@ -23,6 +24,7 @@ class RightArmRobot:
     def __init__(self, model_path: Path | None = None, viewer: bool = False):
         self.sim = SimulationModel.load(model_path)
         self._viewer = None
+        self._viewer_thread = None
         self.hand = LeftHandController(self.sim)
         self.right_kinematics = Kinematics(
             self.sim, self.sim.right, "right_tool_tip_site"
@@ -45,7 +47,21 @@ class RightArmRobot:
         if viewer:
             from mujoco import viewer as mujoco_viewer
 
+            threads_before = {thread.ident for thread in threading.enumerate()}
             self._viewer = mujoco_viewer.launch_passive(self.sim.model, self.sim.data)
+            new_threads = [
+                thread
+                for thread in threading.enumerate()
+                if thread.ident not in threads_before
+            ]
+            self._viewer_thread = next(
+                (
+                    thread
+                    for thread in new_threads
+                    if "_launch_internal" in thread.name
+                ),
+                next(iter(new_threads), None),
+            )
 
     def reset(self, joints_rad: Sequence[float] = RIGHT_HOME_RAD) -> None:
         joints = self._validated_target(joints_rad)
@@ -130,6 +146,9 @@ class RightArmRobot:
         if self._viewer is not None:
             viewer, self._viewer = self._viewer, None
             viewer.close()
+        if self._viewer_thread is not None:
+            viewer_thread, self._viewer_thread = self._viewer_thread, None
+            viewer_thread.join()
 
     @staticmethod
     def _validated_joints(joints_rad: Sequence[float]) -> np.ndarray:

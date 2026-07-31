@@ -17,5 +17,15 @@ def test_real_contact_pick_place_meets_acceptance_contract():
     assert np.linalg.norm(cube[-1, :2] - cube[0, :2]) >= 0.15
     assert result.placed_in_target
     assert not result.used_hidden_attachment
+    board = robot.sim.require_geom("chopping_board")
+    board_top = (
+        robot.sim.model.geom_pos[board, 2]
+        + robot.sim.model.geom_size[board, 2]
+    )
+    assert cube[:, 2].min() - 0.025 >= board_top - 0.002
+    assert np.linalg.norm(result.samples[-1].cube_linear_velocity) < 0.02
+    assert (
+        result.samples[-1].time_s - result.samples[-26].time_s
+    ) >= 0.25 - 1e-9
     np.testing.assert_array_equal(robot._right_target, right_target_before)
     robot.close()

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
+import time
 from typing import Iterable
 
 import mujoco
@@ -140,6 +141,9 @@ class PickPlaceTask:
         self,
         robot: RightArmRobot,
         config: PickPlaceConfig = PickPlaceConfig(),
+        *,
+        trace=None,
+        realtime: bool = False,
     ):
         self.robot = robot
         self.config = self._validated_config(config)
@@ -150,6 +154,8 @@ class PickPlaceTask:
             abort_force=1.0,
         )
         self.samples: list[PickPlaceSample] = []
+        self.trace = trace
+        self.realtime = bool(realtime)
         self.phase = PickPlacePhase.INITIALIZE
         self._cube_body = robot.sim.require_body("pick_cube")
         self._cube_site = robot.sim.require_site("pick_cube_site")
@@ -320,7 +326,7 @@ class PickPlaceTask:
         self.phase = phase
         for point in points:
             self.robot.command_left(point.joints_rad)
-            self.robot.step(self.config.control_dt_s)
+            self._step()
             target_pose = (
                 point.target_pose
                 if point.target_pose is not None
@@ -341,14 +347,14 @@ class PickPlaceTask:
         for fraction in np.linspace(0.0, 1.0, steps + 1)[1:]:
             blend = 10 * fraction**3 - 15 * fraction**4 + 6 * fraction**5
             self.robot.hand.command(start + blend * (goal - start))
-            self.robot.step(self.config.control_dt_s)
+            self._step()
             self._record(self.robot.left_palm_pose()[:3, 3])
             self._require_safe_state()
 
     def _stabilize(self) -> None:
         self.phase = PickPlacePhase.STABILIZE
         for _ in range(self._steps(self.config.grasp_timeout_s)):
-            self.robot.step(self.config.control_dt_s)
+            self._step()
             observation = self.monitor.observe(self.robot.sim)
             self.monitor.update(observation, self.config.control_dt_s)
             self._record(
@@ -364,7 +370,7 @@ class PickPlaceTask:
     def _hold(self, phase: PickPlacePhase, duration_s: float) -> None:
         self.phase = phase
         for _ in range(self._steps(duration_s)):
-            self.robot.step(self.config.control_dt_s)
+            self._step()
             self._record(self.robot.left_palm_pose()[:3, 3])
             self._require_safe_state()
 
@@ -376,8 +382,7 @@ class PickPlaceTask:
     ) -> None:
         observed = observation or self.monitor.observe(self.robot.sim)
         cube_velocity = self.robot.sim.data.cvel[self._cube_body, 3:].copy()
-        self.samples.append(
-            PickPlaceSample(
+        sample = PickPlaceSample(
                 time_s=float(self.robot.sim.data.time),
                 phase=self.phase,
                 left_target_rad=self.robot._left_target,
@@ -391,8 +396,17 @@ class PickPlaceTask:
                 cube_position=self._cube_position(),
                 cube_linear_velocity=cube_velocity,
                 grasp=observed,
-            )
         )
+        self.samples.append(sample)
+        if self.trace is not None:
+            self.trace.append(
+                planned_palm=sample.palm_target_position,
+                actual_palm=sample.palm_actual_position,
+                actual_cube=sample.cube_position,
+                phase=sample.phase.value,
+                contact_count=sample.grasp.hand_contact_count,
+                grasp_ready=self.monitor.ready,
+            )
 
     def _require_safe_state(self) -> None:
         arrays = (
@@ -442,6 +456,11 @@ class PickPlaceTask:
                 "phase duration must be an integer multiple of control_dt_s"
             )
         return steps
+
+    def _step(self) -> None:
+        self.robot.step(self.config.control_dt_s)
+        if self.realtime:
+            time.sleep(self.config.control_dt_s)
 
     @staticmethod
     def _validated_config(config: PickPlaceConfig) -> PickPlaceConfig:

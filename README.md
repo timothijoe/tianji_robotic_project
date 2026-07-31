@@ -9,6 +9,7 @@
 - 右臂关节位置运动；
 - Cartesian 路径采样、连续 IK 和关节位置执行；
 - 左臂安装 20 自由度 Wuji Hand，并提供安全的位置目标接口；
+- 左臂与 Wuji Hand 通过真实 MuJoCo 接触完成方块抓取、搬运和放置；
 - 一次“接近—下压—停留—抬刀”切菜任务；
 - 接触力观测、阈值 warning 和 CSV 日志。
 
@@ -20,6 +21,7 @@ python3.12 -m venv .venv
 .venv/bin/python -m pip install -e .
 .venv/bin/python -m pytest -q
 .venv/bin/twin-sim hand-demo --headless
+.venv/bin/twin-sim pick-place --headless
 .venv/bin/twin-sim chop --headless --log /tmp/twin-sim-chop.csv
 ```
 
@@ -34,6 +36,7 @@ Isaac Lab/强化学习依赖，也没有连接实体灵巧手。
 - [新架构](docs/simulation/architecture.md)
 - [使用方法](docs/simulation/usage.md)
 - [Wuji Hand 控制手册](docs/simulation/wuji_hand_control.md)
+- [左臂 + Wuji Hand 抓取放置](docs/simulation/left_arm_wuji_pick_place.md)
 - [ROS 2 与 Wuji Hand 仿真桥接](docs/simulation/ros2_wuji_hand_bridge.md)
 - [迁移说明](docs/simulation/migration.md)
 - [旧仿真归档](archive/legacy_simulation/README.md)
