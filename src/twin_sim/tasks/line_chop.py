@@ -18,6 +18,7 @@ from twin_sim.tasks.chop import (
 )
 from twin_sim.trajectory import TrajectoryPoint, cartesian_trajectory
 from twin_sim.trajectory_plot import write_trajectory_svg
+from twin_sim.viewer_trail import ViewerTrajectoryTrail
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,8 @@ def run_line_chop(
             ]
             robot.validate_targets(targets)
             robot.reset(preflight.initial_safe.joints_rad)
+            trail = ViewerTrajectoryTrail(robot._viewer, sample_stride=10)
+            trail.draw_target_plan(_target_trail_positions(preflight, config))
             _prepare_viewer_presentation(robot, config.chop)
             force_monitor = ForceMonitor(
                 robot.sim,
@@ -80,13 +83,14 @@ def run_line_chop(
             samples: list[SimulationSample] = []
             warning_count = 0
             was_over_threshold = False
+            trail_step = 0
 
             def execute(
                 phase: str,
                 cut_index: int,
                 points: Iterable[TrajectoryPoint],
             ) -> None:
-                nonlocal warning_count, was_over_threshold
+                nonlocal warning_count, was_over_threshold, trail_step
                 for point in points:
                     robot.command(point.joints_rad)
                     robot.step(config.chop.control_dt_s)
@@ -94,13 +98,14 @@ def run_line_chop(
                     if force.over_threshold and not was_over_threshold:
                         warning_count += 1
                     was_over_threshold = force.over_threshold
+                    actual_pose = kinematics.fk(robot.joint_positions)
                     sample = SimulationSample(
                         time_s=float(robot.sim.data.time),
                         phase=phase,
                         target_joints_rad=point.joints_rad.copy(),
                         actual_joints_rad=robot.joint_positions,
                         target_pose=point.target_pose.copy(),
-                        actual_pose=kinematics.fk(robot.joint_positions),
+                        actual_pose=actual_pose,
                         raw_force_n=force.raw_force_n,
                         filtered_force_n=force.filtered_force_n,
                         force_over_threshold=force.over_threshold,
@@ -108,6 +113,8 @@ def run_line_chop(
                     )
                     samples.append(sample)
                     csv_logger.write(sample)
+                    trail.record_actual(actual_pose[:3, 3], trail_step)
+                    trail_step += 1
 
             execute("READY", 0, (preflight.initial_safe,))
             hold_count = int(
@@ -262,3 +269,22 @@ def _validate_board_bounds(
     points = marker_xy[None, :, :] + offsets[:, None, :]
     if np.any(points < center - half_size) or np.any(points > center + half_size):
         raise ValueError("line-chop path leaves chopping board bounds")
+
+
+def _target_trail_positions(
+    preflight: _LinePreflight,
+    config: LineChopConfig,
+) -> list[np.ndarray]:
+    positions = [preflight.initial_safe.target_pose[:3, 3].copy()]
+    hold_count = int(
+        round(config.chop.hold_duration_s / config.chop.control_dt_s)
+    )
+    for cut in preflight.cuts:
+        positions.extend(point.target_pose[:3, 3].copy() for point in cut.descent[1:])
+        positions.extend(
+            cut.descent[-1].target_pose[:3, 3].copy()
+            for _ in range(hold_count)
+        )
+        positions.extend(point.target_pose[:3, 3].copy() for point in cut.retract[1:])
+        positions.extend(point.target_pose[:3, 3].copy() for point in cut.shift[1:])
+    return positions
