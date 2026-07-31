@@ -2,6 +2,11 @@ import mujoco
 import numpy as np
 
 from twin_sim.model import SimulationModel
+from twin_sim.robot import RightArmRobot
+from twin_sim.tasks.guarded_chop import (
+    _activate_guarded_scene,
+    _geom_belongs_to_body_tree,
+)
 
 
 def test_guarded_chop_proxy_is_fixed_and_hidden_by_default():
@@ -34,3 +39,31 @@ def test_guard_knuckle_site_belongs_to_left_hand():
 
     assert name == "left_finger3_link3"
     assert np.isfinite(sim.data.site_xpos[site]).all()
+
+
+def test_cube_collision_is_paired_only_with_middle_finger_pad():
+    robot = RightArmRobot(viewer=False)
+    try:
+        _activate_guarded_scene(robot)
+        model = robot.sim.model
+        cube = robot.sim.require_geom("guarded_chop_cube")
+        palm = robot.sim.require_body("left_palm_link")
+        partners = set()
+        for geom in range(model.ngeom):
+            if not _geom_belongs_to_body_tree(robot, geom, palm):
+                continue
+            compatible = (
+                model.geom_contype[cube] & model.geom_conaffinity[geom]
+            ) or (
+                model.geom_contype[geom] & model.geom_conaffinity[cube]
+            )
+            if compatible:
+                partners.add(
+                    mujoco.mj_id2name(
+                        model, mujoco.mjtObj.mjOBJ_GEOM, geom
+                    )
+                )
+
+        assert partners == {"left_finger3_pad"}
+    finally:
+        robot.close()

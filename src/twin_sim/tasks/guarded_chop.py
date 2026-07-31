@@ -612,7 +612,7 @@ def _activate_guarded_scene(robot: RightArmRobot) -> None:
     cube = robot.sim.require_geom("guarded_chop_cube")
     cube_body = int(robot.sim.model.geom_bodyid[cube])
     robot.sim.model.geom_rgba[cube] = (0.75, 0.18, 0.12, 1.0)
-    guard_contact_bit = 2
+    guard_contact_bit = 8
     robot.sim.model.geom_contype[cube] = guard_contact_bit
     robot.sim.model.geom_conaffinity[cube] = guard_contact_bit
     robot.sim.model.body_contype[cube_body] = guard_contact_bit
