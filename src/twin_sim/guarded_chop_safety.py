@@ -4,8 +4,8 @@ import numpy as np
 
 
 CAT_PAW_RAD = np.asarray(
-    (0.85, -0.02, 0.62, 0.78)
-    + (0.20, 0.00, 0.72, 0.82) * 4,
+    (0.95, -0.02, 0.95, 1.05)
+    + (0.30, 0.00, 1.10, 1.10) * 4,
     dtype=float,
 )
 
@@ -18,6 +18,8 @@ class SafetyObservation:
     knife_guard_distance_m: float
     left_target_stationary: bool
     right_target_stationary: bool
+    left_speed_rad_s: float
+    right_speed_rad_s: float
     finite_state: bool
 
 
@@ -43,6 +45,8 @@ class SafetyCoordinator:
             value.knife_height_m,
             value.safe_knife_height_m,
             value.knife_guard_distance_m,
+            value.left_speed_rad_s,
+            value.right_speed_rad_s,
         )
         if not value.finite_state or not np.isfinite(scalars).all():
             return SafetyDecision(False, "non-finite simulation state")
@@ -52,10 +56,14 @@ class SafetyCoordinator:
             )
 
         phase = str(getattr(value.phase, "value", value.phase)).upper()
-        if phase == "CUT_DOWN" and not value.left_target_stationary:
+        if phase == "CUT_DOWN" and (
+            not value.left_target_stationary
+            or value.left_speed_rad_s > 0.05
+        ):
             return SafetyDecision(False, "left guard moved during cut")
         if phase == "HAND_SHIFT" and (
             not value.right_target_stationary
+            or value.right_speed_rad_s > 0.05
             or value.knife_height_m < value.safe_knife_height_m
         ):
             return SafetyDecision(

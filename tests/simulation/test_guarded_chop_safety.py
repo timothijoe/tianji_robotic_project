@@ -12,6 +12,8 @@ def observation(**overrides):
         knife_guard_distance_m=0.03,
         left_target_stationary=True,
         right_target_stationary=False,
+        left_speed_rad_s=0.0,
+        right_speed_rad_s=0.0,
         finite_state=True,
     )
     values.update(overrides)
@@ -59,3 +61,19 @@ def test_nonfinite_state_is_rejected():
 
     assert not decision.allowed
     assert "non-finite" in decision.reason
+
+
+def test_actual_arm_motion_blocks_interlocked_phase():
+    coordinator = SafetyCoordinator()
+
+    assert not coordinator.evaluate(
+        observation(left_speed_rad_s=0.06)
+    ).allowed
+    assert not coordinator.evaluate(
+        observation(
+            phase="HAND_SHIFT",
+            right_target_stationary=True,
+            left_target_stationary=False,
+            right_speed_rad_s=0.06,
+        )
+    ).allowed

@@ -69,7 +69,9 @@ class GuardedChopTrace:
         self.guard_target.append(points[3])
         self.phase = str(phase)
         self.cut_index = int(cut_index)
-        self.minimum_distance_m = float(minimum_distance_m)
+        self.minimum_distance_m = min(
+            self.minimum_distance_m, float(minimum_distance_m)
+        )
         self.cut_allowed = bool(cut_allowed)
         if self._sample_index % self._marker_stride == 0:
             self._update_overlay()

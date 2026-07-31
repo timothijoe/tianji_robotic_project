@@ -90,3 +90,21 @@ def test_abort_reason_replaces_live_phase():
 
     assert "phase=aborted" in viewer.texts[3]
     assert "clearance lost" in viewer.texts[3]
+
+
+def test_overlay_keeps_cumulative_minimum_distance():
+    viewer = FakeViewer()
+    trace = GuardedChopTrace(viewer, marker_stride=1)
+    common = dict(
+        planned_knife=(0.0, 0.0, 0.0),
+        actual_knife=(0.0, 0.0, 0.0),
+        actual_guard=(0.0, 0.0, 0.0),
+        guard_target=(0.0, 0.0, 0.0),
+        phase="cut_down",
+        cut_index=1,
+        cut_allowed=True,
+    )
+    trace.append(minimum_distance_m=0.025, **common)
+    trace.append(minimum_distance_m=0.040, **common)
+
+    assert "distance=0.025" in viewer.texts[3]

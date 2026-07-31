@@ -19,6 +19,27 @@ def test_guarded_chop_executes_five_cuts_and_four_safe_shifts():
     assert result.completed_shifts == 4
     assert np.isclose(result.total_shift_m, 0.08, atol=0.002)
     assert result.minimum_distance_m >= 0.02
+    assert max(
+        sample.guard_cube_contact_count for sample in result.samples
+    ) >= 1
+    assert all(
+        not sample.cut_allowed
+        for sample in result.samples
+        if sample.phase is not GuardedChopPhase.CUT_DOWN
+    )
+    assert max(
+        sample.blade_hand_contact_count for sample in result.samples
+    ) == 0
+    assert max(
+        sample.left_speed_rad_s
+        for sample in result.samples
+        if sample.phase is GuardedChopPhase.CUT_DOWN
+    ) <= 0.05
+    assert max(
+        sample.right_speed_rad_s
+        for sample in result.samples
+        if sample.phase is GuardedChopPhase.HAND_SHIFT
+    ) <= 0.05
 
     down = [
         sample

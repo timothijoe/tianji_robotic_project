@@ -42,6 +42,7 @@ class GuardedChopConfig:
     cut_duration_s: float = 1.0
     knife_up_duration_s: float = 1.0
     hand_shift_duration_s: float = 0.8
+    interlock_settle_s: float = 0.3
     final_hold_s: float = 10.0
 
     def validated(self) -> "GuardedChopConfig":
@@ -63,6 +64,7 @@ class GuardedChopConfig:
             self.cut_duration_s,
             self.knife_up_duration_s,
             self.hand_shift_duration_s,
+            self.interlock_settle_s,
         )
         if not all(np.isfinite(value) and value > 0.0 for value in durations):
             raise ValueError("control durations must be positive and finite")
@@ -92,6 +94,11 @@ class GuardedChopSample:
     knife_guard_distance_m: float
     knife_height_m: float
     cut_allowed: bool
+    safety_allowed: bool
+    guard_cube_contact_count: int
+    blade_hand_contact_count: int
+    left_speed_rad_s: float
+    right_speed_rad_s: float
 
     def __post_init__(self) -> None:
         for name in (
@@ -314,10 +321,10 @@ def _guard_plan(
     direction = cut_points_xy[1] - cut_points_xy[0]
     direction /= np.linalg.norm(direction)
     desired_knuckle = np.asarray(
-        (cut_points_xy[0, 0], cut_points_xy[0, 1], 0.35), dtype=float
+        (cut_points_xy[0, 0], cut_points_xy[0, 1], 0.367), dtype=float
     )
     desired_knuckle[:2] -= (
-        config.minimum_distance_m + 0.002
+        config.minimum_distance_m + 0.036
     ) * direction
     ready_pose = palm_pose.copy()
     ready_pose[:3, 3] = (
@@ -366,8 +373,6 @@ def _planned_clearances(
     left_ready_rad: np.ndarray,
 ) -> np.ndarray:
     model, data = robot.sim.model, robot.sim.data
-    blade = robot.sim.require_geom("right_knife_blade")
-    knuckle = robot.sim.require_site("left_guard_knuckle_site")
     distances = []
 
     def measure(right: np.ndarray, left: np.ndarray) -> None:
@@ -375,14 +380,7 @@ def _planned_clearances(
         data.qpos[robot.sim.left.qpos_ids] = left
         data.qpos[robot.sim.hand.qpos_ids] = CAT_PAW_RAD
         mujoco.mj_forward(model, data)
-        distances.append(
-            _point_to_box_distance(
-                data.site_xpos[knuckle],
-                data.geom_xpos[blade],
-                data.geom_xmat[blade].reshape(3, 3),
-                model.geom_size[blade],
-            )
-        )
+        distances.append(_blade_hand_distance(robot))
 
     left = left_ready_rad
     for index, cut in enumerate(cuts):
@@ -431,14 +429,20 @@ def run_guarded_chop(
         cube_site = robot.sim.require_site("guarded_chop_cube_center")
         cube_position = robot.sim.data.site_xpos[cube_site].copy()
         cube_rotation = robot.sim.data.site_xmat[cube_site].copy()
+        last_left_target = robot._left_target.copy()
+        last_right_target = robot._right_target.copy()
 
         def step_and_record(
             current_phase: GuardedChopPhase,
             cut_index: int,
-            *,
-            left_stationary: bool,
-            right_stationary: bool,
         ) -> None:
+            nonlocal last_left_target, last_right_target
+            left_stationary = np.array_equal(
+                robot._left_target, last_left_target
+            )
+            right_stationary = np.array_equal(
+                robot._right_target, last_right_target
+            )
             robot.step(config.control_dt_s)
             sample = _observe_sample(
                 robot,
@@ -451,7 +455,9 @@ def run_guarded_chop(
                 trace=trace,
             )
             samples.append(sample)
-            if not sample.cut_allowed:
+            last_left_target = robot._left_target.copy()
+            last_right_target = robot._right_target.copy()
+            if not sample.safety_allowed:
                 observation = _safety_observation(
                     robot,
                     current_phase,
@@ -467,42 +473,38 @@ def run_guarded_chop(
         for _ in range(
             int(round(config.guard_ready_duration_s / config.control_dt_s))
         ):
-            step_and_record(
-                phase, 0, left_stationary=True, right_stationary=True
-            )
+            step_and_record(phase, 0)
 
         for index, cut in enumerate(plan.cuts, start=1):
             phase = GuardedChopPhase.CUT_DOWN
             for point in cut.descent[1:]:
                 robot.command(point.joints_rad)
-                step_and_record(
-                    phase,
-                    index,
-                    left_stationary=True,
-                    right_stationary=False,
-                )
+                step_and_record(phase, index)
             completed_cuts += 1
 
             phase = GuardedChopPhase.KNIFE_UP
             for point in (*cut.retract[1:], *cut.shift[1:]):
                 robot.command(point.joints_rad)
-                step_and_record(
-                    phase,
-                    index,
-                    left_stationary=True,
-                    right_stationary=False,
-                )
+                step_and_record(phase, index)
+            for _ in range(
+                int(round(config.interlock_settle_s / config.control_dt_s))
+            ):
+                step_and_record(phase, index)
 
             if index <= len(plan.guard_shifts):
                 phase = GuardedChopPhase.HAND_SHIFT
                 for point in plan.guard_shifts[index - 1][1:]:
                     robot.command_left(point.joints_rad)
-                    step_and_record(
-                        phase,
-                        index,
-                        left_stationary=False,
-                        right_stationary=True,
+                    step_and_record(phase, index)
+                for _ in range(
+                    int(
+                        round(
+                            config.interlock_settle_s
+                            / config.control_dt_s
+                        )
                     )
+                ):
+                    step_and_record(phase, index)
                 completed_shifts += 1
 
         phase = GuardedChopPhase.COMPLETE
@@ -510,12 +512,7 @@ def run_guarded_chop(
             1, int(round(config.final_hold_s / config.control_dt_s))
         )
         for _ in range(complete_steps):
-            step_and_record(
-                phase,
-                config.cuts,
-                left_stationary=True,
-                right_stationary=True,
-            )
+            step_and_record(phase, config.cuts)
 
         np.testing.assert_array_equal(
             robot.sim.data.site_xpos[cube_site], cube_position
@@ -563,9 +560,12 @@ def run_guarded_chop(
 
 def _activate_guarded_scene(robot: RightArmRobot) -> None:
     cube = robot.sim.require_geom("guarded_chop_cube")
+    cube_body = int(robot.sim.model.geom_bodyid[cube])
     robot.sim.model.geom_rgba[cube] = (0.75, 0.18, 0.12, 1.0)
     robot.sim.model.geom_contype[cube] = 1
     robot.sim.model.geom_conaffinity[cube] = 1
+    robot.sim.model.body_contype[cube_body] = 1
+    robot.sim.model.body_conaffinity[cube_body] = 1
     for name in (
         "pick_source_pedestal",
         "pick_target_pedestal",
@@ -576,6 +576,17 @@ def _activate_guarded_scene(robot: RightArmRobot) -> None:
         robot.sim.model.geom_rgba[geom, 3] = 0.0
         robot.sim.model.geom_contype[geom] = 0
         robot.sim.model.geom_conaffinity[geom] = 0
+    palm = robot.sim.require_body("left_palm_link")
+    for geom in range(robot.sim.model.ngeom):
+        if (
+            _geom_belongs_to_body_tree(robot, geom, palm)
+            and mujoco.mj_id2name(
+                robot.sim.model, mujoco.mjtObj.mjOBJ_GEOM, geom
+            )
+            is None
+        ):
+            robot.sim.model.geom_contype[geom] = 0
+            robot.sim.model.geom_conaffinity[geom] = 0
 
 
 def _safety_observation(
@@ -601,6 +612,10 @@ def _safety_observation(
         knife_guard_distance_m=distance_m,
         left_target_stationary=left_stationary,
         right_target_stationary=right_stationary,
+        left_speed_rad_s=float(
+            np.linalg.norm(robot.left_joint_velocities)
+        ),
+        right_speed_rad_s=float(np.linalg.norm(robot.joint_velocities)),
         finite_state=finite,
     )
 
@@ -618,14 +633,8 @@ def _observe_sample(
 ) -> GuardedChopSample:
     blade = robot.sim.require_geom("right_knife_blade")
     knuckle = robot.sim.require_site("left_guard_knuckle_site")
-    blade_rotation = robot.sim.data.geom_xmat[blade].reshape(3, 3)
     guard_position = robot.sim.data.site_xpos[knuckle].copy()
-    distance = _point_to_box_distance(
-        guard_position,
-        robot.sim.data.geom_xpos[blade],
-        blade_rotation,
-        robot.sim.model.geom_size[blade],
-    )
+    distance = _blade_hand_distance(robot)
     observation = _safety_observation(
         robot,
         phase,
@@ -648,9 +657,16 @@ def _observe_sample(
         guard_position=guard_position,
         knife_guard_distance_m=distance,
         knife_height_m=observation.knife_height_m,
-        cut_allowed=decision.allowed,
+        cut_allowed=(
+            decision.allowed and phase is GuardedChopPhase.CUT_DOWN
+        ),
+        safety_allowed=decision.allowed,
+        guard_cube_contact_count=_hand_cube_contact_count(robot),
+        blade_hand_contact_count=_blade_hand_contact_count(robot),
+        left_speed_rad_s=observation.left_speed_rad_s,
+        right_speed_rad_s=observation.right_speed_rad_s,
     )
-    if decision.allowed and trace is not None:
+    if trace is not None:
         trace.append(
             planned_knife=_blade_center_for_joints(
                 robot, robot._right_target
@@ -661,7 +677,7 @@ def _observe_sample(
             phase=phase.value,
             cut_index=cut_index,
             minimum_distance_m=distance,
-            cut_allowed=decision.allowed,
+            cut_allowed=sample.cut_allowed,
         )
     return sample
 
@@ -687,3 +703,80 @@ def _knuckle_for_left_target(robot: RightArmRobot) -> np.ndarray:
     knuckle = robot.sim.require_site("left_guard_knuckle_site")
     with robot.left_kinematics._configuration(robot._left_target):
         return robot.sim.data.site_xpos[knuckle].copy()
+
+
+def _hand_cube_contact_count(robot: RightArmRobot) -> int:
+    cube = robot.sim.require_geom("guarded_chop_cube")
+    palm = robot.sim.require_body("left_palm_link")
+
+    count = 0
+    for index in range(robot.sim.data.ncon):
+        contact = robot.sim.data.contact[index]
+        geom1, geom2 = int(contact.geom1), int(contact.geom2)
+        if (
+            geom1 == cube
+            and _geom_belongs_to_body_tree(robot, geom2, palm)
+        ) or (
+            geom2 == cube
+            and _geom_belongs_to_body_tree(robot, geom1, palm)
+        ):
+            count += 1
+    return count
+
+
+def _blade_hand_distance(robot: RightArmRobot) -> float:
+    blade = robot.sim.require_geom("right_knife_blade")
+    palm = robot.sim.require_body("left_palm_link")
+    distances = []
+    for geom in range(robot.sim.model.ngeom):
+        if geom == blade or robot.sim.model.geom_contype[geom] == 0:
+            continue
+        name = mujoco.mj_id2name(
+            robot.sim.model, mujoco.mjtObj.mjOBJ_GEOM, geom
+        )
+        if name is None or not _geom_belongs_to_body_tree(
+            robot, geom, palm
+        ):
+            continue
+        from_to = np.zeros(6)
+        distance = mujoco.mj_geomDistance(
+            robot.sim.model,
+            robot.sim.data,
+            blade,
+            geom,
+            1.0,
+            from_to,
+        )
+        distances.append(float(distance))
+    if not distances:
+        raise RuntimeError("no collidable left-hand geometry found")
+    return min(distances)
+
+
+def _blade_hand_contact_count(robot: RightArmRobot) -> int:
+    blade = robot.sim.require_geom("right_knife_blade")
+    palm = robot.sim.require_body("left_palm_link")
+    count = 0
+    for index in range(robot.sim.data.ncon):
+        contact = robot.sim.data.contact[index]
+        geom1, geom2 = int(contact.geom1), int(contact.geom2)
+        if (
+            geom1 == blade
+            and _geom_belongs_to_body_tree(robot, geom2, palm)
+        ) or (
+            geom2 == blade
+            and _geom_belongs_to_body_tree(robot, geom1, palm)
+        ):
+            count += 1
+    return count
+
+
+def _geom_belongs_to_body_tree(
+    robot: RightArmRobot, geom: int, root_body: int
+) -> bool:
+    body = int(robot.sim.model.geom_bodyid[geom])
+    while body:
+        if body == root_body:
+            return True
+        body = int(robot.sim.model.body_parentid[body])
+    return False
