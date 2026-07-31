@@ -189,7 +189,7 @@ class PickPlaceTask:
         self.robot = robot
         self.config = self._validated_config(config)
         self.monitor = GraspMonitor(
-            stable_dwell_s=0.15,
+            stable_dwell_s=0.55,
             max_linear_speed=0.04,
             max_angular_speed=1.5,
             abort_force=1.0,
@@ -419,10 +419,6 @@ class PickPlaceTask:
             self._record(
                 self.robot.left_palm_pose()[:3, 3],
                 observation=observation,
-                update_monitor=(
-                    phase is not PickPlacePhase.CLOSE_HAND
-                    or fraction >= 0.90
-                ),
             )
             self._require_safe_state()
             if self.monitor.abort_reason:
@@ -460,13 +456,9 @@ class PickPlaceTask:
         palm_target_position: np.ndarray,
         *,
         observation: GraspObservation | None = None,
-        update_monitor: bool = True,
     ) -> None:
         observed = observation or self.monitor.observe(self.robot.sim)
-        if update_monitor:
-            self.monitor.update(observed, self.config.control_dt_s)
-        elif self.phase is PickPlacePhase.CLOSE_HAND:
-            self.monitor.reset()
+        self.monitor.update(observed, self.config.control_dt_s)
         cube_velocity = self.robot.sim.data.cvel[self._cube_body, 3:].copy()
         sample = PickPlaceSample(
             time_s=float(self.robot.sim.data.time),
