@@ -136,8 +136,10 @@ ros2 service call /hand_left/set_enabled wujihand_msgs/srv/SetEnabled \
   "{finger_id: 255, joint_id: 255, enabled: true}"
 ```
 
-`finger_id` 为 0–4，`joint_id` 为 0–3；任一字段的 255 表示全部。这里的使能
-只是仿真命令门控，不代表实体电机上电。
+`finger_id` 为 0–4，`joint_id` 为 0–3。`finger_id: 255, joint_id: 255`
+表示全手；指定手指且 `joint_id: 255` 表示整根手指。与上游驱动一致，
+`finger_id: 255` 不能和单个 joint_id 组合。这里的使能只是仿真命令门控，
+不代表实体电机上电。
 
 启动保守的张开/放松闭合演示：
 

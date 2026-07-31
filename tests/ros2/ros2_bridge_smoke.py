@@ -11,6 +11,7 @@ import time
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 from wujihand_msgs.srv import SetEnabled
 
@@ -22,10 +23,15 @@ class Probe(Node):
         super().__init__("wuji_sim_smoke_probe")
         self.states: list[JointState] = []
         self.create_subscription(
-            JointState, "/hand_left/joint_states", self.states.append, 10
+            JointState,
+            "/hand_left/joint_states",
+            self.states.append,
+            qos_profile_sensor_data,
         )
         self.commands = self.create_publisher(
-            JointState, "/hand_left/joint_commands", 10
+            JointState,
+            "/hand_left/joint_commands",
+            qos_profile_sensor_data,
         )
         self.enabled = self.create_client(
             SetEnabled, "/hand_left/set_enabled"
@@ -69,13 +75,17 @@ def main() -> None:
     environment["PYTHONPATH"] = (
         f"{repo / 'src'}:{environment.get('PYTHONPATH', '')}"
     )
-    process = subprocess.Popen(
-        [str(bridge), "--ros-args", "-r", "__ns:=/hand_left"],
-        env=environment,
-    )
-    rclpy.init()
-    probe = Probe()
+    process: subprocess.Popen | None = None
+    probe: Probe | None = None
+    ros_initialized = False
     try:
+        process = subprocess.Popen(
+            [str(bridge), "--ros-args", "-r", "__ns:=/hand_left"],
+            env=environment,
+        )
+        rclpy.init()
+        ros_initialized = True
+        probe = Probe()
         wait_for(probe, lambda: len(probe.states) >= 2)
         state = probe.states[-1]
         assert tuple(state.name) == LEFT_HAND_JOINT_NAMES
@@ -111,16 +121,22 @@ def main() -> None:
         )
         print("ROS2_WUJI_SIM_SMOKE_OK")
     finally:
-        probe.destroy_node()
-        if rclpy.ok():
+        if probe is not None:
+            probe.destroy_node()
+        if ros_initialized and rclpy.ok():
             rclpy.shutdown()
-        process.send_signal(signal.SIGINT)
-        try:
-            process.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            process.terminate()
-            process.wait(timeout=5.0)
-        assert process.poll() is not None
+        if process is not None and process.poll() is None:
+            process.send_signal(signal.SIGINT)
+            try:
+                process.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    process.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5.0)
+        assert process is None or process.poll() is not None
 
 
 if __name__ == "__main__":

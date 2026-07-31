@@ -12,6 +12,34 @@ LEFT_HAND_JOINT_NAMES = tuple(
 )
 
 
+def control_period(publish_rate: float, timestep: float) -> float:
+    rate = float(publish_rate)
+    step = float(timestep)
+    if not np.isfinite(rate) or rate <= 0.0:
+        raise ValueError("publish_rate must be positive and finite")
+    period = 1.0 / rate
+    ratio = period / step
+    if round(ratio) < 1 or not np.isclose(ratio, round(ratio), rtol=0.0, atol=1e-10):
+        raise ValueError(
+            "publish period must be a positive integer multiple of MuJoCo timestep"
+        )
+    return round(ratio) * step
+
+
+def enabled_indices(finger_id: int, joint_id: int) -> tuple[int, ...]:
+    """Resolve exactly the selector combinations supported by upstream."""
+    if finger_id == 255 and joint_id == 255:
+        return tuple(range(20))
+    if not 0 <= finger_id < 5:
+        raise ValueError("finger_id must be 0-4, or 255 when joint_id is also 255")
+    if joint_id == 255:
+        start = finger_id * 4
+        return tuple(range(start, start + 4))
+    if not 0 <= joint_id < 4:
+        raise ValueError("joint_id must be 0-3 or 255")
+    return (finger_id * 4 + joint_id,)
+
+
 def decode_joint_command(
     names: Sequence[str],
     positions: Sequence[float],

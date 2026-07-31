@@ -1,7 +1,12 @@
 import numpy as np
 import pytest
 
-from twin_sim.ros2_bridge import LEFT_HAND_JOINT_NAMES, decode_joint_command
+from twin_sim.ros2_bridge import (
+    LEFT_HAND_JOINT_NAMES,
+    control_period,
+    decode_joint_command,
+    enabled_indices,
+)
 
 
 def test_positional_command_requires_all_twenty_positions():
@@ -41,3 +46,18 @@ def test_invalid_named_command_is_rejected_atomically(names, positions, message)
     with pytest.raises(ValueError, match=message):
         decode_joint_command(names, positions, current)
     np.testing.assert_array_equal(current, before)
+
+
+def test_control_period_must_match_mujoco_timestep():
+    assert control_period(100.0, 0.002) == 0.01
+    assert control_period(99.999999999, 0.002) == 0.01
+    with pytest.raises(ValueError, match="integer multiple"):
+        control_period(60.0, 0.002)
+
+
+def test_enable_selector_matches_upstream_service_semantics():
+    assert enabled_indices(255, 255) == tuple(range(20))
+    assert enabled_indices(2, 255) == tuple(range(8, 12))
+    assert enabled_indices(2, 3) == (11,)
+    with pytest.raises(ValueError, match="finger_id"):
+        enabled_indices(255, 0)

@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-import numpy as np
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 from wujihand_msgs.msg import HandDiagnostics
 from wujihand_msgs.srv import SetEnabled
 
-from twin_sim.ros2_bridge import LEFT_HAND_JOINT_NAMES, decode_joint_command
+from twin_sim.ros2_bridge import (
+    LEFT_HAND_JOINT_NAMES,
+    control_period,
+    decode_joint_command,
+    enabled_indices,
+)
 from twin_sim.wuji_hand_backend import SimWujiHand
 
 
@@ -19,28 +24,41 @@ class WujiSimBridge(Node):
         self.declare_parameter("publish_rate", 100.0)
         self.declare_parameter("start_enabled", True)
 
-        rate = float(self.get_parameter("publish_rate").value)
-        if not np.isfinite(rate) or rate <= 0.0:
-            raise ValueError("publish_rate must be positive and finite")
-        self._period = 1.0 / rate
-        self._hand = SimWujiHand(
-            viewer=bool(self.get_parameter("viewer").value)
-        )
-        self._hand.write_joint_enabled(
-            bool(self.get_parameter("start_enabled").value)
-        )
-        self._state_pub = self.create_publisher(JointState, "joint_states", 10)
-        self._diagnostics_pub = self.create_publisher(
-            HandDiagnostics, "hand_diagnostics", 10
-        )
-        self.create_subscription(
-            JointState, "joint_commands", self._command_callback, 10
-        )
-        self.create_service(SetEnabled, "set_enabled", self._set_enabled)
-        self.create_timer(self._period, self._tick)
+        self._hand: SimWujiHand | None = None
+        try:
+            self._hand = SimWujiHand(
+                viewer=bool(self.get_parameter("viewer").value)
+            )
+            rate = float(self.get_parameter("publish_rate").value)
+            self._period = control_period(
+                rate, float(self._hand.robot.sim.model.opt.timestep)
+            )
+            self._hand.write_joint_enabled(
+                bool(self.get_parameter("start_enabled").value)
+            )
+            self._state_pub = self.create_publisher(
+                JointState, "joint_states", qos_profile_sensor_data
+            )
+            self._diagnostics_pub = self.create_publisher(
+                HandDiagnostics, "hand_diagnostics", 10
+            )
+            self.create_subscription(
+                JointState,
+                "joint_commands",
+                self._command_callback,
+                qos_profile_sensor_data,
+            )
+            self.create_service(SetEnabled, "set_enabled", self._set_enabled)
+            self.create_timer(self._period, self._tick)
+        except Exception:
+            if self._hand is not None:
+                self._hand.close()
+            super().destroy_node()
+            raise
 
     def destroy_node(self) -> bool:
-        self._hand.close()
+        if self._hand is not None:
+            self._hand.close()
         return super().destroy_node()
 
     def _command_callback(self, message: JointState) -> None:
@@ -54,20 +72,14 @@ class WujiSimBridge(Node):
     def _set_enabled(
         self, request: SetEnabled.Request, response: SetEnabled.Response
     ) -> SetEnabled.Response:
-        if request.finger_id != 255 and request.finger_id > 4:
+        try:
+            indices = enabled_indices(request.finger_id, request.joint_id)
+        except ValueError as error:
             response.success = False
-            response.message = "finger_id must be 0-4 or 255"
-            return response
-        if request.joint_id != 255 and request.joint_id > 3:
-            response.success = False
-            response.message = "joint_id must be 0-3 or 255"
+            response.message = str(error)
             return response
         enabled = self._hand.read_joint_enabled()
-        fingers = range(5) if request.finger_id == 255 else (request.finger_id,)
-        joints = range(4) if request.joint_id == 255 else (request.joint_id,)
-        for finger in fingers:
-            for joint in joints:
-                enabled[finger, joint] = request.enabled
+        enabled.reshape(20)[list(indices)] = request.enabled
         self._hand.write_joint_enabled(enabled)
         response.success = True
         response.message = "simulation enable state updated"
@@ -106,12 +118,14 @@ class WujiSimBridge(Node):
 
 def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)
-    node = WujiSimBridge()
+    node: WujiSimBridge | None = None
     try:
+        node = WujiSimBridge()
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
+        if node is not None:
+            node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

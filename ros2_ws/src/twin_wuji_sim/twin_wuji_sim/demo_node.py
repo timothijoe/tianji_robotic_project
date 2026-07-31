@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 
 from twin_sim.hand import DEFAULT_OPEN_RAD
@@ -11,7 +12,7 @@ class WujiSimDemo(Node):
     def __init__(self) -> None:
         super().__init__("wuji_sim_demo")
         self._publisher = self.create_publisher(
-            JointState, "joint_commands", 10
+            JointState, "joint_commands", qos_profile_sensor_data
         )
         self._closed = False
         self.create_timer(2.0, self._publish_pose)
