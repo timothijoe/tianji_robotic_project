@@ -21,3 +21,10 @@ def test_hand_guide_matches_compiled_model_contract():
         assert f"{upper:.4f}" in text
     for heading in ("仿真控制", "平滑发送", "读取状态", "未来实体手接入"):
         assert heading in text
+
+
+def test_hand_guide_is_linked_from_documentation_entries():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    usage = (ROOT / "docs" / "simulation" / "usage.md").read_text(encoding="utf-8")
+    assert "docs/simulation/wuji_hand_control.md" in readme
+    assert "wuji_hand_control.md" in usage

@@ -53,3 +53,14 @@ Python API 的最小示例位于 `examples/simulation_demo.py`。
 `DESCEND`、`HOLD`、`RETRACT`，前 4 刀之后追加 `SHIFT`。CSV 的
 `cut_index` 标明刀次；SVG 同时展示目标/实际轨迹的俯视图和侧视图。
 去掉 `--headless` 可打开 Viewer，增加 `--slow` 可慢速播放。
+
+## 灵巧手控制
+
+左臂安装了 20 自由度 Wuji Hand。运行无窗口开合验证：
+
+```bash
+.venv/bin/twin-sim hand-demo --headless
+```
+
+关节顺序、控制范围、Python 发送与状态读取示例见
+[Wuji Hand 左手控制说明](wuji_hand_control.md)。
