@@ -5,7 +5,11 @@ from typing import Sequence
 import mujoco
 import numpy as np
 
-from twin_sim.guarded_chop_safety import CAT_PAW_RAD, SafetyCoordinator
+from twin_sim.guarded_chop_safety import (
+    CAT_PAW_RAD,
+    SafetyCoordinator,
+    SafetyObservation,
+)
 from twin_sim.kinematics import PathIkError
 from twin_sim.robot import RightArmRobot
 from twin_sim.tasks.chop import ChopConfig
@@ -89,6 +93,20 @@ class GuardedChopSample:
     knife_height_m: float
     cut_allowed: bool
 
+    def __post_init__(self) -> None:
+        for name in (
+            "left_target_rad",
+            "left_actual_rad",
+            "right_target_rad",
+            "right_actual_rad",
+            "hand_target_rad",
+            "knife_position",
+            "guard_position",
+        ):
+            object.__setattr__(
+                self, name, np.asarray(getattr(self, name), dtype=float).copy()
+            )
+
 
 @dataclass(frozen=True)
 class GuardedChopResult:
@@ -167,24 +185,39 @@ def _preflight_guarded_chop(
                 shift_duration_s=config.hand_shift_duration_s,
             ),
         )
+        board = robot.sim.require_geom("chopping_board")
+        cube = robot.sim.require_geom("guarded_chop_cube")
+        board_top = float(
+            robot.sim.data.geom_xpos[board, 2]
+            + robot.sim.model.geom_size[board, 2]
+        )
+        cube_top = float(
+            robot.sim.data.geom_xpos[cube, 2]
+            + robot.sim.model.geom_size[cube, 2]
+        )
+        cuts = _translate_right_cuts(
+            robot,
+            line.cuts,
+            cube_top - board_top + 0.008,
+            config,
+        )
         left_ready, guard_targets, guard_shifts = _guard_plan(
             robot, line.cut_points_xy, config
         )
         distances = _planned_clearances(
-            robot, line.cuts, guard_targets, guard_shifts, left_ready
+            robot, cuts, guard_targets, guard_shifts, left_ready
         )
         if np.any(distances < config.minimum_distance_m):
             raise ValueError(
                 "guarded-chop plan violates knife-guard clearance: "
                 f"{float(np.min(distances)):.6f} m"
             )
-        safe_height = float(
-            line.initial_safe.target_pose[2, 3]
-        )
+        right_ready = cuts[0].descent[0].joints_rad
+        safe_height = _blade_bottom_height(robot, right_ready)
         return _GuardedPreflight(
-            right_ready_rad=line.initial_safe.joints_rad.copy(),
+            right_ready_rad=right_ready.copy(),
             left_ready_rad=left_ready.copy(),
-            cuts=line.cuts,
+            cuts=cuts,
             guard_shifts=guard_shifts,
             guard_targets=guard_targets,
             minimum_planned_distances_m=distances,
@@ -192,6 +225,75 @@ def _preflight_guarded_chop(
         )
     finally:
         mujoco.mj_copyData(robot.sim.data, robot.sim.model, saved)
+
+
+def _translate_right_cuts(
+    robot: RightArmRobot,
+    cuts: tuple[_CutTrajectories, ...],
+    dz_m: float,
+    config: GuardedChopConfig,
+) -> tuple[_CutTrajectories, ...]:
+    translated = []
+    seed = cuts[0].descent[0].joints_rad
+    for cut in cuts:
+        safe = cut.descent[0].target_pose.copy()
+        contact = cut.descent[-1].target_pose.copy()
+        safe[2, 3] += dz_m
+        contact[2, 3] += dz_m
+        safe_result = robot.right_kinematics.ik(
+            safe, seed, max_iterations=1000, damping=0.003
+        )
+        if not safe_result.success:
+            raise PathIkError(
+                "raised knife-safe IK failed "
+                f"(residual {safe_result.residual:.6g})"
+            )
+        descent = cartesian_trajectory(
+            robot.right_kinematics,
+            safe,
+            contact,
+            safe_result.joints_rad,
+            config.cut_duration_s,
+            config.control_dt_s,
+        )
+        retract = cartesian_trajectory(
+            robot.right_kinematics,
+            contact,
+            safe,
+            descent[-1].joints_rad,
+            config.knife_up_duration_s,
+            config.control_dt_s,
+        )
+        shift = ()
+        seed = retract[-1].joints_rad
+        if cut.shift:
+            next_safe = cut.shift[-1].target_pose.copy()
+            next_safe[2, 3] += dz_m
+            shift = tuple(
+                cartesian_trajectory(
+                    robot.right_kinematics,
+                    safe,
+                    next_safe,
+                    seed,
+                    config.hand_shift_duration_s,
+                    config.control_dt_s,
+                )
+            )
+            seed = shift[-1].joints_rad
+        translated.append(
+            _CutTrajectories(tuple(descent), tuple(retract), shift)
+        )
+    return tuple(translated)
+
+
+def _blade_bottom_height(robot: RightArmRobot, joints_rad: np.ndarray) -> float:
+    blade = robot.sim.require_geom("right_knife_blade")
+    with robot.right_kinematics._configuration(joints_rad):
+        rotation = robot.sim.data.geom_xmat[blade].reshape(3, 3)
+        radius = float(
+            np.abs(rotation[2]) @ robot.sim.model.geom_size[blade]
+        )
+        return float(robot.sim.data.geom_xpos[blade, 2] - radius)
 
 
 def _guard_plan(
@@ -301,4 +403,254 @@ def run_guarded_chop(
     trace=None,
     coordinator: SafetyCoordinator | None = None,
 ) -> GuardedChopResult:
-    raise NotImplementedError("guarded chopping execution is implemented in Task 4")
+    config = config.validated()
+    safety = coordinator or SafetyCoordinator(config.minimum_distance_m)
+    robot = RightArmRobot(viewer=viewer)
+    samples: list[GuardedChopSample] = []
+    phase = GuardedChopPhase.INITIALIZE
+    completed_cuts = 0
+    completed_shifts = 0
+    try:
+        plan = _preflight_guarded_chop(robot, config)
+        _activate_guarded_scene(robot)
+        robot.reset(plan.right_ready_rad)
+        robot.sim.data.qpos[robot.sim.left.qpos_ids] = plan.left_ready_rad
+        robot.sim.data.qvel[robot.sim.left.dof_ids] = 0.0
+        robot.command_left(plan.left_ready_rad)
+        robot.sim.data.qpos[robot.sim.hand.qpos_ids] = CAT_PAW_RAD
+        robot.sim.data.qvel[robot.sim.hand.dof_ids] = 0.0
+        robot.hand.command(CAT_PAW_RAD)
+        robot.sim.data.ctrl[robot.sim.left.actuator_ids] = plan.left_ready_rad
+        robot.sim.data.ctrl[robot.sim.hand.actuator_ids] = CAT_PAW_RAD
+        mujoco.mj_forward(robot.sim.model, robot.sim.data)
+
+        cube_site = robot.sim.require_site("guarded_chop_cube_center")
+        cube_position = robot.sim.data.site_xpos[cube_site].copy()
+        cube_rotation = robot.sim.data.site_xmat[cube_site].copy()
+
+        def step_and_record(
+            current_phase: GuardedChopPhase,
+            cut_index: int,
+            *,
+            left_stationary: bool,
+            right_stationary: bool,
+        ) -> None:
+            robot.step(config.control_dt_s)
+            sample = _observe_sample(
+                robot,
+                current_phase,
+                cut_index,
+                plan.safe_knife_height_m - 0.005,
+                left_stationary=left_stationary,
+                right_stationary=right_stationary,
+                safety=safety,
+            )
+            samples.append(sample)
+            if not sample.cut_allowed:
+                observation = _safety_observation(
+                    robot,
+                    current_phase,
+                    plan.safe_knife_height_m - 0.005,
+                    sample.knife_guard_distance_m,
+                    left_stationary,
+                    right_stationary,
+                )
+                decision = safety.evaluate(observation)
+                raise RuntimeError(decision.reason)
+
+        phase = GuardedChopPhase.GUARD_READY
+        for _ in range(
+            int(round(config.guard_ready_duration_s / config.control_dt_s))
+        ):
+            step_and_record(
+                phase, 0, left_stationary=True, right_stationary=True
+            )
+
+        for index, cut in enumerate(plan.cuts, start=1):
+            phase = GuardedChopPhase.CUT_DOWN
+            for point in cut.descent[1:]:
+                robot.command(point.joints_rad)
+                step_and_record(
+                    phase,
+                    index,
+                    left_stationary=True,
+                    right_stationary=False,
+                )
+            completed_cuts += 1
+
+            phase = GuardedChopPhase.KNIFE_UP
+            for point in (*cut.retract[1:], *cut.shift[1:]):
+                robot.command(point.joints_rad)
+                step_and_record(
+                    phase,
+                    index,
+                    left_stationary=True,
+                    right_stationary=False,
+                )
+
+            if index <= len(plan.guard_shifts):
+                phase = GuardedChopPhase.HAND_SHIFT
+                for point in plan.guard_shifts[index - 1][1:]:
+                    robot.command_left(point.joints_rad)
+                    step_and_record(
+                        phase,
+                        index,
+                        left_stationary=False,
+                        right_stationary=True,
+                    )
+                completed_shifts += 1
+
+        phase = GuardedChopPhase.COMPLETE
+        complete_steps = max(
+            1, int(round(config.final_hold_s / config.control_dt_s))
+        )
+        for _ in range(complete_steps):
+            step_and_record(
+                phase,
+                config.cuts,
+                left_stationary=True,
+                right_stationary=True,
+            )
+
+        np.testing.assert_array_equal(
+            robot.sim.data.site_xpos[cube_site], cube_position
+        )
+        np.testing.assert_array_equal(
+            robot.sim.data.site_xmat[cube_site], cube_rotation
+        )
+        minimum = min(
+            sample.knife_guard_distance_m for sample in samples
+        )
+        if completed_cuts != 5 or completed_shifts != 4:
+            raise RuntimeError("guarded chopping did not complete 5 cuts/4 shifts")
+        if minimum < config.minimum_distance_m:
+            raise RuntimeError("knife-guard distance below final limit")
+        return GuardedChopResult(
+            success=True,
+            final_phase=phase,
+            reason="",
+            samples=tuple(samples),
+            completed_cuts=completed_cuts,
+            completed_shifts=completed_shifts,
+            total_shift_m=completed_shifts * config.hand_shift_m,
+            minimum_distance_m=minimum,
+        )
+    except (AssertionError, PathIkError, RuntimeError, ValueError) as error:
+        if trace is not None and hasattr(trace, "set_abort"):
+            trace.set_abort(str(error))
+        minimum = min(
+            (sample.knife_guard_distance_m for sample in samples),
+            default=float("inf"),
+        )
+        return GuardedChopResult(
+            success=False,
+            final_phase=GuardedChopPhase.ABORTED,
+            reason=str(error),
+            samples=tuple(samples),
+            completed_cuts=completed_cuts,
+            completed_shifts=completed_shifts,
+            total_shift_m=completed_shifts * config.hand_shift_m,
+            minimum_distance_m=minimum,
+        )
+    finally:
+        robot.close()
+
+
+def _activate_guarded_scene(robot: RightArmRobot) -> None:
+    cube = robot.sim.require_geom("guarded_chop_cube")
+    robot.sim.model.geom_rgba[cube] = (0.75, 0.18, 0.12, 1.0)
+    robot.sim.model.geom_contype[cube] = 1
+    robot.sim.model.geom_conaffinity[cube] = 1
+    for name in (
+        "pick_source_pedestal",
+        "pick_target_pedestal",
+        "pick_cube_geom",
+        "pick_target_region",
+    ):
+        geom = robot.sim.require_geom(name)
+        robot.sim.model.geom_rgba[geom, 3] = 0.0
+        robot.sim.model.geom_contype[geom] = 0
+        robot.sim.model.geom_conaffinity[geom] = 0
+
+
+def _safety_observation(
+    robot: RightArmRobot,
+    phase: GuardedChopPhase,
+    safe_height_m: float,
+    distance_m: float,
+    left_stationary: bool,
+    right_stationary: bool,
+) -> SafetyObservation:
+    finite = all(
+        np.isfinite(values).all()
+        for values in (
+            robot.sim.data.qpos,
+            robot.sim.data.qvel,
+            robot.sim.data.ctrl,
+        )
+    )
+    return SafetyObservation(
+        phase=phase.value,
+        knife_height_m=_current_blade_bottom(robot),
+        safe_knife_height_m=safe_height_m,
+        knife_guard_distance_m=distance_m,
+        left_target_stationary=left_stationary,
+        right_target_stationary=right_stationary,
+        finite_state=finite,
+    )
+
+
+def _observe_sample(
+    robot: RightArmRobot,
+    phase: GuardedChopPhase,
+    cut_index: int,
+    safe_height_m: float,
+    *,
+    left_stationary: bool,
+    right_stationary: bool,
+    safety: SafetyCoordinator,
+) -> GuardedChopSample:
+    blade = robot.sim.require_geom("right_knife_blade")
+    knuckle = robot.sim.require_site("left_guard_knuckle_site")
+    blade_rotation = robot.sim.data.geom_xmat[blade].reshape(3, 3)
+    guard_position = robot.sim.data.site_xpos[knuckle].copy()
+    distance = _point_to_box_distance(
+        guard_position,
+        robot.sim.data.geom_xpos[blade],
+        blade_rotation,
+        robot.sim.model.geom_size[blade],
+    )
+    observation = _safety_observation(
+        robot,
+        phase,
+        safe_height_m,
+        distance,
+        left_stationary,
+        right_stationary,
+    )
+    decision = safety.evaluate(observation)
+    sample = GuardedChopSample(
+        time_s=float(robot.sim.data.time),
+        phase=phase,
+        cut_index=cut_index,
+        left_target_rad=robot._left_target,
+        left_actual_rad=robot.left_joint_positions,
+        right_target_rad=robot._right_target,
+        right_actual_rad=robot.joint_positions,
+        hand_target_rad=robot.hand.target,
+        knife_position=robot.sim.data.geom_xpos[blade],
+        guard_position=guard_position,
+        knife_guard_distance_m=distance,
+        knife_height_m=observation.knife_height_m,
+        cut_allowed=decision.allowed,
+    )
+    return sample
+
+
+def _current_blade_bottom(robot: RightArmRobot) -> float:
+    blade = robot.sim.require_geom("right_knife_blade")
+    rotation = robot.sim.data.geom_xmat[blade].reshape(3, 3)
+    radius = float(
+        np.abs(rotation[2]) @ robot.sim.model.geom_size[blade]
+    )
+    return float(robot.sim.data.geom_xpos[blade, 2] - radius)
