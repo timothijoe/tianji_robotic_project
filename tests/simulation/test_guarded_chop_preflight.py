@@ -3,9 +3,23 @@ import numpy as np
 from twin_sim.robot import RightArmRobot
 from twin_sim.tasks.guarded_chop import (
     GuardedChopConfig,
+    _default_view_screen_x,
     _point_to_box_distance,
     _preflight_guarded_chop,
 )
+
+
+def test_preflight_orders_knife_and_guard_motion_screen_right_to_left():
+    robot = RightArmRobot(viewer=False)
+    try:
+        plan = _preflight_guarded_chop(robot, GuardedChopConfig())
+        screen_x = _default_view_screen_x(plan.cut_points_xy)
+        assert np.all(np.diff(screen_x) < 0.0)
+        knife_delta = np.diff(plan.cut_points_xy, axis=0)
+        guard_delta = np.diff(plan.guard_targets[:, :2, 3], axis=0)
+        np.testing.assert_allclose(guard_delta, knife_delta, atol=1e-9)
+    finally:
+        robot.close()
 
 
 def test_preflight_builds_five_cuts_and_four_guard_shifts():

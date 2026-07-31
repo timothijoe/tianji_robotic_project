@@ -22,6 +22,12 @@ from twin_sim.tasks.pick_place import LEFT_GRASP_READY_RAD
 from twin_sim.trajectory import TrajectoryPoint, cartesian_trajectory
 
 
+_GUARDED_CHOP_VIEW_AZIMUTH_DEG = 135.0
+_GUARDED_CHOP_VIEW_ELEVATION_DEG = -20.0
+_GUARDED_CHOP_VIEW_DISTANCE_M = 1.6
+_GUARDED_CHOP_VIEW_LOOKAT = (0.48, 0.0, 0.48)
+
+
 class GuardedChopPhase(str, Enum):
     INITIALIZE = "initialize"
     GUARD_READY = "guard_ready"
@@ -151,10 +157,11 @@ class GuardedChopResult:
 
 
 @dataclass(frozen=True)
-class _GuardedPreflight:
+class _GuardedChopPlan:
     right_ready_rad: np.ndarray
     left_ready_rad: np.ndarray
     cuts: tuple[_CutTrajectories, ...]
+    cut_points_xy: np.ndarray
     guard_shifts: tuple[tuple[TrajectoryPoint, ...], ...]
     guard_targets: np.ndarray
     minimum_planned_distances_m: np.ndarray
@@ -196,7 +203,7 @@ def _point_to_box_distance(
 def _preflight_guarded_chop(
     robot: RightArmRobot,
     config: GuardedChopConfig,
-) -> _GuardedPreflight:
+) -> _GuardedChopPlan:
     config = config.validated()
     saved = mujoco.MjData(robot.sim.model)
     mujoco.mj_copyData(saved, robot.sim.model, robot.sim.data)
@@ -225,14 +232,21 @@ def _preflight_guarded_chop(
             robot.sim.data.geom_xpos[cube, 2]
             + robot.sim.model.geom_size[cube, 2]
         )
+        ordered_indices = _right_to_left_indices(line.cut_points_xy)
+        cut_points_xy = line.cut_points_xy[ordered_indices].copy()
+        ordered_line_cuts = tuple(line.cuts[index] for index in ordered_indices)
         cuts = _translate_right_cuts(
             robot,
-            line.cuts,
+            ordered_line_cuts,
             cube_top - board_top + 0.008,
             config,
         )
         left_ready, guard_targets, guard_shifts = _guard_plan(
-            robot, line.cut_points_xy, config
+            robot,
+            cut_points_xy,
+            config,
+            guard_offset_direction=line.cut_points_xy[1]
+            - line.cut_points_xy[0],
         )
         distances = _planned_clearances(
             robot, cuts, guard_targets, guard_shifts, left_ready
@@ -244,10 +258,11 @@ def _preflight_guarded_chop(
             )
         right_ready = cuts[0].descent[0].joints_rad
         safe_height = _blade_bottom_height(robot, right_ready)
-        return _GuardedPreflight(
+        return _GuardedChopPlan(
             right_ready_rad=right_ready.copy(),
             left_ready_rad=left_ready.copy(),
             cuts=cuts,
+            cut_points_xy=cut_points_xy,
             guard_shifts=guard_shifts,
             guard_targets=guard_targets,
             minimum_planned_distances_m=distances,
@@ -265,7 +280,7 @@ def _translate_right_cuts(
 ) -> tuple[_CutTrajectories, ...]:
     translated = []
     seed = cuts[0].descent[0].joints_rad
-    for cut in cuts:
+    for index, cut in enumerate(cuts):
         safe = cut.descent[0].target_pose.copy()
         contact = cut.descent[-1].target_pose.copy()
         safe[2, 3] += dz_m
@@ -296,8 +311,8 @@ def _translate_right_cuts(
         )
         shift = ()
         seed = retract[-1].joints_rad
-        if cut.shift:
-            next_safe = cut.shift[-1].target_pose.copy()
+        if index + 1 < len(cuts):
+            next_safe = cuts[index + 1].descent[0].target_pose.copy()
             next_safe[2, 3] += dz_m
             shift = tuple(
                 cartesian_trajectory(
@@ -316,6 +331,37 @@ def _translate_right_cuts(
     return tuple(translated)
 
 
+def _right_to_left_indices(points_xy: np.ndarray) -> np.ndarray:
+    points = np.asarray(points_xy, dtype=float)
+    indices = np.arange(len(points))
+    screen_x = _default_view_screen_x(points)
+    if screen_x[0] < screen_x[-1]:
+        indices = indices[::-1]
+    return indices
+
+
+def _ordered_right_to_left(points_xy: np.ndarray) -> np.ndarray:
+    points = np.asarray(points_xy, dtype=float)
+    return points[_right_to_left_indices(points)].copy()
+
+
+def _default_view_screen_x(points_xy: np.ndarray) -> np.ndarray:
+    azimuth = np.deg2rad(_GUARDED_CHOP_VIEW_AZIMUTH_DEG)
+    screen_right_xy = np.asarray((-np.sin(azimuth), np.cos(azimuth)))
+    return np.asarray(points_xy, dtype=float) @ screen_right_xy
+
+
+def _prepare_guarded_chop_viewer(robot: RightArmRobot) -> None:
+    viewer = robot._viewer
+    if viewer is None or not viewer.is_running():
+        return
+    viewer.cam.azimuth = _GUARDED_CHOP_VIEW_AZIMUTH_DEG
+    viewer.cam.elevation = _GUARDED_CHOP_VIEW_ELEVATION_DEG
+    viewer.cam.distance = _GUARDED_CHOP_VIEW_DISTANCE_M
+    viewer.cam.lookat[:] = _GUARDED_CHOP_VIEW_LOOKAT
+    viewer.sync()
+
+
 def _blade_bottom_height(robot: RightArmRobot, joints_rad: np.ndarray) -> float:
     blade = robot.sim.require_geom("right_knife_blade")
     with robot.right_kinematics._configuration(joints_rad):
@@ -330,6 +376,8 @@ def _guard_plan(
     robot: RightArmRobot,
     cut_points_xy: np.ndarray,
     config: GuardedChopConfig,
+    *,
+    guard_offset_direction: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, tuple[tuple[TrajectoryPoint, ...], ...]]:
     model, data = robot.sim.model, robot.sim.data
     knuckle = robot.sim.require_site("left_guard_knuckle_site")
@@ -343,12 +391,18 @@ def _guard_plan(
 
     direction = cut_points_xy[1] - cut_points_xy[0]
     direction /= np.linalg.norm(direction)
+    offset_direction = (
+        direction
+        if guard_offset_direction is None
+        else np.asarray(guard_offset_direction, dtype=float)
+    )
+    offset_direction /= np.linalg.norm(offset_direction)
     desired_knuckle = np.asarray(
         (cut_points_xy[0, 0], cut_points_xy[0, 1], 0.367), dtype=float
     )
     desired_knuckle[:2] -= (
         config.minimum_distance_m + 0.080
-    ) * direction
+    ) * offset_direction
     ready_pose = palm_pose.copy()
     ready_pose[:3, 3] = (
         desired_knuckle - ready_pose[:3, :3] @ knuckle_local
@@ -431,6 +485,7 @@ def run_guarded_chop(
         config.maximum_guard_force_n,
     )
     robot = RightArmRobot(viewer=viewer)
+    _prepare_guarded_chop_viewer(robot)
     if trace is None and viewer:
         from twin_sim.guarded_chop_visualization import GuardedChopTrace
 
