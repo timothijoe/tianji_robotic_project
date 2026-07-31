@@ -31,8 +31,12 @@ class RightArmRobot:
             self.sim, self.sim.left, "left_palm_tcp_site"
         )
         self._tcp_site_id = self.sim.require_site("right_tool_tip_site")
-        self._left_hold = np.zeros(7)
+        self._left_palm_site_id = self.sim.require_site("left_palm_tcp_site")
+        self._left_target = np.zeros(7)
         self._right_target = RIGHT_HOME_RAD.copy()
+        self._left_joint_limits = self.sim.model.jnt_range[
+            self.sim.left.joint_ids
+        ].copy()
         self._joint_limits = self.sim.model.jnt_range[
             self.sim.right.joint_ids
         ].copy()
@@ -46,13 +50,13 @@ class RightArmRobot:
     def reset(self, joints_rad: Sequence[float] = RIGHT_HOME_RAD) -> None:
         joints = self._validated_target(joints_rad)
         mujoco.mj_resetData(self.sim.model, self.sim.data)
-        self._left_hold = self.sim.data.qpos[self.sim.left.qpos_ids].copy()
+        self._left_target = self.sim.data.qpos[self.sim.left.qpos_ids].copy()
         self.sim.data.qpos[self.sim.right.qpos_ids] = joints
         self.sim.data.qvel[self.sim.right.dof_ids] = 0.0
         self.sim.data.qpos[self.sim.hand.qpos_ids] = DEFAULT_OPEN_RAD
         self.sim.data.qvel[self.sim.hand.dof_ids] = 0.0
         self._right_target = joints.copy()
-        self.sim.data.ctrl[self.sim.left.actuator_ids] = self._left_hold
+        self.sim.data.ctrl[self.sim.left.actuator_ids] = self._left_target
         self.sim.data.ctrl[self.sim.right.actuator_ids] = self._right_target
         self.hand.open()
         self.hand.apply()
@@ -62,6 +66,11 @@ class RightArmRobot:
 
     def command(self, joints_rad: Sequence[float]) -> None:
         self._right_target = self._validated_target(joints_rad)
+
+    def command_left(self, joints_rad: Sequence[float]) -> None:
+        self._left_target = self._validated_arm_target(
+            joints_rad, self._left_joint_limits, "left"
+        )
 
     def validate_targets(self, targets: Sequence[Sequence[float]]) -> None:
         for index, target in enumerate(targets):
@@ -73,7 +82,7 @@ class RightArmRobot:
     def step(self, control_dt_s: float) -> None:
         substeps = self._substeps(control_dt_s)
         self._require_finite_state()
-        self.sim.data.ctrl[self.sim.left.actuator_ids] = self._left_hold
+        self.sim.data.ctrl[self.sim.left.actuator_ids] = self._left_target
         self.sim.data.ctrl[self.sim.right.actuator_ids] = self._right_target
         self.hand.apply()
         for _ in range(substeps):
@@ -91,10 +100,31 @@ class RightArmRobot:
     def joint_velocities(self) -> np.ndarray:
         return self.sim.data.qvel[self.sim.right.dof_ids].copy()
 
+    @property
+    def left_joint_positions(self) -> np.ndarray:
+        return self.sim.data.qpos[self.sim.left.qpos_ids].copy()
+
+    @property
+    def left_joint_velocities(self) -> np.ndarray:
+        return self.sim.data.qvel[self.sim.left.dof_ids].copy()
+
     def tcp_pose(self) -> np.ndarray:
         quaternion = np.empty(4)
-        mujoco.mju_mat2Quat(quaternion, self.sim.data.site_xmat[self._tcp_site_id])
-        return np.concatenate((self.sim.data.site_xpos[self._tcp_site_id], quaternion))
+        mujoco.mju_mat2Quat(
+            quaternion, self.sim.data.site_xmat[self._tcp_site_id]
+        )
+        return np.concatenate(
+            (self.sim.data.site_xpos[self._tcp_site_id], quaternion)
+        )
+
+    def left_palm_pose(self) -> np.ndarray:
+        return self._site_pose_matrix(self._left_palm_site_id)
+
+    def _site_pose_matrix(self, site_id: int) -> np.ndarray:
+        pose = np.eye(4)
+        pose[:3, :3] = self.sim.data.site_xmat[site_id].reshape(3, 3)
+        pose[:3, 3] = self.sim.data.site_xpos[site_id]
+        return pose
 
     def close(self) -> None:
         if self._viewer is not None:
@@ -126,19 +156,36 @@ class RightArmRobot:
         return substeps
 
     def _validated_target(self, joints_rad: Sequence[float]) -> np.ndarray:
-        joints = self._validated_joints(joints_rad)
+        return self._validated_arm_target(
+            joints_rad, self._joint_limits, "right"
+        )
+
+    def _validated_arm_target(
+        self,
+        joints_rad: Sequence[float],
+        joint_limits: np.ndarray,
+        label: str,
+    ) -> np.ndarray:
+        try:
+            joints = np.asarray(joints_rad, dtype=float)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"{label} joints_rad must contain 7 finite values"
+            ) from error
+        if joints.shape != (7,) or not np.isfinite(joints).all():
+            raise ValueError(f"{label} joints_rad must contain 7 finite values")
         outside = np.flatnonzero(
-            (joints < self._joint_limits[:, 0])
-            | (joints > self._joint_limits[:, 1])
+            (joints < joint_limits[:, 0])
+            | (joints > joint_limits[:, 1])
         )
         if outside.size:
             index = int(outside[0])
-            lower, upper = self._joint_limits[index]
+            lower, upper = joint_limits[index]
             raise ValueError(
-                f"joint {index + 1} target {joints[index]:.6g} is outside "
+                f"{label} joint {index + 1} target {joints[index]:.6g} is outside "
                 f"range [{lower:.6g}, {upper:.6g}]"
             )
-        return joints
+        return joints.copy()
 
     def _require_finite_state(self) -> None:
         if not all(
