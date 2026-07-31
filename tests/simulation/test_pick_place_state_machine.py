@@ -91,8 +91,6 @@ def test_completion_gate_rejects_cube_still_touching_hand():
             samples,
             target_position=np.array((0.20, 0.0, 0.30)),
             target_radius_m=0.045,
-            support_top_m=0.20,
-            cube_half_height_m=0.025,
         )
         is None
     )
@@ -101,10 +99,34 @@ def test_completion_gate_rejects_cube_still_touching_hand():
         samples[-1],
         grasp=GraspObservation(1, False, 0.0, 0.0, 0.0),
     )
-    assert "still contacts" in _completion_failure_reason(
+    assert "independently" in _completion_failure_reason(
         samples,
         target_position=np.array((0.20, 0.0, 0.30)),
         target_radius_m=0.045,
-        support_top_m=0.20,
-        cube_half_height_m=0.025,
+    )
+
+    samples[-10] = replace(
+        samples[-10],
+        grasp=GraspObservation(0, False, 0.0, 0.0, 0.0),
+    )
+    samples[1] = replace(samples[1], support_penetration_m=0.0021)
+    assert "penetrated" in _completion_failure_reason(
+        samples,
+        target_position=np.array((0.20, 0.0, 0.30)),
+        target_radius_m=0.045,
+    )
+
+    samples[-1] = replace(
+        samples[-1],
+        grasp=GraspObservation(0, False, 0.0, 0.0, 0.0),
+    )
+    samples[1] = replace(samples[1], support_penetration_m=0.0)
+    samples[-10] = replace(
+        samples[-10],
+        grasp=GraspObservation(1, False, 0.0, 0.0, 0.0),
+    )
+    assert "independently" in _completion_failure_reason(
+        samples,
+        target_position=np.array((0.20, 0.0, 0.30)),
+        target_radius_m=0.045,
     )

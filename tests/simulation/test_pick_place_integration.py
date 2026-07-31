@@ -6,9 +6,17 @@ from twin_sim.tasks.pick_place import PickPlacePhase, PickPlaceTask
 
 
 def test_real_contact_pick_place_meets_acceptance_contract():
+    class CaptureTrace:
+        def __init__(self):
+            self.records = []
+
+        def append(self, **record):
+            self.records.append(record)
+
+    trace = CaptureTrace()
     robot = RightArmRobot(viewer=False)
     right_target_before = robot._right_target.copy()
-    result = PickPlaceTask(robot).run()
+    result = PickPlaceTask(robot, trace=trace).run()
     assert result.success, (
         f"{result.abort_phase}: {result.reason}; "
         f"last={result.samples[-1].phase if result.samples else 'none'}"
@@ -18,12 +26,17 @@ def test_real_contact_pick_place_meets_acceptance_contract():
     assert np.linalg.norm(cube[-1, :2] - cube[0, :2]) >= 0.15
     assert result.placed_in_target
     assert not result.used_hidden_attachment
-    target_support = robot.sim.require_geom("pick_target_pedestal")
-    target_support_top = (
-        robot.sim.model.geom_pos[target_support, 2]
-        + robot.sim.model.geom_size[target_support, 2]
-    )
-    assert cube[:, 2].min() - 0.025 >= target_support_top - 0.002
+    assert max(sample.support_penetration_m for sample in result.samples) <= 0.002
+    close_records = [
+        record for record in trace.records if record["phase"] == "close_hand"
+    ]
+    ready_indices = [
+        index
+        for index, record in enumerate(close_records)
+        if record["grasp_ready"]
+    ]
+    assert ready_indices == [len(close_records) - 1]
+    assert not trace.records[-1]["grasp_ready"]
     assert np.linalg.norm(result.samples[-1].cube_linear_velocity) < 0.02
     assert (
         result.samples[-1].time_s - result.samples[-26].time_s

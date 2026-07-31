@@ -84,6 +84,7 @@ class PickPlaceSample:
     palm_actual_position: np.ndarray
     cube_position: np.ndarray
     cube_linear_velocity: np.ndarray
+    support_penetration_m: float
     grasp: GraspObservation
 
     def __post_init__(self) -> None:
@@ -121,6 +122,7 @@ class PickPlaceSample:
             palm_actual_position=palm_position,
             cube_position=cube_position,
             cube_linear_velocity=np.zeros(3),
+            support_penetration_m=0.0,
             grasp=GraspObservation(0, False, 0.0, 0.0, 0.0),
         )
 
@@ -141,8 +143,6 @@ def _completion_failure_reason(
     *,
     target_position: np.ndarray,
     target_radius_m: float,
-    support_top_m: float,
-    cube_half_height_m: float,
 ) -> str | None:
     recorded = tuple(samples)
     if not recorded:
@@ -154,16 +154,25 @@ def _completion_failure_reason(
         return "cube transfer below 0.15 m"
     if np.linalg.norm(cube[-1, :2] - target_position[:2]) > target_radius_m:
         return "cube outside target region"
-    if float(cube[:, 2].min() - cube_half_height_m) < support_top_m - 0.002:
+    if max(sample.support_penetration_m for sample in recorded) > 0.002:
         return "cube penetrated a task support"
-    if np.linalg.norm(recorded[-1].cube_linear_velocity) >= 0.02:
-        return "cube did not settle below 0.02 m/s"
-    if recorded[-1].grasp.hand_contact_count:
-        return "cube still contacts the hand after release"
     complete = [
         sample for sample in recorded if sample.phase is PickPlacePhase.COMPLETE
     ]
-    if not complete or complete[-1].time_s - complete[0].time_s < 0.25 - 1e-9:
+    independent_suffix: list[PickPlaceSample] = []
+    for sample in reversed(complete):
+        if (
+            sample.grasp.hand_contact_count
+            or np.linalg.norm(sample.cube_linear_velocity) >= 0.02
+        ):
+            break
+        independent_suffix.append(sample)
+    if (
+        not independent_suffix
+        or independent_suffix[0].time_s
+        - independent_suffix[-1].time_s
+        < 0.25 - 1e-9
+    ):
         return "cube did not settle independently for 0.25 s"
     return None
 
@@ -198,16 +207,7 @@ class PickPlaceTask:
             robot.sim.require_geom("pick_source_pedestal"),
             robot.sim.require_geom("pick_target_pedestal"),
         )
-        self._support_top_m = max(
-            float(
-                robot.sim.model.geom_pos[geom, 2]
-                + robot.sim.model.geom_size[geom, 2]
-            )
-            for geom in support_geoms
-        )
-        self._cube_half_height_m = float(
-            robot.sim.model.geom_size[self._cube_geom, 2]
-        )
+        self._support_geoms = frozenset(support_geoms)
         self._cube_initial = np.zeros(3)
         self._carry_verified = False
 
@@ -242,6 +242,7 @@ class PickPlaceTask:
                 grasp_pose[:3, :3]
                 @ np.asarray(self.config.grasp_offset_local_m)
             )
+            grasp_pose[2, 3] += 0.001
             pregrasp_pose = grasp_pose.copy()
             pregrasp_pose[:3, 3] -= (
                 self.config.pregrasp_offset_m * grasp_pose[:3, 2]
@@ -356,8 +357,6 @@ class PickPlaceTask:
                 self.samples,
                 target_position=self.robot.sim.data.site_xpos[self._target_site],
                 target_radius_m=self.config.target_radius_m,
-                support_top_m=self._support_top_m,
-                cube_half_height_m=self._cube_half_height_m,
             )
             success = reason is None
             return PickPlaceResult(
@@ -417,11 +416,13 @@ class PickPlaceTask:
             self.robot.hand.command(start + blend * (goal - start))
             self._step()
             observation = self.monitor.observe(self.robot.sim)
-            if phase is PickPlacePhase.CLOSE_HAND:
-                self.monitor.update(observation, self.config.control_dt_s)
             self._record(
                 self.robot.left_palm_pose()[:3, 3],
                 observation=observation,
+                update_monitor=(
+                    phase is not PickPlacePhase.CLOSE_HAND
+                    or fraction >= 0.90
+                ),
             )
             self._require_safe_state()
             if self.monitor.abort_reason:
@@ -429,7 +430,6 @@ class PickPlaceTask:
             if (
                 phase is PickPlacePhase.CLOSE_HAND
                 and self.monitor.ready
-                and fraction >= 0.95
             ):
                 return
 
@@ -438,7 +438,6 @@ class PickPlaceTask:
         for _ in range(self._steps(self.config.grasp_timeout_s)):
             self._step()
             observation = self.monitor.observe(self.robot.sim)
-            self.monitor.update(observation, self.config.control_dt_s)
             self._record(
                 self.robot.left_palm_pose()[:3, 3], observation=observation
             )
@@ -461,8 +460,13 @@ class PickPlaceTask:
         palm_target_position: np.ndarray,
         *,
         observation: GraspObservation | None = None,
+        update_monitor: bool = True,
     ) -> None:
         observed = observation or self.monitor.observe(self.robot.sim)
+        if update_monitor:
+            self.monitor.update(observed, self.config.control_dt_s)
+        elif self.phase is PickPlacePhase.CLOSE_HAND:
+            self.monitor.reset()
         cube_velocity = self.robot.sim.data.cvel[self._cube_body, 3:].copy()
         sample = PickPlaceSample(
             time_s=float(self.robot.sim.data.time),
@@ -477,6 +481,7 @@ class PickPlaceTask:
             palm_actual_position=self.robot.left_palm_pose()[:3, 3],
             cube_position=self._cube_position(),
             cube_linear_velocity=cube_velocity,
+            support_penetration_m=self._support_penetration_m(),
             grasp=observed,
         )
         self.samples.append(sample)
@@ -501,10 +506,7 @@ class PickPlaceTask:
         observation = self.samples[-1].grasp
         if observation.max_hand_actuator_force > self.monitor.abort_force:
             raise RuntimeError("hand force limit exceeded")
-        if (
-            self._cube_position()[2] - self._cube_half_height_m
-            < self._support_top_m - 0.002
-        ):
+        if self.samples[-1].support_penetration_m > 0.002:
             raise RuntimeError("cube penetrated a task support")
         if (
             self._carry_verified
@@ -534,6 +536,18 @@ class PickPlaceTask:
 
     def _cube_position(self) -> np.ndarray:
         return self.robot.sim.data.site_xpos[self._cube_site].copy()
+
+    def _support_penetration_m(self) -> float:
+        penetration = 0.0
+        for index in range(self.robot.sim.data.ncon):
+            contact = self.robot.sim.data.contact[index]
+            geoms = {int(contact.geom1), int(contact.geom2)}
+            if (
+                self._cube_geom in geoms
+                and bool(geoms & self._support_geoms)
+            ):
+                penetration = max(penetration, -float(contact.dist))
+        return penetration
 
     def _abort(self, reason: str) -> PickPlaceResult:
         failed_phase = self.phase
