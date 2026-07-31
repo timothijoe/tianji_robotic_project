@@ -4,6 +4,12 @@ from twin_sim.tasks.line_chop import (
     LineChopResult,
     run_line_chop,
 )
+from twin_sim.tasks.guarded_chop import (
+    GuardedChopConfig,
+    GuardedChopPhase,
+    GuardedChopResult,
+    run_guarded_chop,
+)
 
 __all__ = [
     "ChopConfig",
@@ -12,4 +18,8 @@ __all__ = [
     "LineChopResult",
     "run_chop",
     "run_line_chop",
+    "GuardedChopConfig",
+    "GuardedChopPhase",
+    "GuardedChopResult",
+    "run_guarded_chop",
 ]
