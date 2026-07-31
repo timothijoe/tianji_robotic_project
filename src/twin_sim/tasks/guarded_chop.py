@@ -511,6 +511,20 @@ def run_guarded_chop(
     completed_shifts = 0
     try:
         plan = _preflight_guarded_chop(robot, config)
+        if trace is not None:
+            blade_contact_heights = np.asarray(
+                [
+                    _blade_center_for_joints(
+                        robot, cut.descent[-1].joints_rad
+                    )[2]
+                    for cut in plan.cuts
+                ]
+            )
+            trace.set_plan(
+                np.column_stack(
+                    (plan.cut_points_xy, blade_contact_heights)
+                )
+            )
         _configure_guarded_scene(robot, config.scene_mode)
         robot.reset(plan.right_ready_rad)
         robot.sim.data.qpos[robot.sim.left.qpos_ids] = plan.left_ready_rad
@@ -895,12 +909,8 @@ def _observe_sample(
     )
     if trace is not None:
         trace.append(
-            planned_knife=_blade_center_for_joints(
-                robot, robot._right_target
-            ),
             actual_knife=sample.knife_position,
             actual_guard=sample.guard_position,
-            guard_target=_knuckle_for_left_target(robot),
             phase=phase.value,
             cut_index=cut_index,
             minimum_distance_m=distance,
@@ -924,12 +934,6 @@ def _blade_center_for_joints(
     blade = robot.sim.require_geom("right_knife_blade")
     with robot.right_kinematics._configuration(joints_rad):
         return robot.sim.data.geom_xpos[blade].copy()
-
-
-def _knuckle_for_left_target(robot: RightArmRobot) -> np.ndarray:
-    knuckle = robot.sim.require_site("left_guard_knuckle_site")
-    with robot.left_kinematics._configuration(robot._left_target):
-        return robot.sim.data.site_xpos[knuckle].copy()
 
 
 def _hand_cube_contact_count(robot: RightArmRobot) -> int:

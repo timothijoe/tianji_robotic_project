@@ -24,7 +24,7 @@ class FakeGeom:
 class FakeScene:
     def __init__(self):
         self.ngeom = 0
-        self.maxgeom = 16
+        self.maxgeom = 64
         self.geoms = [FakeGeom() for _ in range(self.maxgeom)]
 
 
@@ -49,37 +49,61 @@ class FakeViewer:
         self.texts = texts
 
 
-def test_trace_uses_approved_colors_and_overlay():
+def test_trace_draws_three_trails_and_five_compact_cut_marks():
     viewer = FakeViewer()
     trace = GuardedChopTrace(viewer, marker_stride=1)
+    trace.set_plan(
+        [(0.7, y, 0.33) for y in (0.04, 0.02, 0.0, -0.02, -0.04)]
+    )
 
     trace.append(
-        planned_knife=np.array((0.6, 0.0, 0.4)),
-        actual_knife=np.array((0.6, 0.0, 0.39)),
-        actual_guard=np.array((0.6, 0.04, 0.36)),
-        guard_target=np.array((0.6, 0.04, 0.36)),
-        phase="cut_down",
-        cut_index=2,
-        minimum_distance_m=0.025,
-        cut_allowed=True,
+        planned_knife=(0.7, 0.04, 0.36),
+        actual_knife=(0.7, 0.04, 0.35),
+        actual_guard=(0.6, 0.10, 0.36),
+        phase="hand_open",
+        cut_index=1,
+        minimum_distance_m=0.06,
+        cut_allowed=False,
+    )
+    trace.append(
+        actual_knife=(0.7, 0.02, 0.34),
+        actual_guard=(0.6, 0.08, 0.36),
+        phase="hand_open",
+        cut_index=1,
+        minimum_distance_m=0.05,
+        cut_allowed=False,
     )
 
-    assert viewer.user_scn.ngeom == 4
-    np.testing.assert_allclose(
-        viewer.user_scn.geoms[0].rgba, (0.1, 0.35, 1.0, 0.9)
+    assert len(trace.cut_points) == 5
+    assert not hasattr(trace, "guard_target")
+    assert viewer.user_scn.ngeom == 11
+    colors = [geom.rgba for geom in viewer.user_scn.geoms[:11]]
+    assert (
+        sum(
+            np.allclose(color, trace.planned_knife_color)
+            for color in colors
+        )
+        == 9
     )
-    np.testing.assert_allclose(
-        viewer.user_scn.geoms[1].rgba, (0.0, 0.9, 1.0, 0.9)
+    assert (
+        sum(
+            np.allclose(color, trace.actual_knife_color)
+            for color in colors
+        )
+        == 1
     )
-    np.testing.assert_allclose(
-        viewer.user_scn.geoms[2].rgba, (0.75, 0.1, 0.9, 0.95)
+    assert (
+        sum(
+            np.allclose(color, trace.actual_guard_color)
+            for color in colors
+        )
+        == 1
     )
-    np.testing.assert_allclose(
-        viewer.user_scn.geoms[3].rgba, (1.0, 0.85, 0.1, 0.95)
-    )
+    cut_marks = viewer.user_scn.geoms[4:9]
+    assert all(mark.size[0] <= 0.0015 for mark in cut_marks)
+    assert all(mark.size[2] <= 0.006 for mark in cut_marks)
     assert viewer.texts[2] == "Guarded chop"
-    assert "cut=2/5" in viewer.texts[3]
-    assert "distance=0.025" in viewer.texts[3]
+    assert "phase=hand_open" in viewer.texts[3]
 
 
 def test_abort_reason_replaces_live_phase():
@@ -96,10 +120,8 @@ def test_overlay_keeps_cumulative_minimum_distance():
     viewer = FakeViewer()
     trace = GuardedChopTrace(viewer, marker_stride=1)
     common = dict(
-        planned_knife=(0.0, 0.0, 0.0),
         actual_knife=(0.0, 0.0, 0.0),
         actual_guard=(0.0, 0.0, 0.0),
-        guard_target=(0.0, 0.0, 0.0),
         phase="cut_down",
         cut_index=1,
         cut_allowed=True,
