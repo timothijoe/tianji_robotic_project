@@ -536,6 +536,15 @@ def _planned_clearances(
     for index, cut in enumerate(cuts):
         for point in cut.descent:
             measure(point.joints_rad, left)
+        if config.scene_mode == "object":
+            for point in (*cut.retract, *cut.shift):
+                measure(point.joints_rad, left)
+            if index < len(guard_shifts):
+                right = cut.shift[-1].joints_rad
+                for point in guard_shifts[index]:
+                    measure(right, point.joints_rad)
+                left = guard_shifts[index][-1].joints_rad
+            continue
         if index >= len(guard_shifts):
             for point in cut.retract:
                 measure(point.joints_rad, left)

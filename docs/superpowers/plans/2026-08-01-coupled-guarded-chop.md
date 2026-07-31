@@ -136,15 +136,20 @@ for index in range(1, 5):
     ]
     assert coupled
     assert any(
-        sample.right_speed_rad_s > 0.05
-        and (sample.left_speed_rad_s > 0.05
-             or sample.hand_speed_rad_s > 0.05)
+        sample.right_speed_rad_s > 0.005
+        and (sample.left_speed_rad_s > 0.005
+             or sample.hand_speed_rad_s > 0.005)
         for sample in coupled
     )
     assert min(sample.knife_height_m for sample in coupled) >= (
         plan.safe_knife_height_m
     )
 ```
+
+The `0.005 rad/s` threshold verifies clearly nonzero simultaneous physical
+motion without contradicting the approved three-second slow handover. Target
+pairing is additionally guaranteed by commanding both resampled trajectories
+inside the same control-loop iteration.
 
 Also assert every `KNIFE_CLEAR` sample has left and hand speed at most `0.05`, and every `CUT_DOWN` retains constant left targets and hand speed at most `0.05`.
 

@@ -39,6 +39,24 @@ def test_cut_requires_stationary_guard_and_clearance():
     assert "distance" in decision.reason
 
 
+def test_knife_clear_rejects_guard_motion_below_safe_height():
+    coordinator = SafetyCoordinator()
+
+    decision = coordinator.evaluate(
+        observation(
+            phase="KNIFE_CLEAR",
+            knife_height_m=0.33,
+            safe_knife_height_m=0.34,
+            left_target_stationary=False,
+            left_speed_rad_s=0.2,
+            hand_speed_rad_s=0.2,
+        )
+    )
+
+    assert not decision.allowed
+    assert "guard moved before knife clearance" in decision.reason
+
+
 @pytest.mark.parametrize(
     "phase", ("COUPLED_OPEN", "COUPLED_SHIFT", "COUPLED_CLOSE")
 )

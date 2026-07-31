@@ -164,6 +164,24 @@ def test_plane_scene_keeps_guard_cube_hidden_and_collision_disabled():
         robot.close()
 
 
+def test_object_preflight_keeps_conservative_serial_trajectory(monkeypatch):
+    def reject_plane_coupling(*args, **kwargs):
+        raise AssertionError("object preflight used plane coupling")
+
+    monkeypatch.setattr(
+        guarded_chop, "_resample_trajectory", reject_plane_coupling
+    )
+    robot = RightArmRobot(viewer=False)
+    try:
+        plan = _preflight_guarded_chop(
+            robot, GuardedChopConfig(scene_mode="object")
+        )
+    finally:
+        robot.close()
+
+    assert len(plan.guard_shifts) == 4
+
+
 def test_object_mode_retains_contact_latched_hand():
     result = run_guarded_chop(
         GuardedChopConfig(scene_mode="object", final_hold_s=0.0),
