@@ -17,6 +17,7 @@ from twin_sim.tasks.chop import (
     _validate_config,
 )
 from twin_sim.trajectory import TrajectoryPoint, cartesian_trajectory
+from twin_sim.trajectory_plot import write_trajectory_svg
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ def run_line_chop(
     config: LineChopConfig,
     *,
     log_path: Path,
+    plot_path: Path,
     viewer: bool = False,
 ) -> LineChopResult:
     with CsvLogger(log_path) as csv_logger:
@@ -134,6 +136,7 @@ def run_line_chop(
             )
             samples.append(complete)
             csv_logger.write(complete)
+            write_trajectory_svg(plot_path, samples)
             _finish_viewer_presentation(robot, config.chop)
             return LineChopResult(
                 completed=True,

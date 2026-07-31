@@ -37,3 +37,18 @@ CSV 包含目标/实际关节、目标/实际 TCP pose、原始/滤波接触力�
 
 Python API 的最小示例位于 `examples/simulation_demo.py`。
 
+## 巡线切菜与轨迹图
+
+```bash
+.venv/bin/twin-sim line-chop \
+  --cuts 5 \
+  --spacing-m 0.03 \
+  --headless \
+  --log /tmp/twin-sim-line-chop.csv \
+  --plot /tmp/twin-sim-line-chop.svg
+```
+
+任务默认沿刀刃反方向连续切 5 刀，相邻切点间距 3 cm。每刀依次执行
+`DESCEND`、`HOLD`、`RETRACT`，前 4 刀之后追加 `SHIFT`。CSV 的
+`cut_index` 标明刀次；SVG 同时展示目标/实际轨迹的俯视图和侧视图。
+去掉 `--headless` 可打开 Viewer，增加 `--slow` 可慢速播放。

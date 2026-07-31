@@ -5,6 +5,7 @@ import time
 from twin_sim.kinematics import Kinematics
 from twin_sim.robot import RIGHT_HOME_RAD, RightArmRobot
 from twin_sim.tasks.chop import ChopConfig, run_chop
+from twin_sim.tasks.line_chop import LineChopConfig, run_line_chop
 from twin_sim.trajectory import cartesian_trajectory, joint_trajectory
 
 
@@ -33,6 +34,31 @@ def main(argv: list[str] | None = None) -> int:
         run_chop(
             config,
             log_path=args.log,
+            viewer=not args.headless,
+        )
+        return 0
+    if args.command == "line-chop":
+        chop_config = (
+            ChopConfig(
+                control_dt_s=args.control_dt,
+                descent_duration_s=3.0,
+                hold_duration_s=1.0,
+                retract_duration_s=3.0,
+                viewer_start_hold_s=5.0,
+                viewer_end_hold_s=8.0,
+            )
+            if args.slow
+            else ChopConfig(control_dt_s=args.control_dt)
+        )
+        run_line_chop(
+            LineChopConfig(
+                chop=chop_config,
+                cuts=args.cuts,
+                spacing_m=args.spacing_m,
+                shift_duration_s=3.0 if args.slow else 1.0,
+            ),
+            log_path=args.log,
+            plot_path=args.plot,
             viewer=not args.headless,
         )
         return 0
@@ -88,6 +114,14 @@ def _parser() -> argparse.ArgumentParser:
     chop.add_argument("--control-dt", type=float, default=0.01)
     chop.add_argument("--slow", action="store_true")
     chop.add_argument("--full-motion", action="store_true")
+    line_chop = commands.add_parser("line-chop")
+    line_chop.add_argument("--cuts", type=int, default=5)
+    line_chop.add_argument("--spacing-m", type=float, default=0.03)
+    line_chop.add_argument("--headless", action="store_true")
+    line_chop.add_argument("--log", type=Path, required=True)
+    line_chop.add_argument("--plot", type=Path, required=True)
+    line_chop.add_argument("--control-dt", type=float, default=0.01)
+    line_chop.add_argument("--slow", action="store_true")
     return parser
 
 

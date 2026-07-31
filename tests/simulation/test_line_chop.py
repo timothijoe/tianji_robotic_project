@@ -10,6 +10,7 @@ def test_default_line_chop_runs_five_cuts_and_four_shifts(tmp_path):
     result = tasks.run_line_chop(
         tasks.LineChopConfig(),
         log_path=tmp_path / "line.csv",
+        plot_path=tmp_path / "line.svg",
     )
 
     assert result.completed
@@ -26,6 +27,7 @@ def test_default_cut_points_are_three_centimetres_apart(tmp_path):
     result = tasks.run_line_chop(
         tasks.LineChopConfig(),
         log_path=tmp_path / "spacing.csv",
+        plot_path=tmp_path / "spacing.svg",
     )
 
     deltas = np.diff(result.cut_points_xy, axis=0)
@@ -43,6 +45,7 @@ def test_line_chop_rejects_invalid_cut_count(cuts, tmp_path):
         tasks.run_line_chop(
             tasks.LineChopConfig(cuts=cuts),
             log_path=tmp_path / "invalid.csv",
+            plot_path=tmp_path / "invalid.svg",
         )
 
 
@@ -51,4 +54,5 @@ def test_line_chop_rejects_path_outside_board_before_motion(tmp_path):
         tasks.run_line_chop(
             tasks.LineChopConfig(cuts=20, spacing_m=0.03),
             log_path=tmp_path / "outside.csv",
+            plot_path=tmp_path / "outside.svg",
         )
