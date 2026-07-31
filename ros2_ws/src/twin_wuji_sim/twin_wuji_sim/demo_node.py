@@ -32,12 +32,14 @@ class WujiSimDemo(Node):
 
 def main(args: list[str] | None = None) -> None:
     rclpy.init(args=args)
-    node = WujiSimDemo()
+    node: WujiSimDemo | None = None
     try:
+        node = WujiSimDemo()
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        node.destroy_node()
+        if node is not None:
+            node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

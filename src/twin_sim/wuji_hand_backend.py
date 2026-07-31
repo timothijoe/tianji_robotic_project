@@ -86,11 +86,15 @@ class SimWujiHand:
         self._require_open()
         values = np.asarray(enabled)
         if values.shape == ():
+            if not np.issubdtype(values.dtype, np.bool_):
+                raise ValueError("joint enabled must contain boolean values")
             self._enabled.fill(bool(values))
             return
         if values.shape != _SDK_SHAPE:
             raise ValueError("joint enabled must be a bool or have shape (5, 4)")
-        self._enabled = values.astype(bool, copy=True)
+        if not np.issubdtype(values.dtype, np.bool_):
+            raise ValueError("joint enabled must contain boolean values")
+        self._enabled = values.copy()
 
     def read_joint_enabled(self) -> np.ndarray:
         self._require_open()
@@ -110,6 +114,9 @@ class SimWujiHand:
 
     def read_joint_temperature(self) -> np.ndarray:
         raise NotImplementedError("joint temperature is not simulated")
+
+    def read_input_voltage(self) -> float:
+        raise NotImplementedError("input voltage is not simulated")
 
     def close(self) -> None:
         if not self._closed and self._owns_robot:

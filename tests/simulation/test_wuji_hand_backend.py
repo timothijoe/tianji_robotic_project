@@ -81,4 +81,14 @@ def test_unsupported_sdk_method_is_explicit():
     hand = SimWujiHand()
     with pytest.raises(NotImplementedError, match="not simulated"):
         hand.read_joint_temperature()
+    with pytest.raises(NotImplementedError, match="not simulated"):
+        hand.read_input_voltage()
+    hand.close()
+
+
+@pytest.mark.parametrize("invalid", ("false", 1, np.ones((5, 4), dtype=int)))
+def test_enabled_state_requires_boolean_values(invalid):
+    hand = SimWujiHand()
+    with pytest.raises(ValueError, match="boolean"):
+        hand.write_joint_enabled(invalid)
     hand.close()
