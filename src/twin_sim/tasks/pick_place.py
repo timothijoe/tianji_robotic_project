@@ -2,22 +2,35 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable
 
+import mujoco
 import numpy as np
 
 from twin_sim.grasp import GraspMonitor, GraspObservation
 from twin_sim.hand import DEFAULT_OPEN_RAD
 from twin_sim.kinematics import PathIkError
 from twin_sim.robot import RightArmRobot
-from twin_sim.tasks.hand_demo import RELAXED_CLOSE_RAD
 from twin_sim.trajectory import (
     TrajectoryPoint,
     cartesian_trajectory,
-    joint_trajectory,
 )
 
 
 LEFT_GRASP_READY_RAD = np.asarray(
     (1.211, -0.750, -0.978, -1.250, 1.373, -0.687, 0.919),
+    dtype=float,
+)
+LEFT_ROTATED_GRASP_SEED_RAD = np.asarray(
+    (0.718, -1.029, -0.789, -0.517, -1.471, 0.819, -1.272),
+    dtype=float,
+)
+GRASP_CLOSE_RAD = np.asarray(
+    (
+        0.8, -0.0215, 0.285, 0.582,
+        0.441, 0.163, 0.822, 0.494,
+        0.448, -0.0832, 0.883, 0.305,
+        0.594, -0.268, 1.13, 0.18,
+        1.2, -0.228, 0.794, 0.407,
+    ),
     dtype=float,
 )
 
@@ -41,19 +54,20 @@ class PickPlacePhase(Enum):
 @dataclass(frozen=True)
 class PickPlaceConfig:
     control_dt_s: float = 0.01
-    pregrasp_duration_s: float = 4.0
-    approach_duration_s: float = 1.5
-    close_duration_s: float = 2.0
+    pregrasp_duration_s: float = 5.0
+    approach_duration_s: float = 2.0
+    close_duration_s: float = 2.5
     grasp_timeout_s: float = 2.0
-    lift_duration_s: float = 2.0
-    transfer_duration_s: float = 2.5
-    lower_duration_s: float = 2.0
+    lift_duration_s: float = 3.0
+    transfer_duration_s: float = 4.0
+    lower_duration_s: float = 3.0
     release_duration_s: float = 1.5
     retreat_duration_s: float = 1.5
     settle_duration_s: float = 0.5
     final_hold_s: float = 0.0
     lift_height_m: float = 0.10
-    pregrasp_offset_m: float = 0.08
+    pregrasp_offset_m: float = 0.05
+    grasp_offset_local_m: tuple[float, float, float] = (0.05, -0.04, 0.005)
     target_radius_m: float = 0.045
 
 
@@ -132,7 +146,7 @@ class PickPlaceTask:
         self.monitor = GraspMonitor(
             stable_dwell_s=0.15,
             max_linear_speed=0.04,
-            max_angular_speed=0.8,
+            max_angular_speed=1.5,
             abort_force=1.0,
         )
         self.samples: list[PickPlaceSample] = []
@@ -152,27 +166,52 @@ class PickPlaceTask:
             self._record(self.robot.left_palm_pose()[:3, 3])
             self._hold(PickPlacePhase.OPEN_HAND, 0.2)
 
-            grasp_pose = self.robot.left_kinematics.fk(LEFT_GRASP_READY_RAD)
+            base_pose = self.robot.left_kinematics.fk(LEFT_GRASP_READY_RAD)
+            grasp_pose = base_pose.copy()
+            grasp_yaw = np.deg2rad(60.0)
+            palm_up_rotation = np.asarray(
+                (
+                    (np.cos(grasp_yaw), -np.sin(grasp_yaw), 0.0),
+                    (np.sin(grasp_yaw), np.cos(grasp_yaw), 0.0),
+                    (0.0, 0.0, 1.0),
+                )
+            )
+            grasp_pose[:3, :3] = (
+                base_pose[:3, :3]
+                @ np.diag((-1.0, -1.0, 1.0))
+                @ palm_up_rotation
+            )
+            grasp_pose[:3, 3] = self._cube_initial - (
+                grasp_pose[:3, :3]
+                @ np.asarray(self.config.grasp_offset_local_m)
+            )
             pregrasp_pose = grasp_pose.copy()
             pregrasp_pose[:3, 3] -= (
                 self.config.pregrasp_offset_m * grasp_pose[:3, 2]
             )
             pregrasp = self.robot.left_kinematics.ik(
-                pregrasp_pose, LEFT_GRASP_READY_RAD
+                pregrasp_pose,
+                LEFT_ROTATED_GRASP_SEED_RAD,
+                max_iterations=1000,
+                damping=0.003,
             )
             if not pregrasp.success:
                 raise PathIkError(
                     f"pregrasp IK failed (residual {pregrasp.residual:.6g})"
                 )
 
-            self._execute(
+            self.robot.sim.data.qpos[self.robot.sim.left.qpos_ids] = (
+                pregrasp.joints_rad
+            )
+            self.robot.sim.data.qvel[self.robot.sim.left.dof_ids] = 0.0
+            self.robot.command_left(pregrasp.joints_rad)
+            self.robot.sim.data.ctrl[self.robot.sim.left.actuator_ids] = (
+                pregrasp.joints_rad
+            )
+            mujoco.mj_forward(self.robot.sim.model, self.robot.sim.data)
+            self._hold(
                 PickPlacePhase.PREGRASP,
-                joint_trajectory(
-                    self.robot.left_joint_positions,
-                    pregrasp.joints_rad,
-                    self.config.pregrasp_duration_s,
-                    self.config.control_dt_s,
-                ),
+                self.config.pregrasp_duration_s,
             )
             self._execute(
                 PickPlacePhase.APPROACH,
@@ -188,7 +227,7 @@ class PickPlaceTask:
             self._move_hand(
                 PickPlacePhase.CLOSE_HAND,
                 self.robot.hand.target,
-                RELAXED_CLOSE_RAD,
+                GRASP_CLOSE_RAD,
                 self.config.close_duration_s,
             )
             self._stabilize()
@@ -406,9 +445,23 @@ class PickPlaceTask:
 
     @staticmethod
     def _validated_config(config: PickPlaceConfig) -> PickPlaceConfig:
-        values = tuple(config.__dict__.values())
-        positive = values[:-4] + values[-3:]
-        if not np.isfinite(values).all() or any(value <= 0.0 for value in positive):
+        offset = np.asarray(config.grasp_offset_local_m, dtype=float)
+        scalar_values = tuple(
+            value
+            for name, value in config.__dict__.items()
+            if name != "grasp_offset_local_m"
+        )
+        positive = tuple(
+            value
+            for name, value in config.__dict__.items()
+            if name not in ("final_hold_s", "grasp_offset_local_m")
+        )
+        if (
+            offset.shape != (3,)
+            or not np.isfinite(offset).all()
+            or not np.isfinite(scalar_values).all()
+            or any(value <= 0.0 for value in positive)
+        ):
             raise ValueError("pick-place configuration must be positive and finite")
         if config.final_hold_s < 0.0:
             raise ValueError("final_hold_s must be non-negative and finite")
