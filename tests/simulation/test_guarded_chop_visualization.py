@@ -148,20 +148,21 @@ def test_abort_reason_replaces_live_phase():
     assert "clearance lost" in viewer.texts[3]
 
 
-def test_overlay_displays_coupled_shift_phase():
+@pytest.mark.parametrize("phase", ("low_guard_shift", "knife_lift_shift"))
+def test_overlay_displays_low_guard_sequence_phases(phase):
     viewer = FakeViewer()
     trace = GuardedChopTrace(viewer)
 
     trace.append(
         actual_knife=(0.7, 0.04, 0.36),
         actual_guard=(0.6, 0.10, 0.36),
-        phase="coupled_shift",
+        phase=phase,
         cut_index=2,
         minimum_distance_m=0.04,
         cut_allowed=False,
     )
 
-    assert "phase=coupled_shift" in viewer.texts[3]
+    assert f"phase={phase}" in viewer.texts[3]
 
 
 def test_overlay_keeps_cumulative_minimum_distance():
