@@ -444,6 +444,7 @@ def run_guarded_chop(
                 left_stationary=left_stationary,
                 right_stationary=right_stationary,
                 safety=safety,
+                trace=trace,
             )
             samples.append(sample)
             if not sample.cut_allowed:
@@ -609,6 +610,7 @@ def _observe_sample(
     left_stationary: bool,
     right_stationary: bool,
     safety: SafetyCoordinator,
+    trace=None,
 ) -> GuardedChopSample:
     blade = robot.sim.require_geom("right_knife_blade")
     knuckle = robot.sim.require_site("left_guard_knuckle_site")
@@ -644,6 +646,19 @@ def _observe_sample(
         knife_height_m=observation.knife_height_m,
         cut_allowed=decision.allowed,
     )
+    if decision.allowed and trace is not None:
+        trace.append(
+            planned_knife=_blade_center_for_joints(
+                robot, robot._right_target
+            ),
+            actual_knife=sample.knife_position,
+            actual_guard=sample.guard_position,
+            guard_target=_knuckle_for_left_target(robot),
+            phase=phase.value,
+            cut_index=cut_index,
+            minimum_distance_m=distance,
+            cut_allowed=decision.allowed,
+        )
     return sample
 
 
@@ -654,3 +669,17 @@ def _current_blade_bottom(robot: RightArmRobot) -> float:
         np.abs(rotation[2]) @ robot.sim.model.geom_size[blade]
     )
     return float(robot.sim.data.geom_xpos[blade, 2] - radius)
+
+
+def _blade_center_for_joints(
+    robot: RightArmRobot, joints_rad: np.ndarray
+) -> np.ndarray:
+    blade = robot.sim.require_geom("right_knife_blade")
+    with robot.right_kinematics._configuration(joints_rad):
+        return robot.sim.data.geom_xpos[blade].copy()
+
+
+def _knuckle_for_left_target(robot: RightArmRobot) -> np.ndarray:
+    knuckle = robot.sim.require_site("left_guard_knuckle_site")
+    with robot.left_kinematics._configuration(robot._left_target):
+        return robot.sim.data.site_xpos[knuckle].copy()
