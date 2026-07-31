@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import twin_sim.tasks.guarded_chop as guarded_chop
 from twin_sim.tasks.guarded_chop import (
     GuardedChopConfig,
     GuardedChopPhase,
@@ -57,3 +58,12 @@ def test_phase_order_contains_interlocked_actions():
         "complete",
         "aborted",
     ]
+
+
+def test_guarded_chop_viewer_sync_is_limited_to_display_rate():
+    sync_stride = getattr(guarded_chop, "_viewer_sync_stride", None)
+
+    assert callable(sync_stride)
+    assert sync_stride(0.01) == 3
+    assert sync_stride(0.02) == 2
+    assert sync_stride(0.05) == 1

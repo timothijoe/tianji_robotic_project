@@ -110,6 +110,31 @@ def test_viewer_step_is_paced_in_real_time(monkeypatch):
     robot.close()
 
 
+def test_viewer_step_can_defer_sync_without_changing_pacing(monkeypatch):
+    robot = RightArmRobot()
+
+    class FakeViewer:
+        def __init__(self):
+            self.sync_calls = 0
+
+        def sync(self):
+            self.sync_calls += 1
+
+        def close(self):
+            pass
+
+    viewer = FakeViewer()
+    sleeps = []
+    robot._viewer = viewer
+    monkeypatch.setattr("twin_sim.robot.time.sleep", sleeps.append)
+
+    robot.step(0.002, sync_viewer=False)
+
+    assert viewer.sync_calls == 0
+    assert sleeps == [0.002]
+    robot.close()
+
+
 def test_close_waits_for_passive_viewer_thread():
     robot = RightArmRobot()
 

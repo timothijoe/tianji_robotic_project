@@ -23,9 +23,9 @@ class FakeGeom:
 
 
 class FakeScene:
-    def __init__(self):
+    def __init__(self, maxgeom=64):
         self.ngeom = 0
-        self.maxgeom = 64
+        self.maxgeom = maxgeom
         self.geoms = [FakeGeom() for _ in range(self.maxgeom)]
 
 
@@ -38,9 +38,10 @@ class FakeLock:
 
 
 class FakeViewer:
-    def __init__(self):
-        self.user_scn = FakeScene()
+    def __init__(self, maxgeom=64):
+        self.user_scn = FakeScene(maxgeom)
         self.texts = None
+        self.text_call_count = 0
 
     @staticmethod
     def lock():
@@ -48,6 +49,7 @@ class FakeViewer:
 
     def set_texts(self, texts):
         self.texts = texts
+        self.text_call_count += 1
 
 
 def test_trace_draws_three_trails_and_five_compact_cut_marks():
@@ -160,3 +162,51 @@ def test_overlay_keeps_cumulative_minimum_distance():
     trace.append(minimum_distance_m=0.040, **common)
 
     assert "distance=0.025" in viewer.texts[3]
+
+
+def test_trace_bounds_viewer_work_as_sample_history_grows():
+    viewer = FakeViewer()
+    trace = GuardedChopTrace(
+        viewer,
+        max_points=4,
+        marker_stride=1,
+    )
+    trace.set_plan(
+        [(0.7, y, 0.33) for y in (0.04, 0.02, 0.0, -0.02, -0.04)]
+    )
+
+    for index in range(100):
+        trace.append(
+            actual_knife=(0.7, 0.001 * index, 0.35),
+            actual_guard=(0.6, 0.001 * index, 0.36),
+            phase="hand_shift",
+            cut_index=1,
+            minimum_distance_m=0.04,
+            cut_allowed=False,
+        )
+
+    planned_geoms = 9
+    max_actual_geoms = 2 * (4 - 1)
+    assert viewer.user_scn.ngeom <= planned_geoms + max_actual_geoms
+    assert viewer.text_call_count == 1
+
+
+def test_default_trace_keeps_a_compact_visible_tail():
+    viewer = FakeViewer(maxgeom=512)
+    trace = GuardedChopTrace(viewer)
+    trace.set_plan(
+        [(0.7, y, 0.33) for y in (0.04, 0.02, 0.0, -0.02, -0.04)]
+    )
+
+    for index in range(1000):
+        trace.append(
+            actual_knife=(0.7, 0.0001 * index, 0.35),
+            actual_guard=(0.6, 0.0001 * index, 0.36),
+            phase="hand_shift",
+            cut_index=1,
+            minimum_distance_m=0.04,
+            cut_allowed=False,
+        )
+
+    assert trace.actual_knife.maxlen == 16
+    assert viewer.user_scn.ngeom <= 9 + 2 * (16 - 1)

@@ -19,7 +19,7 @@ class GuardedChopTrace:
         self,
         viewer=None,
         *,
-        max_points: int = 3000,
+        max_points: int = 16,
         marker_stride: int = 10,
     ) -> None:
         for name, value in (
@@ -33,6 +33,7 @@ class GuardedChopTrace:
             ):
                 raise ValueError(f"{name} must be a positive integer")
         self._viewer = viewer
+        self._max_trail_geoms = 2 * (int(max_points) - 1)
         self._marker_stride = int(marker_stride)
         self._sample_index = 0
         self.planned_knife = deque(maxlen=int(max_points))
@@ -41,6 +42,10 @@ class GuardedChopTrace:
         self.cut_points: tuple[np.ndarray, ...] = ()
         self._last_drawn_actual_knife = None
         self._last_drawn_actual_guard = None
+        self._trail_geom_start = None
+        self._trail_geom_count = 0
+        self._next_trail_geom = 0
+        self._last_overlay_status = None
         self.phase = ""
         self.cut_index = 0
         self.minimum_distance_m = float("inf")
@@ -118,7 +123,7 @@ class GuardedChopTrace:
                         self.trail_radius_m,
                     )
                 )
-            self._draw_segments(segments)
+            self._draw_trail_segments(segments)
             self._last_drawn_actual_knife = knife_point.copy()
             self._last_drawn_actual_guard = guard_point.copy()
         self._sample_index += 1
@@ -140,7 +145,10 @@ class GuardedChopTrace:
         )
         if self.abort_reason:
             status += f"  abort={self.abort_reason}"
+        if status == self._last_overlay_status:
+            return
         viewer.set_texts((None, None, "Guarded chop", status))
+        self._last_overlay_status = status
 
     def _draw_segments(self, segments) -> None:
         viewer = self._viewer
@@ -161,6 +169,44 @@ class GuardedChopTrace:
                     color,
                 )
                 scene.ngeom += 1
+
+    def _draw_trail_segments(self, segments) -> None:
+        viewer = self._viewer
+        if viewer is None or getattr(viewer, "user_scn", None) is None:
+            return
+        with viewer.lock():
+            scene = viewer.user_scn
+            if self._trail_geom_start is None:
+                self._trail_geom_start = scene.ngeom
+            capacity = min(
+                self._max_trail_geoms,
+                scene.maxgeom - self._trail_geom_start,
+            )
+            if capacity <= 0:
+                return
+            for start, end, color, radius_m in segments:
+                if np.array_equal(start, end):
+                    continue
+                if self._trail_geom_count < capacity:
+                    geom_index = (
+                        self._trail_geom_start + self._trail_geom_count
+                    )
+                    self._trail_geom_count += 1
+                    scene.ngeom += 1
+                else:
+                    geom_index = (
+                        self._trail_geom_start + self._next_trail_geom
+                    )
+                    self._next_trail_geom = (
+                        self._next_trail_geom + 1
+                    ) % capacity
+                _init_capsule_between(
+                    scene.geoms[geom_index],
+                    start,
+                    end,
+                    radius_m,
+                    color,
+                )
 
 
 def _init_capsule_between(

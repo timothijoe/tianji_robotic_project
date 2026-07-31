@@ -27,6 +27,14 @@ _GUARDED_CHOP_VIEW_AZIMUTH_DEG = 135.0
 _GUARDED_CHOP_VIEW_ELEVATION_DEG = -20.0
 _GUARDED_CHOP_VIEW_DISTANCE_M = 1.6
 _GUARDED_CHOP_VIEW_LOOKAT = (0.48, 0.0, 0.48)
+_VIEWER_REFRESH_PERIOD_S = 0.03
+
+
+def _viewer_sync_stride(control_dt_s: float) -> int:
+    return max(
+        1,
+        int(round(_VIEWER_REFRESH_PERIOD_S / control_dt_s)),
+    )
 
 
 class GuardedChopPhase(str, Enum):
@@ -547,19 +555,27 @@ def run_guarded_chop(
             )
         last_left_target = robot._left_target.copy()
         last_right_target = robot._right_target.copy()
+        viewer_step_index = 0
+        viewer_sync_stride = _viewer_sync_stride(config.control_dt_s)
 
         def step_and_record(
             current_phase: GuardedChopPhase,
             cut_index: int,
         ) -> None:
-            nonlocal last_left_target, last_right_target
+            nonlocal last_left_target, last_right_target, viewer_step_index
             left_stationary = np.array_equal(
                 robot._left_target, last_left_target
             )
             right_stationary = np.array_equal(
                 robot._right_target, last_right_target
             )
-            robot.step(config.control_dt_s)
+            robot.step(
+                config.control_dt_s,
+                sync_viewer=(
+                    viewer_step_index % viewer_sync_stride == 0
+                ),
+            )
+            viewer_step_index += 1
             sample = _observe_sample(
                 robot,
                 current_phase,

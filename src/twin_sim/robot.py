@@ -95,7 +95,12 @@ class RightArmRobot:
             except ValueError as error:
                 raise ValueError(f"invalid target at sample {index}: {error}") from error
 
-    def step(self, control_dt_s: float) -> None:
+    def step(
+        self,
+        control_dt_s: float,
+        *,
+        sync_viewer: bool = True,
+    ) -> None:
         substeps = self._substeps(control_dt_s)
         self._require_finite_state()
         self.sim.data.ctrl[self.sim.left.actuator_ids] = self._left_target
@@ -104,7 +109,8 @@ class RightArmRobot:
         for _ in range(substeps):
             mujoco.mj_step(self.sim.model, self.sim.data)
         self._require_finite_state()
-        self._sync_viewer()
+        if sync_viewer:
+            self._sync_viewer()
         if self._viewer is not None:
             time.sleep(float(control_dt_s))
 
