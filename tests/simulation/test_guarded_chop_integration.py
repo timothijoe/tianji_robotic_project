@@ -10,11 +10,17 @@ from twin_sim.robot import RightArmRobot
 from twin_sim.tasks.guarded_chop import (
     GuardedChopConfig,
     GuardedChopPhase,
+    _preflight_guarded_chop,
     run_guarded_chop,
 )
 
 
 def test_plane_mode_visibly_opens_shifts_and_closes_each_time():
+    robot = RightArmRobot(viewer=False)
+    try:
+        plan = _preflight_guarded_chop(robot, GuardedChopConfig())
+    finally:
+        robot.close()
     result = run_guarded_chop(
         GuardedChopConfig(final_hold_s=0.0), viewer=False
     )
@@ -57,6 +63,18 @@ def test_plane_mode_visibly_opens_shifts_and_closes_each_time():
         for sample in result.samples
         if sample.phase is GuardedChopPhase.HAND_SHIFT
     ) <= 0.05
+    for phase in (
+        GuardedChopPhase.HAND_OPEN,
+        GuardedChopPhase.HAND_SHIFT,
+        GuardedChopPhase.HAND_CLOSE,
+    ):
+        heights = [
+            sample.knife_height_m
+            for sample in result.samples
+            if sample.phase is phase
+        ]
+        assert heights
+        assert min(heights) >= plan.safe_knife_height_m
 
     down = [
         sample

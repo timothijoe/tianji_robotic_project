@@ -54,9 +54,6 @@ class SimulationModel:
         simulation.require_sensor("right_tool_torque")
         simulation.require_geom("right_knife_blade")
         simulation.require_geom("chopping_board")
-        simulation.require_geom("guarded_chop_cube")
-        simulation.require_site("guarded_chop_cube_center")
-        simulation.require_site("left_guard_knuckle_site")
         simulation.validate_actuator_contract()
         mujoco.mj_forward(model, data)
         return simulation

@@ -28,6 +28,7 @@ _GUARDED_CHOP_VIEW_ELEVATION_DEG = -20.0
 _GUARDED_CHOP_VIEW_DISTANCE_M = 1.6
 _GUARDED_CHOP_VIEW_LOOKAT = (0.48, 0.0, 0.48)
 _VIEWER_REFRESH_PERIOD_S = 0.03
+_KNIFE_SAFE_TRACKING_HEADROOM_M = 0.006
 
 
 def _viewer_sync_stride(control_dt_s: float) -> int:
@@ -228,6 +229,10 @@ def _preflight_guarded_chop(
     config: GuardedChopConfig,
 ) -> _GuardedChopPlan:
     config = config.validated()
+    robot.sim.require_geom("guarded_chop_cube")
+    robot.sim.require_site("guarded_chop_cube_center")
+    robot.sim.require_site("left_guard_knuckle_site")
+    robot.sim.require_site("left_palm_tcp_site")
     saved = mujoco.MjData(robot.sim.model)
     mujoco.mj_copyData(saved, robot.sim.model, robot.sim.data)
     try:
@@ -280,7 +285,10 @@ def _preflight_guarded_chop(
                 f"{float(np.min(distances)):.6f} m"
             )
         right_ready = cuts[0].descent[0].joints_rad
-        safe_height = _blade_bottom_height(robot, right_ready)
+        safe_height = (
+            _blade_bottom_height(robot, right_ready)
+            - _KNIFE_SAFE_TRACKING_HEADROOM_M
+        )
         return _GuardedChopPlan(
             right_ready_rad=right_ready.copy(),
             left_ready_rad=left_ready.copy(),
@@ -306,7 +314,7 @@ def _translate_right_cuts(
     for index, cut in enumerate(cuts):
         safe = cut.descent[0].target_pose.copy()
         contact = cut.descent[-1].target_pose.copy()
-        safe[2, 3] += dz_m
+        safe[2, 3] += dz_m + _KNIFE_SAFE_TRACKING_HEADROOM_M
         contact[2, 3] += dz_m
         safe_result = robot.right_kinematics.ik(
             safe, seed, max_iterations=1000, damping=0.003
@@ -336,7 +344,9 @@ def _translate_right_cuts(
         seed = retract[-1].joints_rad
         if index + 1 < len(cuts):
             next_safe = cuts[index + 1].descent[0].target_pose.copy()
-            next_safe[2, 3] += dz_m
+            next_safe[2, 3] += (
+                dz_m + _KNIFE_SAFE_TRACKING_HEADROOM_M
+            )
             shift = tuple(
                 cartesian_trajectory(
                     robot.right_kinematics,
@@ -580,7 +590,7 @@ def run_guarded_chop(
                 robot,
                 current_phase,
                 cut_index,
-                plan.safe_knife_height_m - 0.005,
+                plan.safe_knife_height_m,
                 left_stationary=left_stationary,
                 right_stationary=right_stationary,
                 safety=safety,
@@ -593,7 +603,7 @@ def run_guarded_chop(
                 observation = _safety_observation(
                     robot,
                     current_phase,
-                    plan.safe_knife_height_m - 0.005,
+                    plan.safe_knife_height_m,
                     sample.knife_guard_distance_m,
                     left_stationary,
                     right_stationary,

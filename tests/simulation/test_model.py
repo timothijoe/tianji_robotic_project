@@ -1,9 +1,51 @@
+import os
+from xml.etree import ElementTree
+
 import mujoco
 import numpy as np
 import pytest
 
 from twin_sim.model import ModelValidationError, SimulationModel
 from twin_sim.hand_names import HAND_ACTUATORS, HAND_JOINTS
+from twin_sim.paths import project_root
+from twin_sim.robot import RightArmRobot
+
+
+def _custom_scene_without_guarded_features(tmp_path):
+    root = project_root()
+    scene_dir = tmp_path / "robot_assets" / "mujoco"
+    hand_dir = scene_dir / "wuji_hand"
+    hand_dir.mkdir(parents=True)
+    os.symlink(root / "MarvinCCS", tmp_path / "MarvinCCS")
+    os.symlink(root / "robot_assets" / "mujoco" / "meshes", scene_dir / "meshes")
+    os.symlink(
+        root / "robot_assets" / "mujoco" / "wuji_hand" / "meshes",
+        hand_dir / "meshes",
+    )
+
+    scene = ElementTree.parse(
+        root / "robot_assets" / "mujoco" / "right_chopping_scene.xml"
+    )
+    worldbody = scene.getroot().find("worldbody")
+    guarded_body = next(
+        body
+        for body in worldbody
+        if body.get("name") == "guarded_chop_cube_body"
+    )
+    worldbody.remove(guarded_body)
+    custom_path = scene_dir / "custom_right_task.xml"
+    scene.write(custom_path, encoding="unicode")
+
+    hand = ElementTree.parse(
+        root / "robot_assets" / "mujoco" / "wuji_hand" / "left_hand.xml"
+    )
+    excluded_sites = {"left_palm_tcp_site", "left_guard_knuckle_site"}
+    for parent in hand.iter():
+        for child in list(parent):
+            if child.get("name") in excluded_sites:
+                parent.remove(child)
+    hand.write(hand_dir / "left_hand.xml", encoding="unicode")
+    return custom_path
 
 
 def test_active_scene_has_arm_and_hand_position_actuators():
@@ -18,6 +60,29 @@ def test_active_scene_has_arm_and_hand_position_actuators():
         sim.model.actuator_biastype[i] == mujoco.mjtBias.mjBIAS_AFFINE
         for i in actuator_ids
     )
+
+
+def test_custom_right_task_model_does_not_require_guarded_chop_objects(
+    tmp_path,
+):
+    sim = SimulationModel.load(
+        _custom_scene_without_guarded_features(tmp_path)
+    )
+
+    assert sim.require_site("right_tool_tip_site") >= 0
+    with pytest.raises(ModelValidationError, match="guarded_chop_cube"):
+        sim.require_geom("guarded_chop_cube")
+
+
+def test_custom_right_task_robot_does_not_require_left_palm_tcp(tmp_path):
+    robot = RightArmRobot(
+        _custom_scene_without_guarded_features(tmp_path), viewer=False
+    )
+    try:
+        assert np.isfinite(robot.tcp_pose()).all()
+        robot.step(0.002)
+    finally:
+        robot.close()
 
 
 def test_left_hand_is_mounted_below_left_wrist():

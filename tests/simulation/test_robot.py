@@ -1,3 +1,6 @@
+import threading
+
+import mujoco.viewer
 import numpy as np
 import pytest
 
@@ -146,7 +149,7 @@ def test_close_waits_for_passive_viewer_thread():
         def __init__(self):
             self.joined = False
 
-        def join(self):
+        def join(self, timeout=None):
             self.joined = True
 
     thread = FakeThread()
@@ -156,3 +159,63 @@ def test_close_waits_for_passive_viewer_thread():
     robot.close()
 
     assert thread.joined
+
+
+def test_viewer_launch_tracks_only_the_thread_created_for_its_target(
+    monkeypatch,
+):
+    class FakeViewer:
+        def close(self):
+            pass
+
+    class FakeThread:
+        def __init__(self, ident, name, target):
+            self.ident = ident
+            self.name = name
+            self._target = target
+
+        def join(self, timeout=None):
+            pass
+
+    existing = FakeThread(1, "existing", object())
+    launched = FakeThread(
+        2, "viewer-worker", mujoco.viewer._launch_internal
+    )
+    decoy = FakeThread(3, "Thread (_launch_internal)", object())
+    snapshots = iter(
+        ([existing], [existing, launched, decoy])
+    )
+    monkeypatch.setattr(threading, "enumerate", lambda: next(snapshots))
+    monkeypatch.setattr(
+        mujoco.viewer,
+        "launch_passive",
+        lambda model, data: FakeViewer(),
+    )
+
+    robot = RightArmRobot(viewer=True)
+
+    assert robot._viewer_thread is launched
+    robot.close()
+
+
+def test_close_bounds_the_passive_viewer_thread_wait():
+    robot = RightArmRobot()
+
+    class FakeViewer:
+        def close(self):
+            pass
+
+    class FakeThread:
+        def __init__(self):
+            self.join_timeouts = []
+
+        def join(self, timeout):
+            self.join_timeouts.append(timeout)
+
+    thread = FakeThread()
+    robot._viewer = FakeViewer()
+    robot._viewer_thread = thread
+
+    robot.close()
+
+    assert thread.join_timeouts == [1.0]

@@ -14,6 +14,7 @@ from twin_sim.kinematics import Kinematics
 RIGHT_HOME_RAD = np.array(
     (0.4, -1.3, 0.08, -1.606525, 0.057176, 0.79256, 1.5), dtype=float
 )
+_VIEWER_CLOSE_TIMEOUT_S = 1.0
 
 
 class NumericalSafetyError(RuntimeError):
@@ -29,11 +30,9 @@ class RightArmRobot:
         self.right_kinematics = Kinematics(
             self.sim, self.sim.right, "right_tool_tip_site"
         )
-        self.left_kinematics = Kinematics(
-            self.sim, self.sim.left, "left_palm_tcp_site"
-        )
+        self._left_kinematics = None
         self._tcp_site_id = self.sim.require_site("right_tool_tip_site")
-        self._left_palm_site_id = self.sim.require_site("left_palm_tcp_site")
+        self._left_palm_site_id = None
         self._left_target = np.zeros(7)
         self._right_target = RIGHT_HOME_RAD.copy()
         self._left_joint_limits = self.sim.model.jnt_range[
@@ -47,21 +46,18 @@ class RightArmRobot:
         if viewer:
             from mujoco import viewer as mujoco_viewer
 
-            threads_before = {thread.ident for thread in threading.enumerate()}
+            threads_before = set(threading.enumerate())
             self._viewer = mujoco_viewer.launch_passive(self.sim.model, self.sim.data)
-            new_threads = [
+            launch_target = getattr(mujoco_viewer, "_launch_internal", None)
+            launched_threads = set(threading.enumerate()) - threads_before
+            matching_threads = [
                 thread
-                for thread in threading.enumerate()
-                if thread.ident not in threads_before
+                for thread in launched_threads
+                if launch_target is not None
+                and getattr(thread, "_target", None) is launch_target
             ]
-            self._viewer_thread = next(
-                (
-                    thread
-                    for thread in new_threads
-                    if "_launch_internal" in thread.name
-                ),
-                next(iter(new_threads), None),
-            )
+            if len(matching_threads) == 1:
+                self._viewer_thread = matching_threads[0]
 
     def reset(self, joints_rad: Sequence[float] = RIGHT_HOME_RAD) -> None:
         joints = self._validated_target(joints_rad)
@@ -130,6 +126,14 @@ class RightArmRobot:
     def left_joint_velocities(self) -> np.ndarray:
         return self.sim.data.qvel[self.sim.left.dof_ids].copy()
 
+    @property
+    def left_kinematics(self) -> Kinematics:
+        if self._left_kinematics is None:
+            self._left_kinematics = Kinematics(
+                self.sim, self.sim.left, "left_palm_tcp_site"
+            )
+        return self._left_kinematics
+
     def tcp_pose(self) -> np.ndarray:
         quaternion = np.empty(4)
         mujoco.mju_mat2Quat(
@@ -140,6 +144,10 @@ class RightArmRobot:
         )
 
     def left_palm_pose(self) -> np.ndarray:
+        if self._left_palm_site_id is None:
+            self._left_palm_site_id = self.sim.require_site(
+                "left_palm_tcp_site"
+            )
         return self._site_pose_matrix(self._left_palm_site_id)
 
     def _site_pose_matrix(self, site_id: int) -> np.ndarray:
@@ -149,12 +157,14 @@ class RightArmRobot:
         return pose
 
     def close(self) -> None:
-        if self._viewer is not None:
-            viewer, self._viewer = self._viewer, None
-            viewer.close()
-        if self._viewer_thread is not None:
-            viewer_thread, self._viewer_thread = self._viewer_thread, None
-            viewer_thread.join()
+        viewer, self._viewer = self._viewer, None
+        viewer_thread, self._viewer_thread = self._viewer_thread, None
+        try:
+            if viewer is not None:
+                viewer.close()
+        finally:
+            if viewer_thread is not None:
+                viewer_thread.join(timeout=_VIEWER_CLOSE_TIMEOUT_S)
 
     @staticmethod
     def _validated_joints(joints_rad: Sequence[float]) -> np.ndarray:
