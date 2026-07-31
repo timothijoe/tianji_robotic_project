@@ -30,8 +30,8 @@
     <light pos="0 -1 1.5" dir="0 1 -1" />
     <geom name="floor" type="plane" size="1.5 1.5 0.05" rgba="0.2 0.25 0.3 1" />
     <geom name="chopping_board" type="box" pos="0.62 0 0.205" size="0.32 0.24 0.025" rgba="0.55 0.32 0.12 1" friction="1.0 0.03 0.003" solref="0.04 1" solimp="0.85 0.95 0.005" />
-    <geom name="pick_source_pedestal" type="box" pos="0.62 0.22 0.304" size="0.060 0.060 0.074" rgba="0.3 0.32 0.35 1" friction="1.2 0.03 0.003" contype="4" conaffinity="0" />
-    <geom name="pick_target_pedestal" type="box" pos="0.62 0.02 0.304" size="0.060 0.060 0.074" rgba="0.25 0.35 0.28 1" friction="1.2 0.03 0.003" contype="4" conaffinity="0" />
+    <geom name="pick_source_pedestal" type="box" pos="0.62 0.22 0.304" size="0.060 0.060 0.074" rgba="0.3 0.32 0.35 1" friction="1.2 0.03 0.003" solref="0.005 1" solimp="0.95 0.99 0.001" contype="4" conaffinity="0" />
+    <geom name="pick_target_pedestal" type="box" pos="0.62 0.02 0.304" size="0.060 0.060 0.074" rgba="0.25 0.35 0.28 1" friction="1.2 0.03 0.003" solref="0.005 1" solimp="0.95 0.99 0.001" contype="4" conaffinity="0" />
     <body name="pick_cube" pos="0.62 0.22 0.403">
       <freejoint name="pick_cube_free" />
       <geom name="pick_cube_geom" type="box" size="0.025 0.025 0.025" mass="0.02" friction="3.0 0.05 0.005" contype="1" conaffinity="5" rgba="0.9 0.45 0.1 1" />

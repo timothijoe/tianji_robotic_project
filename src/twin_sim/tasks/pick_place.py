@@ -136,6 +136,38 @@ class PickPlaceResult:
     used_hidden_attachment: bool = False
 
 
+def _completion_failure_reason(
+    samples: Iterable[PickPlaceSample],
+    *,
+    target_position: np.ndarray,
+    target_radius_m: float,
+    support_top_m: float,
+    cube_half_height_m: float,
+) -> str | None:
+    recorded = tuple(samples)
+    if not recorded:
+        return "no pick-place samples recorded"
+    cube = np.asarray([sample.cube_position for sample in recorded])
+    if float(cube[:, 2].max() - cube[0, 2]) < 0.08:
+        return "cube lift below 0.08 m"
+    if float(np.linalg.norm(cube[-1, :2] - cube[0, :2])) < 0.15:
+        return "cube transfer below 0.15 m"
+    if np.linalg.norm(cube[-1, :2] - target_position[:2]) > target_radius_m:
+        return "cube outside target region"
+    if float(cube[:, 2].min() - cube_half_height_m) < support_top_m - 0.002:
+        return "cube penetrated a task support"
+    if np.linalg.norm(recorded[-1].cube_linear_velocity) >= 0.02:
+        return "cube did not settle below 0.02 m/s"
+    if recorded[-1].grasp.hand_contact_count:
+        return "cube still contacts the hand after release"
+    complete = [
+        sample for sample in recorded if sample.phase is PickPlacePhase.COMPLETE
+    ]
+    if not complete or complete[-1].time_s - complete[0].time_s < 0.25 - 1e-9:
+        return "cube did not settle independently for 0.25 s"
+    return None
+
+
 class PickPlaceTask:
     def __init__(
         self,
@@ -158,16 +190,35 @@ class PickPlaceTask:
         self.realtime = bool(realtime)
         self.phase = PickPlacePhase.INITIALIZE
         self._cube_body = robot.sim.require_body("pick_cube")
+        self._cube_geom = robot.sim.require_geom("pick_cube_geom")
         self._cube_site = robot.sim.require_site("pick_cube_site")
         self._target_site = robot.sim.require_site("pick_target_site")
+        support_geoms = (
+            robot.sim.require_geom("chopping_board"),
+            robot.sim.require_geom("pick_source_pedestal"),
+            robot.sim.require_geom("pick_target_pedestal"),
+        )
+        self._support_top_m = max(
+            float(
+                robot.sim.model.geom_pos[geom, 2]
+                + robot.sim.model.geom_size[geom, 2]
+            )
+            for geom in support_geoms
+        )
+        self._cube_half_height_m = float(
+            robot.sim.model.geom_size[self._cube_geom, 2]
+        )
         self._cube_initial = np.zeros(3)
+        self._carry_verified = False
 
     def run(self) -> PickPlaceResult:
         self.samples.clear()
         self.monitor.reset()
         self.robot.reset()
+        self._carry_verified = False
         self._cube_initial = self._cube_position()
         right_target = self.robot._right_target.copy()
+        right_actual = self.robot.joint_positions.copy()
         try:
             self._record(self.robot.left_palm_pose()[:3, 3])
             self._hold(PickPlacePhase.OPEN_HAND, 0.2)
@@ -246,6 +297,8 @@ class PickPlaceTask:
                 lift_pose,
                 self.config.lift_duration_s,
             )
+            self._require_carried_cube(minimum_lift_m=0.08)
+            self._carry_verified = True
 
             target_delta = (
                 self.robot.sim.data.site_xpos[self._target_site, :2]
@@ -259,9 +312,10 @@ class PickPlaceTask:
                 transfer_pose,
                 self.config.transfer_duration_s,
             )
+            self._require_carried_cube(minimum_lift_m=0.06)
 
             lower_pose = transfer_pose.copy()
-            lower_pose[2, 3] -= self.config.lift_height_m - 0.005
+            lower_pose[2, 3] -= self.config.lift_height_m - 0.012
             self._execute_cartesian(
                 PickPlacePhase.LOWER,
                 transfer_pose,
@@ -290,13 +344,27 @@ class PickPlaceTask:
                 self._hold(PickPlacePhase.COMPLETE, self.config.final_hold_s)
 
             np.testing.assert_array_equal(self.robot._right_target, right_target)
+            np.testing.assert_allclose(
+                self.robot.joint_positions,
+                right_actual,
+                atol=0.005,
+                rtol=0.0,
+                err_msg="right arm actual state changed during left task",
+            )
             placed = self._placed_in_target()
-            success = placed and self._acceptance_motion_passed()
+            reason = _completion_failure_reason(
+                self.samples,
+                target_position=self.robot.sim.data.site_xpos[self._target_site],
+                target_radius_m=self.config.target_radius_m,
+                support_top_m=self._support_top_m,
+                cube_half_height_m=self._cube_half_height_m,
+            )
+            success = reason is None
             return PickPlaceResult(
                 success=success,
                 final_phase=PickPlacePhase.COMPLETE,
                 abort_phase=None,
-                reason="" if success else "placement acceptance criteria not met",
+                reason="" if success else reason,
                 samples=tuple(self.samples),
                 placed_in_target=placed,
             )
@@ -348,8 +416,22 @@ class PickPlaceTask:
             blend = 10 * fraction**3 - 15 * fraction**4 + 6 * fraction**5
             self.robot.hand.command(start + blend * (goal - start))
             self._step()
-            self._record(self.robot.left_palm_pose()[:3, 3])
+            observation = self.monitor.observe(self.robot.sim)
+            if phase is PickPlacePhase.CLOSE_HAND:
+                self.monitor.update(observation, self.config.control_dt_s)
+            self._record(
+                self.robot.left_palm_pose()[:3, 3],
+                observation=observation,
+            )
             self._require_safe_state()
+            if self.monitor.abort_reason:
+                raise RuntimeError(self.monitor.abort_reason)
+            if (
+                phase is PickPlacePhase.CLOSE_HAND
+                and self.monitor.ready
+                and fraction >= 0.95
+            ):
+                return
 
     def _stabilize(self) -> None:
         self.phase = PickPlacePhase.STABILIZE
@@ -383,19 +465,19 @@ class PickPlaceTask:
         observed = observation or self.monitor.observe(self.robot.sim)
         cube_velocity = self.robot.sim.data.cvel[self._cube_body, 3:].copy()
         sample = PickPlaceSample(
-                time_s=float(self.robot.sim.data.time),
-                phase=self.phase,
-                left_target_rad=self.robot._left_target,
-                left_actual_rad=self.robot.left_joint_positions,
-                hand_target_rad=self.robot.hand.target,
-                hand_actual_rad=self.robot.sim.data.qpos[
-                    self.robot.sim.hand.qpos_ids
-                ],
-                palm_target_position=palm_target_position,
-                palm_actual_position=self.robot.left_palm_pose()[:3, 3],
-                cube_position=self._cube_position(),
-                cube_linear_velocity=cube_velocity,
-                grasp=observed,
+            time_s=float(self.robot.sim.data.time),
+            phase=self.phase,
+            left_target_rad=self.robot._left_target,
+            left_actual_rad=self.robot.left_joint_positions,
+            hand_target_rad=self.robot.hand.target,
+            hand_actual_rad=self.robot.sim.data.qpos[
+                self.robot.sim.hand.qpos_ids
+            ],
+            palm_target_position=palm_target_position,
+            palm_actual_position=self.robot.left_palm_pose()[:3, 3],
+            cube_position=self._cube_position(),
+            cube_linear_velocity=cube_velocity,
+            grasp=observed,
         )
         self.samples.append(sample)
         if self.trace is not None:
@@ -419,12 +501,29 @@ class PickPlaceTask:
         observation = self.samples[-1].grasp
         if observation.max_hand_actuator_force > self.monitor.abort_force:
             raise RuntimeError("hand force limit exceeded")
+        if (
+            self._cube_position()[2] - self._cube_half_height_m
+            < self._support_top_m - 0.002
+        ):
+            raise RuntimeError("cube penetrated a task support")
+        if (
+            self._carry_verified
+            and self.phase is PickPlacePhase.TRANSFER
+            and (
+                self._cube_position()[2] < self._cube_initial[2] + 0.05
+                or observation.hand_contact_count == 0
+            )
+        ):
+            raise RuntimeError("cube dropped during transfer")
 
-    def _acceptance_motion_passed(self) -> bool:
-        cube = np.asarray([sample.cube_position for sample in self.samples])
-        lift = float(cube[:, 2].max() - cube[0, 2])
-        transfer = float(np.linalg.norm(cube[-1, :2] - cube[0, :2]))
-        return lift >= 0.08 and transfer >= 0.15
+    def _require_carried_cube(self, *, minimum_lift_m: float) -> None:
+        observation = self.monitor.observe(self.robot.sim)
+        lift = float(self._cube_position()[2] - self._cube_initial[2])
+        if lift < minimum_lift_m or observation.hand_contact_count == 0:
+            raise RuntimeError(
+                f"cube dropped during {self.phase.value} "
+                f"(lift={lift:.3f} m, contacts={observation.hand_contact_count})"
+            )
 
     def _placed_in_target(self) -> bool:
         target = self.robot.sim.data.site_xpos[self._target_site]
@@ -439,6 +538,8 @@ class PickPlaceTask:
     def _abort(self, reason: str) -> PickPlaceResult:
         failed_phase = self.phase
         self.phase = PickPlacePhase.ABORTED
+        if self.trace is not None and hasattr(self.trace, "set_abort"):
+            self.trace.set_abort(reason)
         return PickPlaceResult(
             success=False,
             final_phase=PickPlacePhase.ABORTED,

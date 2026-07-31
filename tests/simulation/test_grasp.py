@@ -48,3 +48,15 @@ def test_contact_observation_is_finite_and_cube_specific():
             value.max_hand_actuator_force,
         )
     ).all()
+
+
+def test_opposing_contacts_must_come_from_different_hand_parts():
+    normal = np.asarray((1.0, 0.0, 0.0))
+    opposite = -normal
+
+    assert not GraspMonitor._has_opposing_parts(
+        ((12, normal), (12, opposite))
+    )
+    assert GraspMonitor._has_opposing_parts(
+        ((12, normal), (18, opposite))
+    )

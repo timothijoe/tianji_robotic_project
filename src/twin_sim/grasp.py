@@ -68,7 +68,7 @@ class GraspMonitor:
         cube_body = sim.require_body("pick_cube")
         palm_body = sim.require_body("left_palm_link")
         hand_bodies = self._descendants(sim.model, palm_body)
-        normals: list[np.ndarray] = []
+        contacts: list[tuple[int, np.ndarray]] = []
 
         for index in range(sim.data.ncon):
             contact = sim.data.contact[index]
@@ -78,15 +78,11 @@ class GraspMonitor:
             body2 = int(sim.model.geom_bodyid[geom2])
             normal = np.asarray(contact.frame[:3], dtype=float)
             if body1 in hand_bodies and body2 == cube_body:
-                normals.append(normal.copy())
+                contacts.append((body1, normal.copy()))
             elif body2 in hand_bodies and body1 == cube_body:
-                normals.append(-normal.copy())
+                contacts.append((body2, -normal.copy()))
 
-        opposing = any(
-            float(np.dot(first, second)) < -0.3
-            for offset, first in enumerate(normals)
-            for second in normals[offset + 1 :]
-        )
+        opposing = self._has_opposing_parts(contacts)
         cube_velocity = sim.data.cvel[cube_body]
         actuator_force = sim.data.actuator_force[sim.hand.actuator_ids]
         maximum_force = (
@@ -95,11 +91,23 @@ class GraspMonitor:
             else 0.0
         )
         return GraspObservation(
-            hand_contact_count=len(normals),
+            hand_contact_count=len(contacts),
             opposing_contacts=opposing,
             cube_linear_speed_m_s=float(np.linalg.norm(cube_velocity[3:])),
             cube_angular_speed_rad_s=float(np.linalg.norm(cube_velocity[:3])),
             max_hand_actuator_force=maximum_force,
+        )
+
+    @staticmethod
+    def _has_opposing_parts(
+        contacts: list[tuple[int, np.ndarray]]
+        | tuple[tuple[int, np.ndarray], ...],
+    ) -> bool:
+        return any(
+            first_body != second_body
+            and float(np.dot(first_normal, second_normal)) < -0.3
+            for offset, (first_body, first_normal) in enumerate(contacts)
+            for second_body, second_normal in contacts[offset + 1 :]
         )
 
     @staticmethod

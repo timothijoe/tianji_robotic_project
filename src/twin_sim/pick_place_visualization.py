@@ -62,6 +62,7 @@ class PickPlaceTrace:
         self.contact_count = int(contact_count)
         self.grasp_ready = bool(grasp_ready)
         self.abort_reason = str(abort_reason)
+        self._update_overlay()
         if self._sample_index % self._marker_stride == 0:
             self._draw(
                 (
@@ -71,6 +72,23 @@ class PickPlaceTrace:
                 )
             )
         self._sample_index += 1
+
+    def set_abort(self, reason: str) -> None:
+        self.phase = "aborted"
+        self.abort_reason = str(reason)
+        self._update_overlay()
+
+    def _update_overlay(self) -> None:
+        viewer = self._viewer
+        if viewer is None or not hasattr(viewer, "set_texts"):
+            return
+        status = (
+            f"phase={self.phase}  contacts={self.contact_count}  "
+            f"grasp_ready={self.grasp_ready}"
+        )
+        if self.abort_reason:
+            status += f"  abort={self.abort_reason}"
+        viewer.set_texts((None, None, "Pick-place", status))
 
     def _draw(
         self,
