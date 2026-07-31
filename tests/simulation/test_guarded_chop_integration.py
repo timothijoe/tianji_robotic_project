@@ -1,6 +1,12 @@
 import numpy as np
 
-from twin_sim.guarded_chop_safety import SafetyDecision
+import twin_sim.tasks.guarded_chop as guarded_chop
+from twin_sim.guarded_chop_safety import (
+    CAT_PAW_OPEN_RAD,
+    CAT_PAW_RAD,
+    SafetyDecision,
+)
+from twin_sim.robot import RightArmRobot
 from twin_sim.tasks.guarded_chop import (
     GuardedChopConfig,
     GuardedChopPhase,
@@ -8,7 +14,7 @@ from twin_sim.tasks.guarded_chop import (
 )
 
 
-def test_guarded_chop_executes_five_cuts_and_four_safe_shifts():
+def test_plane_mode_visibly_opens_shifts_and_closes_each_time():
     result = run_guarded_chop(
         GuardedChopConfig(final_hold_s=0.0), viewer=False
     )
@@ -21,7 +27,7 @@ def test_guarded_chop_executes_five_cuts_and_four_safe_shifts():
     assert result.minimum_distance_m >= 0.02
     assert max(
         sample.guard_cube_contact_count for sample in result.samples
-    ) >= 1
+    ) == 0
     assert max(
         sample.guard_cube_penetration_m for sample in result.samples
     ) <= 0.003
@@ -72,6 +78,102 @@ def test_guarded_chop_executes_five_cuts_and_four_safe_shifts():
         shift = [sample for sample in shifts if sample.cut_index == index]
         targets = np.asarray([sample.right_target_rad for sample in shift])
         assert np.max(np.ptp(targets, axis=0)) <= 1e-12
+
+    phases = [sample.phase for sample in result.samples]
+    assert phases.count(GuardedChopPhase.HAND_OPEN) > 0
+    assert phases.count(GuardedChopPhase.HAND_CLOSE) > 0
+    for index in range(1, 5):
+        opened = [
+            sample
+            for sample in result.samples
+            if sample.cut_index == index
+            and sample.phase is GuardedChopPhase.HAND_OPEN
+        ]
+        shifted = [
+            sample
+            for sample in result.samples
+            if sample.cut_index == index
+            and sample.phase is GuardedChopPhase.HAND_SHIFT
+        ]
+        closed = [
+            sample
+            for sample in result.samples
+            if sample.cut_index == index
+            and sample.phase is GuardedChopPhase.HAND_CLOSE
+        ]
+        assert opened and shifted and closed
+        assert opened[-1].time_s < shifted[0].time_s
+        assert shifted[-1].time_s < closed[0].time_s
+        np.testing.assert_allclose(
+            opened[-1].hand_target_rad,
+            CAT_PAW_OPEN_RAD,
+            rtol=0.0,
+            atol=1e-9,
+        )
+        assert np.max(
+            np.ptp(
+                np.asarray(
+                    [sample.hand_target_rad for sample in shifted]
+                ),
+                axis=0,
+            )
+        ) < 1e-9
+        np.testing.assert_allclose(
+            closed[-1].hand_target_rad,
+            CAT_PAW_RAD,
+            rtol=0.0,
+            atol=1e-9,
+        )
+        for hand_phase in (opened, shifted, closed):
+            right_targets = np.asarray(
+                [sample.right_target_rad for sample in hand_phase]
+            )
+            assert np.max(np.ptp(right_targets, axis=0)) <= 1e-12
+            assert max(
+                sample.right_speed_rad_s for sample in hand_phase
+            ) <= 0.05
+
+
+def test_plane_scene_keeps_guard_cube_hidden_and_collision_disabled():
+    robot = RightArmRobot(viewer=False)
+    try:
+        configure = getattr(
+            guarded_chop, "_configure_guarded_scene", None
+        )
+        assert callable(configure)
+        configure(robot, "plane")
+        cube = robot.sim.require_geom("guarded_chop_cube")
+        cube_body = int(robot.sim.model.geom_bodyid[cube])
+
+        assert robot.sim.model.geom_rgba[cube, 3] == 0.0
+        assert robot.sim.model.geom_contype[cube] == 0
+        assert robot.sim.model.geom_conaffinity[cube] == 0
+        assert robot.sim.model.body_contype[cube_body] == 0
+        assert robot.sim.model.body_conaffinity[cube_body] == 0
+    finally:
+        robot.close()
+
+
+def test_object_mode_retains_contact_latched_hand():
+    result = run_guarded_chop(
+        GuardedChopConfig(scene_mode="object", final_hold_s=0.0),
+        viewer=False,
+    )
+
+    assert result.success, result.reason
+    assert max(
+        sample.guard_cube_contact_count for sample in result.samples
+    ) >= 1
+    shifts = [
+        sample
+        for sample in result.samples
+        if sample.phase is GuardedChopPhase.HAND_SHIFT
+    ]
+    assert shifts
+    assert max(
+        np.linalg.norm(sample.hand_target_rad - CAT_PAW_RAD)
+        for sample in shifts
+    ) > 1e-3
 
 
 def test_rejected_safety_decision_aborts_both_arm_sequence():

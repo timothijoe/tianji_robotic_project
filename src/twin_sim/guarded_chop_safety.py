@@ -95,7 +95,7 @@ class SafetyCoordinator:
             or value.hand_speed_rad_s > 0.05
         ):
             return SafetyDecision(False, "left guard moved during cut")
-        if phase == "HAND_SHIFT" and (
+        if phase in {"HAND_OPEN", "HAND_SHIFT", "HAND_CLOSE"} and (
             not value.right_target_stationary
             or value.right_speed_rad_s > 0.05
             or value.knife_height_m < value.safe_knife_height_m

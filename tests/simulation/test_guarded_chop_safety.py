@@ -1,3 +1,5 @@
+import pytest
+
 from twin_sim.guarded_chop_safety import (
     SafetyCoordinator,
     SafetyObservation,
@@ -37,10 +39,13 @@ def test_cut_requires_stationary_guard_and_clearance():
     assert "distance" in decision.reason
 
 
-def test_shift_requires_raised_stationary_knife():
+@pytest.mark.parametrize(
+    "phase", ("HAND_OPEN", "HAND_SHIFT", "HAND_CLOSE")
+)
+def test_left_hand_phase_requires_raised_stationary_knife(phase):
     coordinator = SafetyCoordinator(minimum_distance_m=0.02)
     allowed = observation(
-        phase="HAND_SHIFT",
+        phase=phase,
         knife_height_m=0.36,
         right_target_stationary=True,
         left_target_stationary=False,
@@ -49,9 +54,17 @@ def test_shift_requires_raised_stationary_knife():
     assert coordinator.evaluate(allowed).allowed
     assert not coordinator.evaluate(
         observation(
-            phase="HAND_SHIFT",
+            phase=phase,
             knife_height_m=0.33,
             right_target_stationary=True,
+            left_target_stationary=False,
+        )
+    ).allowed
+    assert not coordinator.evaluate(
+        observation(
+            phase=phase,
+            knife_height_m=0.36,
+            right_target_stationary=False,
             left_target_stationary=False,
         )
     ).allowed
@@ -77,7 +90,10 @@ def test_excessive_guard_contact_is_rejected():
     ).allowed
 
 
-def test_actual_arm_motion_blocks_interlocked_phase():
+@pytest.mark.parametrize(
+    "phase", ("HAND_OPEN", "HAND_SHIFT", "HAND_CLOSE")
+)
+def test_actual_arm_motion_blocks_interlocked_phase(phase):
     coordinator = SafetyCoordinator()
 
     assert not coordinator.evaluate(
@@ -88,7 +104,7 @@ def test_actual_arm_motion_blocks_interlocked_phase():
     ).allowed
     assert not coordinator.evaluate(
         observation(
-            phase="HAND_SHIFT",
+            phase=phase,
             right_target_stationary=True,
             left_target_stationary=False,
             right_speed_rad_s=0.06,

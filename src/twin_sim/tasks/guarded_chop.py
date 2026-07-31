@@ -6,6 +6,7 @@ import mujoco
 import numpy as np
 
 from twin_sim.guarded_chop_safety import (
+    CAT_PAW_OPEN_RAD,
     CAT_PAW_RAD,
     SafetyCoordinator,
     SafetyObservation,
@@ -198,6 +199,20 @@ def _point_to_box_distance(
     local = rotation_array.T @ (point_array - center_array)
     closest = np.clip(local, -size_array, size_array)
     return float(np.linalg.norm(local - closest))
+
+
+def _joint_trajectory(
+    start_rad: Sequence[float],
+    goal_rad: Sequence[float],
+    duration_s: float,
+    dt_s: float,
+) -> tuple[np.ndarray, ...]:
+    steps = int(round(duration_s / dt_s))
+    blend = np.linspace(0.0, 1.0, steps + 1)
+    smooth = blend * blend * (3.0 - 2.0 * blend)
+    start = np.asarray(start_rad, dtype=float)
+    goal = np.asarray(goal_rad, dtype=float)
+    return tuple(start + value * (goal - start) for value in smooth)
 
 
 def _preflight_guarded_chop(
@@ -496,7 +511,7 @@ def run_guarded_chop(
     completed_shifts = 0
     try:
         plan = _preflight_guarded_chop(robot, config)
-        _activate_guarded_scene(robot)
+        _configure_guarded_scene(robot, config.scene_mode)
         robot.reset(plan.right_ready_rad)
         robot.sim.data.qpos[robot.sim.left.qpos_ids] = plan.left_ready_rad
         robot.sim.data.qvel[robot.sim.left.dof_ids] = 0.0
@@ -508,9 +523,14 @@ def run_guarded_chop(
         robot.sim.data.ctrl[robot.sim.hand.actuator_ids] = CAT_PAW_RAD
         mujoco.mj_forward(robot.sim.model, robot.sim.data)
 
-        cube_site = robot.sim.require_site("guarded_chop_cube_center")
-        cube_position = robot.sim.data.site_xpos[cube_site].copy()
-        cube_rotation = robot.sim.data.site_xmat[cube_site].copy()
+        cube_pose = None
+        if config.scene_mode == "object":
+            cube_site = robot.sim.require_site("guarded_chop_cube_center")
+            cube_pose = (
+                cube_site,
+                robot.sim.data.site_xpos[cube_site].copy(),
+                robot.sim.data.site_xmat[cube_site].copy(),
+            )
         last_left_target = robot._left_target.copy()
         last_right_target = robot._right_target.copy()
 
@@ -565,8 +585,11 @@ def run_guarded_chop(
         def wait_for_guard_stability(
             current_phase: GuardedChopPhase,
             cut_index: int,
+            *,
+            latch_contact: bool,
         ) -> None:
-            latch_hand_pose()
+            if latch_contact:
+                latch_hand_pose()
             stable_time = 0.0
             maximum_steps = int(
                 round(config.stability_timeout_s / config.control_dt_s)
@@ -594,7 +617,11 @@ def run_guarded_chop(
             int(round(config.guard_ready_duration_s / config.control_dt_s))
         ):
             step_and_record(phase, 0)
-        wait_for_guard_stability(phase, 0)
+        wait_for_guard_stability(
+            phase,
+            0,
+            latch_contact=config.scene_mode == "object",
+        )
 
         for index, cut in enumerate(plan.cuts, start=1):
             phase = GuardedChopPhase.CUT_DOWN
@@ -613,12 +640,44 @@ def run_guarded_chop(
                 step_and_record(phase, index)
 
             if index <= len(plan.guard_shifts):
-                phase = GuardedChopPhase.HAND_SHIFT
-                for point in plan.guard_shifts[index - 1][1:]:
-                    robot.command_left(point.joints_rad)
-                    latch_hand_pose()
-                    step_and_record(phase, index)
-                wait_for_guard_stability(phase, index)
+                if config.scene_mode == "plane":
+                    phase = GuardedChopPhase.HAND_OPEN
+                    for target in _joint_trajectory(
+                        CAT_PAW_RAD,
+                        CAT_PAW_OPEN_RAD,
+                        config.hand_open_duration_s,
+                        config.control_dt_s,
+                    )[1:]:
+                        robot.hand.command(target)
+                        step_and_record(phase, index)
+
+                    phase = GuardedChopPhase.HAND_SHIFT
+                    for point in plan.guard_shifts[index - 1][1:]:
+                        robot.command_left(point.joints_rad)
+                        robot.hand.command(CAT_PAW_OPEN_RAD)
+                        step_and_record(phase, index)
+
+                    phase = GuardedChopPhase.HAND_CLOSE
+                    for target in _joint_trajectory(
+                        CAT_PAW_OPEN_RAD,
+                        CAT_PAW_RAD,
+                        config.hand_close_duration_s,
+                        config.control_dt_s,
+                    )[1:]:
+                        robot.hand.command(target)
+                        step_and_record(phase, index)
+                    wait_for_guard_stability(
+                        phase, index, latch_contact=False
+                    )
+                else:
+                    phase = GuardedChopPhase.HAND_SHIFT
+                    for point in plan.guard_shifts[index - 1][1:]:
+                        robot.command_left(point.joints_rad)
+                        latch_hand_pose()
+                        step_and_record(phase, index)
+                    wait_for_guard_stability(
+                        phase, index, latch_contact=True
+                    )
                 completed_shifts += 1
 
         phase = GuardedChopPhase.COMPLETE
@@ -628,12 +687,14 @@ def run_guarded_chop(
         for _ in range(complete_steps):
             step_and_record(phase, config.cuts)
 
-        np.testing.assert_array_equal(
-            robot.sim.data.site_xpos[cube_site], cube_position
-        )
-        np.testing.assert_array_equal(
-            robot.sim.data.site_xmat[cube_site], cube_rotation
-        )
+        if cube_pose is not None:
+            cube_site, cube_position, cube_rotation = cube_pose
+            np.testing.assert_array_equal(
+                robot.sim.data.site_xpos[cube_site], cube_position
+            )
+            np.testing.assert_array_equal(
+                robot.sim.data.site_xmat[cube_site], cube_rotation
+            )
         minimum = min(
             sample.knife_guard_distance_m for sample in samples
         )
@@ -672,29 +733,47 @@ def run_guarded_chop(
         robot.close()
 
 
-def _activate_guarded_scene(robot: RightArmRobot) -> None:
+def _configure_guarded_scene(
+    robot: RightArmRobot, scene_mode: Literal["plane", "object"]
+) -> None:
     cube = robot.sim.require_geom("guarded_chop_cube")
     cube_body = int(robot.sim.model.geom_bodyid[cube])
-    robot.sim.model.geom_rgba[cube] = (0.75, 0.18, 0.12, 1.0)
     guard_contact_bit = 8
-    robot.sim.model.geom_contype[cube] = guard_contact_bit
-    robot.sim.model.geom_conaffinity[cube] = guard_contact_bit
-    robot.sim.model.body_contype[cube_body] = guard_contact_bit
-    robot.sim.model.body_conaffinity[cube_body] = guard_contact_bit
-    for name in (
-        "left_finger3_pad",
-        "right_knife_blade",
-    ):
+    if scene_mode == "object":
+        robot.sim.model.geom_rgba[cube] = (0.75, 0.18, 0.12, 1.0)
+        robot.sim.model.geom_contype[cube] = guard_contact_bit
+        robot.sim.model.geom_conaffinity[cube] = guard_contact_bit
+        robot.sim.model.body_contype[cube_body] = guard_contact_bit
+        robot.sim.model.body_conaffinity[cube_body] = guard_contact_bit
+    elif scene_mode == "plane":
+        robot.sim.model.geom_rgba[cube, 3] = 0.0
+        robot.sim.model.geom_contype[cube] = 0
+        robot.sim.model.geom_conaffinity[cube] = 0
+        robot.sim.model.body_contype[cube_body] = 0
+        robot.sim.model.body_conaffinity[cube_body] = 0
+    else:
+        raise ValueError("scene_mode must be 'plane' or 'object'")
+
+    guarded_geoms = ("left_finger3_pad", "right_knife_blade")
+    for name in guarded_geoms:
         geom = robot.sim.require_geom(name)
-        robot.sim.model.geom_contype[geom] |= guard_contact_bit
-        robot.sim.model.geom_conaffinity[geom] |= guard_contact_bit
+        if scene_mode == "object":
+            robot.sim.model.geom_contype[geom] |= guard_contact_bit
+            robot.sim.model.geom_conaffinity[geom] |= guard_contact_bit
+        else:
+            robot.sim.model.geom_contype[geom] &= ~guard_contact_bit
+            robot.sim.model.geom_conaffinity[geom] &= ~guard_contact_bit
         if name == "right_knife_blade":
             robot.sim.model.geom_contype[geom] |= 2
             robot.sim.model.geom_conaffinity[geom] |= 2
         body = int(robot.sim.model.geom_bodyid[geom])
         while body:
-            robot.sim.model.body_contype[body] |= guard_contact_bit
-            robot.sim.model.body_conaffinity[body] |= guard_contact_bit
+            if scene_mode == "object":
+                robot.sim.model.body_contype[body] |= guard_contact_bit
+                robot.sim.model.body_conaffinity[body] |= guard_contact_bit
+            else:
+                robot.sim.model.body_contype[body] &= ~guard_contact_bit
+                robot.sim.model.body_conaffinity[body] &= ~guard_contact_bit
             if name == "right_knife_blade":
                 robot.sim.model.body_contype[body] |= 2
                 robot.sim.model.body_conaffinity[body] |= 2
@@ -720,6 +799,10 @@ def _activate_guarded_scene(robot: RightArmRobot) -> None:
         ):
             robot.sim.model.geom_contype[geom] = 0
             robot.sim.model.geom_conaffinity[geom] = 0
+
+
+def _activate_guarded_scene(robot: RightArmRobot) -> None:
+    _configure_guarded_scene(robot, "object")
 
 
 def _safety_observation(
