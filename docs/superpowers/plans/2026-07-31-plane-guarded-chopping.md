@@ -56,7 +56,7 @@ def test_plane_mode_and_open_close_phases_are_defaults():
 
 - [ ] **Step 2: Verify the tests fail for missing interfaces**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_posture.py tests/simulation/test_guarded_chop_state_machine.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_posture.py tests/simulation/test_guarded_chop_state_machine.py -q`
 Expected: FAIL because `CAT_PAW_OPEN_RAD`, `scene_mode`, `HAND_OPEN`, and `HAND_CLOSE` do not exist.
 
 - [ ] **Step 3: Add the open posture, mode validation, and phases**
@@ -88,7 +88,7 @@ positive, finite, control-step-aligned duration checks.
 
 - [ ] **Step 4: Run focused tests**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_posture.py tests/simulation/test_guarded_chop_state_machine.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_posture.py tests/simulation/test_guarded_chop_state_machine.py -q`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -135,7 +135,7 @@ independent of an open Viewer.
 
 - [ ] **Step 2: Run the direction test and confirm the current order fails**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_preflight.py::test_preflight_orders_knife_and_guard_motion_screen_right_to_left -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_preflight.py::test_preflight_orders_knife_and_guard_motion_screen_right_to_left -q`
 Expected: FAIL because current points advance left-to-right in the default Viewer.
 
 - [ ] **Step 3: Reverse only the point order before building trajectories**
@@ -161,7 +161,7 @@ preflight checks.
 
 - [ ] **Step 4: Run preflight and clearance tests**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_preflight.py tests/simulation/test_guarded_chop_posture.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_preflight.py tests/simulation/test_guarded_chop_posture.py -q`
 Expected: PASS with five right-to-left points and four matching guard deltas.
 
 - [ ] **Step 5: Commit**
@@ -210,7 +210,7 @@ that the cube alpha and collision masks remain disabled.
 
 - [ ] **Step 2: Run integration tests and verify missing phases fail**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_integration.py -q -s`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_integration.py -q -s`
 Expected: FAIL because the current state machine shifts with a latched hand and activates the cube.
 
 - [ ] **Step 3: Implement joint interpolation and mode-specific scene activation**
@@ -262,7 +262,7 @@ speed checks.
 
 - [ ] **Step 5: Run safety and integration tests**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_safety.py tests/simulation/test_guarded_chop_integration.py -q -s`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_safety.py tests/simulation/test_guarded_chop_integration.py -q -s`
 Expected: PASS with five cuts, four explicit open-shift-close cycles, zero plane cube contact, and zero blade-hand contact.
 
 - [ ] **Step 6: Commit**
@@ -310,7 +310,7 @@ Update `FakeScene.maxgeom` high enough for five cut marks plus trail segments.
 
 - [ ] **Step 2: Run visualization tests and confirm the old four-sphere API fails**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py -q`
 Expected: FAIL because `set_plan` and continuous trail rendering do not exist.
 
 - [ ] **Step 3: Implement bounded line/capsule rendering**
@@ -331,7 +331,7 @@ static, cyan and purple trails grow from actual samples.
 
 - [ ] **Step 5: Run visualization and integration tests**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py tests/simulation/test_guarded_chop_integration.py -q -s`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py tests/simulation/test_guarded_chop_integration.py -q -s`
 Expected: PASS; no test expects yellow target spheres.
 
 - [ ] **Step 6: Commit**
@@ -370,7 +370,7 @@ def test_guarded_chop_cli_accepts_object_scene():
 
 - [ ] **Step 2: Run the parser tests and verify `scene` is absent**
 
-Run: `.venv/bin/pytest tests/simulation/test_cli.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_cli.py -q`
 Expected: FAIL because `--scene` is not registered.
 
 - [ ] **Step 3: Add the CLI argument and pass it into configuration**
@@ -402,26 +402,26 @@ calibration and is not the default demonstration.
 
 - [ ] **Step 5: Run targeted verification**
 
-Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_*.py tests/simulation/test_cli.py -q`  
+Run: `.venv/bin/pytest tests/simulation/test_guarded_chop_*.py tests/simulation/test_cli.py -q`
 Expected: all targeted tests pass.
 
 - [ ] **Step 6: Run full verification**
 
-Run: `.venv/bin/pytest -q`  
+Run: `.venv/bin/pytest -q`
 Expected: all tests pass; only the pre-existing chop contact-force warning may remain.
 
-Run: `.venv/bin/twin-sim guarded-chop --headless --final-hold 0`  
+Run: `.venv/bin/twin-sim guarded-chop --headless --final-hold 0`
 Expected: `success=True cuts=5 shifts=4 total_shift_m=0.080`.
 
-Run: `sha256sum -c docs/simulation/protected-files.sha256`  
+Run: `sha256sum -c docs/simulation/protected-files.sha256`
 Expected: every protected real-robot and SDK file reports `OK`.
 
-Run: `git diff --check`  
+Run: `git diff --check`
 Expected: no output and exit code 0.
 
 - [ ] **Step 7: Perform one Viewer acceptance run**
 
-Run: `.venv/bin/twin-sim guarded-chop --final-hold 10`  
+Run: `.venv/bin/twin-sim guarded-chop --final-hold 10`
 Expected: five screen-right-to-left cuts; four clearly visible open-shift-close
 cycles; blue/cyan/purple trails and five compact cut marks; automatic success exit.
 

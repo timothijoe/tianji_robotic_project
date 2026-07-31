@@ -1,7 +1,7 @@
 # 左臂 + Wuji Hand 抓取放置开发日志
 
-日期：2026-07-31  
-分支：`feature/left-wuji-pick-place`  
+日期：2026-07-31
+分支：`feature/left-wuji-pick-place`
 基线：`58ec9ab`
 
 ## 目标与边界

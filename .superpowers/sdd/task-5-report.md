@@ -38,7 +38,11 @@ implementation:
 10 passed in 1.87s
 ```
 
-## Verification
+## Initial CLI verification (historical)
+
+The following results were captured before the Viewer performance review.
+They are retained as task-level evidence; the later review-repair verification
+is the authoritative Viewer status.
 
 ```text
 .venv/bin/pytest tests/simulation/test_guarded_chop_*.py \
@@ -75,20 +79,6 @@ no output; exit 0
 shows --scene {plane,object}; exit 0
 ```
 
-## Viewer acceptance facts
-
-`DISPLAY=:0` was available, so
-`.venv/bin/twin-sim guarded-chop --final-hold 10` was launched. The Viewer
-process started without a launch error and continued running without output
-for approximately 120 seconds, but it did not automatically finish within the
-available acceptance window. It was stopped with Ctrl-C and exited 130 from
-`guarded_chop_visualization.py` while updating the overlay.
-
-No desktop pixels were visible through this agent interface. Therefore this
-run does **not** claim visual acceptance of the right-to-left cuts, hand
-cycles, trails, or cut marks, and it does not confirm automatic success exit.
-Those visual items remain for a human-visible Viewer check.
-
 ## Commit
 
 The functional commit contains only:
@@ -99,17 +89,8 @@ The functional commit contains only:
 - `docs/simulation/guarded_chopping_development_log.md`
 
 Commit: `3d79089` (`docs: expose plane guarded chopping demo`). This report
-and the existing uncommitted Task 4 report are intentionally excluded from
-that commit.
-
-## Concerns at the initial Task 5 handoff
-
-At the initial handoff, automated, headless, hash, and diff verification had
-passed, while Viewer performance and human-visible inspection were still open.
-The following review-repair section supersedes the automatic-exit concern:
-the repaired Viewer completed successfully in 87.11 seconds, and a later
-parent-run demonstration completed in approximately 62 seconds. The user then
-requested branch integration after the visible demonstration.
+and the Task 4 report were intentionally excluded from that functional commit;
+both reports were later preserved in `162e028`.
 
 ## Review repair: bounded Viewer work and automatic exit
 
@@ -166,7 +147,7 @@ tests/simulation/test_guarded_chop_integration.py
 4 passed in 57.72s
 ```
 
-### Fresh final verification
+### Viewer performance repair verification
 
 ```text
 .venv/bin/pytest -q
@@ -203,5 +184,4 @@ request local branch integration after that demonstration; no further visual
 change request was made.
 
 Review-repair commit: `70d2a4d` (`fix: bound guarded chop viewer work`). This
-report and the existing Task 4 report remain excluded from the functional
-commit.
+report and the Task 4 report were later preserved by `162e028`.

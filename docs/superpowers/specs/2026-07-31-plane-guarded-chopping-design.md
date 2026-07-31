@@ -1,13 +1,14 @@
 # 平面版右向左猫爪倒手切菜设计
 
-日期：2026-07-31  
+日期：2026-07-31
 分支：`feature/left-wuji-pick-place`
 
-## 实现进展（截至 2026-08-01）
+## 实现进展（截至最终审查修复）
 
-本设计的代码实现、自动测试和 Viewer 自动退出验证已经完成。当前 HEAD 为
-`70d2a4d`，本轮平面版共有 9 个本地提交，尚未推送到远端；远端
-`origin/feature/left-wuji-pick-place` 仍停在物体版安全收尾提交 `8fcaedf`。
+本设计的代码实现、自动测试、Viewer 自动退出验证和最终审查修复均已完成。
+进展采用提交清单记录，不绑定容易过期的 HEAD、领先提交数或远端位置。
+Task 4、Task 5 报告已经由 `162e028` 纳入分支；后续是否推送或集成由分支
+维护者决定。
 
 | 模块 | 状态 | 证据 |
 | --- | --- | --- |
@@ -17,9 +18,10 @@
 | 三色轨迹与落刀标记 | 已完成 | 蓝色计划、青色实际刀、紫色实际护手、5 个紧凑标记 |
 | 安全互锁 | 已完成 | 刀手距离、20 手指速度、阶段互锁与零刀手接触测试通过 |
 | Viewer 性能与自动退出 | 已完成 | 约 33 Hz 任务局部同步；最近一次约 62 秒自动成功退出 |
-| 自动验收 | 已完成 | 全量 169 项通过；headless 完成 5 刀/4 次/0.08 m；保护哈希通过 |
+| 自动验收 | 已完成 | 最终审查后全量、plane/object、保护哈希和 range diff-check 均重新验证 |
 | 人工视觉验收 | 待用户明确确认 | 仍需确认方向、手指张合、三色轨迹和 5 个标记的肉眼效果 |
-| 推送与最终整分支审查 | 待完成 | 本地相对远端领先 9 个提交 |
+| 最终整分支审查 | 已完成 | 安全高度、自定义模型兼容性、Viewer 关闭和文档状态均已修复 |
+| 推送与集成 | 待维护者决定 | 本文不记录易过期的远端领先数量 |
 
 实现提交按顺序为：
 
@@ -33,6 +35,9 @@ ffe86c8 feat: order guarded cuts right to left
 345dfe6 fix: prioritize guarded chop cut marks
 3d79089 docs: expose plane guarded chopping demo
 70d2a4d fix: bound guarded chop viewer work
+c8e818a docs: record plane guarded chop progress
+162e028 docs: preserve guarded chop task reports
+66d3c05 fix: close guarded chop safety review gaps
 ```
 
 ## 目标
@@ -144,6 +149,11 @@ ffe86c8 feat: order guarded cuts right to left
 范数不超过 0.05 rad/s。刀片与全部 20 个启用且命名的手部碰撞代理兼容，集成
 运行的真实刀手接触数为零。
 
+最终审查取消了安全协调器输入中的隐式 `-0.005 m` 放宽；三种左手阶段均直接
+使用规划安全高度。为补偿位置伺服约 4.36 mm 的稳态跟踪下沉，抬刀轨迹目标
+显式增加 0.006 m 跟踪余量，安全线本身不变，集成测试直接检查三种阶段的实际
+刀底高度均达到规划值。
+
 物体模式保留独立 bit 8 的方块—中指指垫配对、最大 0.003 m 穿入和 35 N
 法向力限制；平面模式不启用这些方块接触规则。
 
@@ -182,27 +192,29 @@ ffe86c8 feat: order guarded cuts right to left
 最新验证结果为：
 
 ```text
-全量 pytest：169 passed，1 条既有接触力 warning
+全量 pytest：173 passed，1 条既有接触力 warning
 默认 plane headless：success=True cuts=5 shifts=4
-total_shift_m=0.080 min_distance_m=0.044 reason=-
+total_shift_m=0.080 min_distance_m=0.049 reason=-
+object headless：success=True cuts=5 shifts=4
+total_shift_m=0.080 min_distance_m=0.062 reason=-
+规划安全高度：0.417999569 m
+HAND_OPEN/SHIFT/CLOSE 实际最低刀高：0.419658321 m 以上
 实体机/SDK 保护文件：全部 OK
-git diff --check：通过
-Viewer：约 62 秒自动 success / exit 0
+git diff --check 98bfc6b..HEAD：通过
+Viewer（70d2a4d 验收）：约 62 秒自动 success / exit 0
 ```
 
 唯一 warning 来自既有切菜力监控用例：接触力 39.611 N 超过 30 N warning
 阈值，不是本轮平面猫爪功能新增失败。
 
 子任务审查状态：Task 1–3 均一次通过；Task 4 的几何预算优先级和旧 API 问题
-修复后通过；Task 5 的 Viewer 性能问题修复后代码质量获批。当前只剩人工视觉
-验收尚未由用户明确确认。
+修复后通过；Task 5 的 Viewer 性能问题修复后代码质量获批；最终整分支审查的
+安全高度、自定义模型 API、Viewer 线程关闭和文档问题也已修复。当前只剩人工
+视觉验收尚未由用户明确确认。
 
 ## 未完成项
 
 1. 用户确认 Viewer 中刀具确实从右向左推进。
 2. 用户确认每次倒手能明显看见手指张开、左移、重新收拢。
 3. 用户确认蓝、青、紫轨迹和 5 个落刀标记清楚可辨。
-4. 处理 `.superpowers/sdd/task-4-report.md` 与 `task-5-report.md` 的未提交修改，
-   保持产品工作区状态明确。
-5. 完成人工视觉确认后的整分支最终审查和新鲜全量验证。
-6. 将本地领先远端的 9 个提交推送到 `feature/left-wuji-pick-place`，并更新 PR。
+4. 由分支维护者决定是否推送、集成或更新 PR。
