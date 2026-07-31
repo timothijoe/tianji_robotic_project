@@ -143,10 +143,10 @@
     <position name="act_left_joint5" joint="left_joint5" kp="1920" kv="64" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-18 18" />
     <position name="act_left_joint6" joint="left_joint6" kp="1280" kv="48" ctrllimited="true" ctrlrange="-1.0467 1.0467" forcelimited="true" forcerange="-18 18" />
     <position name="act_left_joint7" joint="left_joint7" kp="960" kv="40" ctrllimited="true" ctrlrange="-1.57 1.57" forcelimited="true" forcerange="-18 18" />
-    <position name="act_right_joint1" joint="right_joint1" kp="6144" kv="158" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-108 108" />
+    <position name="act_right_joint1" joint="right_joint1" kp="7373" kv="173" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-108 108" />
     <position name="act_right_joint2" joint="right_joint2" kp="5120" kv="144" ctrllimited="true" ctrlrange="-2.093 2.093" forcelimited="true" forcerange="-108 108" />
     <position name="act_right_joint3" joint="right_joint3" kp="4608" kv="123" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-66 66" />
-    <position name="act_right_joint4" joint="right_joint4" kp="3200" kv="96" ctrllimited="true" ctrlrange="-2.531 1.047" forcelimited="true" forcerange="-66 66" />
+    <position name="act_right_joint4" joint="right_joint4" kp="3840" kv="105" ctrllimited="true" ctrlrange="-2.531 1.047" forcelimited="true" forcerange="-66 66" />
     <position name="act_right_joint5" joint="right_joint5" kp="1920" kv="64" ctrllimited="true" ctrlrange="-3.11 3.11" forcelimited="true" forcerange="-18 18" />
     <position name="act_right_joint6" joint="right_joint6" kp="1280" kv="48" ctrllimited="true" ctrlrange="-1.0467 1.0467" forcelimited="true" forcerange="-18 18" />
     <position name="act_right_joint7" joint="right_joint7" kp="960" kv="40" ctrllimited="true" ctrlrange="-1.57 1.57" forcelimited="true" forcerange="-18 18" />
