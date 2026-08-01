@@ -4,8 +4,10 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import tempfile
-from typing import Sequence
+import time
+from typing import Callable, Sequence
 
+import mujoco
 import numpy as np
 
 
@@ -196,3 +198,68 @@ def load_recording(path: Path, model) -> GuardedChopRecording:
             for index in range(count)
         )
     return GuardedChopRecording(frames)
+
+
+def _validated_replay_rate(rate: float) -> float:
+    value = float(rate)
+    if not np.isfinite(value) or value <= 0.0:
+        raise ValueError("rate must be positive and finite")
+    return value
+
+
+def replay_recording(
+    robot,
+    recording: GuardedChopRecording,
+    *,
+    rate: float,
+    trace=None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    playback_rate = _validated_replay_rate(rate)
+    if recording.model_dimensions != (
+        int(robot.sim.model.nq),
+        int(robot.sim.model.nv),
+        int(robot.sim.model.nu),
+    ):
+        raise ValueError("recording model dimensions do not match robot model")
+    if trace is not None:
+        trace.begin_replay(playback_rate)
+
+    times = np.asarray([frame.time_s for frame in recording.frames])
+    positive_deltas = np.diff(times)
+    positive_deltas = positive_deltas[positive_deltas > 0.0]
+    wall_step = (
+        float(np.median(positive_deltas)) / playback_rate
+        if positive_deltas.size
+        else 1.0 / 30.0
+    )
+    sync_stride = max(1, int(round((1.0 / 30.0) / wall_step)))
+    last_index = len(recording.frames) - 1
+
+    for index, frame in enumerate(recording.frames):
+        robot.sim.data.time = frame.time_s
+        robot.sim.data.qpos[:] = frame.qpos
+        robot.sim.data.qvel[:] = frame.qvel
+        robot.sim.data.ctrl[:] = frame.ctrl
+        mujoco.mj_forward(robot.sim.model, robot.sim.data)
+        if trace is not None:
+            trace.append(
+                actual_knife=frame.knife_position,
+                actual_guard=frame.guard_position,
+                phase=frame.phase,
+                cut_index=frame.cut_index,
+                minimum_distance_m=frame.minimum_distance_m,
+                cut_allowed=frame.cut_allowed,
+            )
+        viewer = robot._viewer
+        if viewer is not None and (
+            index % sync_stride == 0 or index == last_index
+        ):
+            viewer.sync()
+        if index < last_index:
+            delay = max(
+                0.0,
+                (recording.frames[index + 1].time_s - frame.time_s)
+                / playback_rate,
+            )
+            sleep(delay)

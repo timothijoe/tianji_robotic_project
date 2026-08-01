@@ -148,6 +148,38 @@ def test_abort_reason_replaces_live_phase():
     assert "clearance lost" in viewer.texts[3]
 
 
+def test_begin_replay_clears_actual_trails_and_labels_overlay():
+    viewer = FakeViewer()
+    trace = GuardedChopTrace(viewer, marker_stride=1)
+    trace.set_plan(
+        [(0.7, y, 0.33) for y in (0.04, 0.02, 0.0, -0.02, -0.04)]
+    )
+    trace.append(
+        actual_knife=(0.7, 0.04, 0.35),
+        actual_guard=(0.6, 0.10, 0.36),
+        phase="cut_down",
+        cut_index=1,
+        minimum_distance_m=0.04,
+        cut_allowed=True,
+    )
+    trace.append(
+        actual_knife=(0.7, 0.02, 0.34),
+        actual_guard=(0.6, 0.08, 0.36),
+        phase="cut_down",
+        cut_index=1,
+        minimum_distance_m=0.04,
+        cut_allowed=True,
+    )
+
+    trace.begin_replay(2.0)
+
+    assert len(trace.cut_points) == 5
+    assert list(trace.actual_knife) == []
+    assert list(trace.actual_guard) == []
+    assert viewer.user_scn.ngeom == 9
+    assert "replay 2.0x" in viewer.texts[3]
+
+
 @pytest.mark.parametrize("phase", ("low_guard_shift", "knife_lift_shift"))
 def test_overlay_displays_low_guard_sequence_phases(phase):
     viewer = FakeViewer()

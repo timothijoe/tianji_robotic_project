@@ -51,6 +51,7 @@ class GuardedChopTrace:
         self.minimum_distance_m = float("inf")
         self.cut_allowed = False
         self.abort_reason = ""
+        self._replay_rate = None
 
     def set_plan(
         self, cut_points: Sequence[Sequence[float]]
@@ -134,11 +135,44 @@ class GuardedChopTrace:
         self.abort_reason = str(reason)
         self._update_overlay()
 
+    def begin_replay(self, rate: float) -> None:
+        playback_rate = float(rate)
+        if not np.isfinite(playback_rate) or playback_rate <= 0.0:
+            raise ValueError("rate must be positive and finite")
+        viewer = self._viewer
+        if (
+            viewer is not None
+            and getattr(viewer, "user_scn", None) is not None
+            and self._trail_geom_start is not None
+        ):
+            with viewer.lock():
+                viewer.user_scn.ngeom = self._trail_geom_start
+        self.actual_knife.clear()
+        self.actual_guard.clear()
+        self._sample_index = 0
+        self._last_drawn_actual_knife = None
+        self._last_drawn_actual_guard = None
+        self._trail_geom_count = 0
+        self._next_trail_geom = 0
+        self._last_overlay_status = None
+        self.minimum_distance_m = float("inf")
+        self.cut_allowed = False
+        self.abort_reason = ""
+        self.phase = ""
+        self.cut_index = 0
+        self._replay_rate = playback_rate
+        self._update_overlay()
+
     def _update_overlay(self) -> None:
         viewer = self._viewer
         if viewer is None or not hasattr(viewer, "set_texts"):
             return
-        status = (
+        replay = (
+            f"replay {self._replay_rate:.1f}x  "
+            if self._replay_rate is not None
+            else ""
+        )
+        status = replay + (
             f"cut={self.cut_index}/5  phase={self.phase}  "
             f"distance={self.minimum_distance_m:.3f} m  "
             f"cut_allowed={self.cut_allowed}"
