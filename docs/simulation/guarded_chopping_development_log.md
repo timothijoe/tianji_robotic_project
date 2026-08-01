@@ -3,6 +3,19 @@
 日期：2026-07-31
 分支：`feature/left-wuji-pick-place`
 
+## 2026-08-01：消除 Viewer 启动旧场景闪现
+
+用户观察到每次启动时会先出现通用举刀姿态、红色方块、绿色目标区和两个灰色
+底座，随后才突然切换到正确切菜姿态。排查确认模型中没有重复生成垃圾物体；根因
+是 `RightArmRobot(viewer=True)` 在 guarded-chop 预检、场景隐藏和 ready reset
+之前就打开了 passive Viewer，首屏因此显示通用模型默认状态。
+
+修复后机器人提供幂等 `open_viewer()`，原有 `viewer=True` 调用保持兼容；
+guarded-chop 则先以 headless 方式创建机器人，完成预检、场景配置、双臂与 Wuji
+Hand 初始状态以及 `mj_forward` 后才开窗、设置相机并创建轨迹 trace。预检失败时
+不会闪现窗口，headless 路径也不会调用 Viewer。现有 `GUARD_READY` 阶段在窗口
+打开后保持正确初始姿态，便于观察砧板和刀手位置。
+
 ## 2026-08-01：低刀位退手与斜向换刀
 
 人工观察上一版“右刀回升/横移与左手倒手同步”的动作后，确认真实需求并不是

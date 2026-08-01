@@ -61,3 +61,14 @@ Viewer 启动和线程识别逻辑移动到该方法。`RightArmRobot(viewer=Tru
 
 人工验收通过 `./scripts/run_guarded_chop.sh` 连续启动两次：窗口首帧不再出现红色、
 绿色或两个灰色抓取物体，右刀和左手从正确切菜初始姿态开始，保持后再执行动作。
+
+## 实现进展
+
+2026-08-01 已完成幂等 `RightArmRobot.open_viewer()` 和 guarded-chop 延迟开窗。
+自动启动顺序测试在 `open_viewer()` 调用时直接验证四个抓取物体均已隐藏、Wuji
+Hand 已处于猫爪姿态，并验证相机准备及 trace 创建发生在开窗之后。待完整回归和
+两次真实 Viewer 首帧检查完成后记录最终验收结果。
+
+完整仿真回归结果为 `186 passed`，另有 1 条既有接触力观测告警；平面 headless
+仍完成 5 刀、4 次倒手和 `0.080 m` 总退让，最小刀手距离 `0.039 m`，返回
+`success=True`。真实 Viewer 首帧检查仍待人工确认。

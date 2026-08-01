@@ -687,18 +687,34 @@ def run_guarded_chop(
         config.maximum_guard_penetration_m,
         config.maximum_guard_force_n,
     )
-    robot = RightArmRobot(viewer=viewer)
-    _prepare_guarded_chop_viewer(robot)
-    if trace is None and viewer:
-        from twin_sim.guarded_chop_visualization import GuardedChopTrace
-
-        trace = GuardedChopTrace(robot._viewer)
+    robot = RightArmRobot(viewer=False)
     samples: list[GuardedChopSample] = []
     phase = GuardedChopPhase.INITIALIZE
     completed_cuts = 0
     completed_shifts = 0
     try:
         plan = _preflight_guarded_chop(robot, config)
+        _configure_guarded_scene(robot, config.scene_mode)
+        robot.reset(plan.right_ready_rad)
+        robot.sim.data.qpos[robot.sim.left.qpos_ids] = plan.left_ready_rad
+        robot.sim.data.qvel[robot.sim.left.dof_ids] = 0.0
+        robot.command_left(plan.left_ready_rad)
+        robot.sim.data.qpos[robot.sim.hand.qpos_ids] = CAT_PAW_RAD
+        robot.sim.data.qvel[robot.sim.hand.dof_ids] = 0.0
+        robot.hand.command(CAT_PAW_RAD)
+        robot.sim.data.ctrl[robot.sim.left.actuator_ids] = plan.left_ready_rad
+        robot.sim.data.ctrl[robot.sim.hand.actuator_ids] = CAT_PAW_RAD
+        mujoco.mj_forward(robot.sim.model, robot.sim.data)
+
+        if viewer:
+            robot.open_viewer()
+            _prepare_guarded_chop_viewer(robot)
+            if trace is None:
+                from twin_sim.guarded_chop_visualization import (
+                    GuardedChopTrace,
+                )
+
+                trace = GuardedChopTrace(robot._viewer)
         if trace is not None:
             blade_contact_heights = np.asarray(
                 [
@@ -713,17 +729,6 @@ def run_guarded_chop(
                     (plan.cut_points_xy, blade_contact_heights)
                 )
             )
-        _configure_guarded_scene(robot, config.scene_mode)
-        robot.reset(plan.right_ready_rad)
-        robot.sim.data.qpos[robot.sim.left.qpos_ids] = plan.left_ready_rad
-        robot.sim.data.qvel[robot.sim.left.dof_ids] = 0.0
-        robot.command_left(plan.left_ready_rad)
-        robot.sim.data.qpos[robot.sim.hand.qpos_ids] = CAT_PAW_RAD
-        robot.sim.data.qvel[robot.sim.hand.dof_ids] = 0.0
-        robot.hand.command(CAT_PAW_RAD)
-        robot.sim.data.ctrl[robot.sim.left.actuator_ids] = plan.left_ready_rad
-        robot.sim.data.ctrl[robot.sim.hand.actuator_ids] = CAT_PAW_RAD
-        mujoco.mj_forward(robot.sim.model, robot.sim.data)
 
         cube_pose = None
         if config.scene_mode == "object":
