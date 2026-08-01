@@ -88,3 +88,22 @@ twin-sim guarded-chop-replay --recording "$recording_path" --rate 2.0
 当前可见手指优化和新脚本都直接开发在 `develop_9_kinematic_branch`。脚本、测试和文档
 完成并提交后，再根据用户指定的目标分支执行一次合并并在合并结果上重跑测试；在目标
 分支未明确前不猜测为 `main` 或 `develop_8_kinematic_branch`。
+
+## 实现与验证结果
+
+2026-08-01 已实现 `guarded-chop-replay` CLI 和两个可执行入口：
+
+```bash
+./scripts/run_guarded_chop_record.sh [recording.npz]
+./scripts/replay_guarded_chop_2x.sh [recording.npz]
+```
+
+原速度脚本真实 Viewer 运行返回 5 刀、4 次倒手、0.080 m 逻辑推进、0.057 m 最小刀手
+距离，并覆盖默认 latest。独立回放脚本不重新运行任务；命令墙钟时间约 25 秒，其中约
+10 秒用于 MuJoCo 预检和 Viewer 启动，状态播放部分约为 28.9 秒录制时长的一半。回放
+前后文件 SHA-256 均为
+`68f0e1ac43204ee1d8f6af2c47a3601e150a8441caa3a70a88d17bb10a948609`，mtime
+`1785593109`、大小 `1934223` 字节也保持不变。
+
+集中录制/回放/CLI/launcher 回归为 `35 passed`；完整回归为 `220 passed`，仅保留
+一条既有 39.611 N 接触力观测告警。目标分支合并仍等待用户明确指定。

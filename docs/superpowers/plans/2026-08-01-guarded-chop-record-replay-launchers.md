@@ -29,7 +29,7 @@
 - Consumes: `load_recording(path, model)`, `replay_recording(robot, recording, rate, trace)`, `RightArmRobot`, `GuardedChopTrace`, and the existing plane-scene/preflight visualization helpers.
 - Produces: `play_guarded_chop_recording(path: Path, *, rate: float = 2.0) -> None`.
 
-- [ ] **Step 1: Write the failing orchestration test**
+- [x] **Step 1: Write the failing orchestration test**
 
 Create `tests/simulation/test_guarded_chop_playback.py` with monkeypatched fake robot, preflight plan, loader, and replay function. Assert that `play_guarded_chop_recording(Path("demo.npz"), rate=2.0)`:
 
@@ -44,7 +44,7 @@ assert calls["closed"] is True
 
 Also assert the trace receives a `(5, 3)` planned marker array and that no symbol named `run_guarded_chop` is imported or called by the playback module.
 
-- [ ] **Step 2: Run the new test and verify RED**
+- [x] **Step 2: Run the new test and verify RED**
 
 Run:
 
@@ -54,7 +54,7 @@ Run:
 
 Expected: FAIL because `twin_sim.guarded_chop_playback` does not exist.
 
-- [ ] **Step 3: Implement the high-level playback function**
+- [x] **Step 3: Implement the high-level playback function**
 
 Create `src/twin_sim/guarded_chop_playback.py` with this structure:
 
@@ -88,7 +88,7 @@ def play_guarded_chop_recording(path: Path, *, rate: float = 2.0) -> None:
 
 Use explicit imports from existing modules; do not import `run_guarded_chop`.
 
-- [ ] **Step 4: Run playback unit tests and verify GREEN**
+- [x] **Step 4: Run playback unit tests and verify GREEN**
 
 Run:
 
@@ -100,7 +100,7 @@ Run:
 
 Expected: PASS, including the existing assertion that replay never calls `mj_step`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/twin_sim/guarded_chop_playback.py tests/simulation/test_guarded_chop_playback.py
@@ -120,7 +120,7 @@ git commit -m "feat: add standalone guarded chop playback"
 - Consumes: `play_guarded_chop_recording(path: Path, *, rate: float = 2.0)` from Task 1.
 - Produces: `twin-sim guarded-chop-replay --recording PATH --rate RATE` and two executable shell scripts.
 
-- [ ] **Step 1: Write failing CLI tests**
+- [x] **Step 1: Write failing CLI tests**
 
 Add tests that parse:
 
@@ -133,7 +133,7 @@ assert args.rate == 2.0
 Monkeypatch `cli.play_guarded_chop_recording`, call
 `main(["guarded-chop-replay", "--recording", "demo.npz", "--rate", "1.5"])`, and assert it receives `Path("demo.npz")` and `rate=1.5`. Parametrize `0`, `-1`, `nan`, and `inf`; expect `SystemExit` from the parser-facing validation path.
 
-- [ ] **Step 2: Run CLI tests and verify RED**
+- [x] **Step 2: Run CLI tests and verify RED**
 
 Run:
 
@@ -143,7 +143,7 @@ Run:
 
 Expected: FAIL because the new subcommand and imported playback function are missing.
 
-- [ ] **Step 3: Implement the CLI subcommand**
+- [x] **Step 3: Implement the CLI subcommand**
 
 Import `play_guarded_chop_recording`. Add parser arguments:
 
@@ -159,7 +159,7 @@ guarded_replay.add_argument("--rate", type=float, default=2.0)
 
 In `main`, validate `args.rate` with `validate_replay_rate`; on `ValueError`, call `parser.error(str(error))`. Then call `play_guarded_chop_recording(args.recording, rate=rate)` and return zero.
 
-- [ ] **Step 4: Write failing launcher tests**
+- [x] **Step 4: Write failing launcher tests**
 
 Extend `tests/simulation/test_guarded_chop_launcher.py` with exact fake-executable assertions:
 
@@ -176,7 +176,7 @@ assert replay_stdout == [
 
 Run each script with an explicit `recordings/demo.npz` argument and assert only the path changes. Reuse the missing-environment assertion for both scripts.
 
-- [ ] **Step 5: Run launcher tests and verify RED**
+- [x] **Step 5: Run launcher tests and verify RED**
 
 Run:
 
@@ -186,7 +186,7 @@ Run:
 
 Expected: FAIL because both scripts are absent.
 
-- [ ] **Step 6: Create the thin launchers**
+- [x] **Step 6: Create the thin launchers**
 
 Both scripts use the existing `SCRIPT_DIR`, `REPO_ROOT`, `TWIN_SIM`, and missing-environment message pattern. Set:
 
@@ -203,7 +203,7 @@ exec "${TWIN_SIM}" guarded-chop-replay --recording "${RECORDING_PATH}" --rate 2.
 
 Run `chmod +x scripts/run_guarded_chop_record.sh scripts/replay_guarded_chop_2x.sh`.
 
-- [ ] **Step 7: Verify CLI and launchers**
+- [x] **Step 7: Verify CLI and launchers**
 
 Run:
 
@@ -215,7 +215,7 @@ Run:
 
 Expected: PASS with unchanged behavior for both existing scripts.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/twin_sim/cli.py tests/simulation/test_cli.py \
@@ -237,7 +237,7 @@ git commit -m "feat: add guarded chop record and replay scripts"
 - Consumes: the two executable launchers and current `develop_9_kinematic_branch` history.
 - Produces: fresh latest recording, successful standalone 2× Viewer replay, complete verification record, and a user-selected target-branch merge.
 
-- [ ] **Step 1: Run focused and complete regression suites**
+- [x] **Step 1: Run focused and complete regression suites**
 
 Run:
 
@@ -252,19 +252,19 @@ Run:
 
 Expected: all tests PASS; only the existing 39.611 N contact-force observation warning may remain.
 
-- [ ] **Step 2: Run the normal-speed recording script**
+- [x] **Step 2: Run the normal-speed recording script**
 
 Run `./scripts/run_guarded_chop_record.sh`, observe one normal-speed Viewer run, and verify the default NPZ modification time changes and the command returns 5 cuts, 4 shifts, total 0.080 m, and minimum distance at least 0.02 m.
 
-- [ ] **Step 3: Run the standalone 2× replay script**
+- [x] **Step 3: Run the standalone 2× replay script**
 
 Run `./scripts/replay_guarded_chop_2x.sh`. Verify it begins directly from the saved first frame, displays `replay 2.0x`, completes in approximately half the recorded simulation duration, and does not change the NPZ checksum or modification time.
 
-- [ ] **Step 4: Update both feature records**
+- [x] **Step 4: Update both feature records**
 
 Document exact commands, paths, test count, warnings, recording metrics, replay elapsed time, non-mutating checksum evidence, and the user's accepted visible-hand verdict. Mark every evidenced checkbox complete in both plans.
 
-- [ ] **Step 5: Commit documentation**
+- [x] **Step 5: Commit documentation**
 
 ```bash
 git add docs/simulation/guarded_chopping_development_log.md \
