@@ -73,6 +73,15 @@ def test_plane_preflight_builds_two_cut_inchworm_guard_motions():
             GuardedChopPhase.ARM_RESET_RELAX,
         ]
         assert all(len(motion.hand) == 251 for motion in motions)
+        np.testing.assert_allclose(
+            motions[1].hand, motions[0].hand[::-1], atol=0.0
+        )
+        np.testing.assert_allclose(
+            motions[3].hand, motions[2].hand[::-1], atol=0.0
+        )
+        np.testing.assert_allclose(
+            motions[0].hand, motions[2].hand, atol=0.0
+        )
         previous = _finger_pad_position(
             robot, motions[0].hand[0], motions[0].left[0]
         )

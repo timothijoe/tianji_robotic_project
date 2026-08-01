@@ -1,3 +1,4 @@
+import mujoco
 import numpy as np
 import pytest
 
@@ -7,6 +8,28 @@ from twin_sim.guarded_chop_safety import (
     GUARD_RELAXED_RAD,
     GUARD_RETRACTED_RAD,
 )
+
+
+def _finger_link_state(robot, hand_rad, left_rad, finger, link):
+    saved = mujoco.MjData(robot.sim.model)
+    mujoco.mj_copyData(saved, robot.sim.model, robot.sim.data)
+    try:
+        robot.sim.data.qpos[robot.sim.left.qpos_ids] = left_rad
+        robot.sim.data.qpos[robot.sim.hand.qpos_ids] = hand_rad
+        mujoco.mj_forward(robot.sim.model, robot.sim.data)
+        palm = robot.sim.require_body("left_palm_link")
+        body = robot.sim.require_body(f"left_finger{finger}_link{link}")
+        palm_rotation = robot.sim.data.xmat[palm].reshape(3, 3)
+        position = palm_rotation.T @ (
+            robot.sim.data.xpos[body] - robot.sim.data.xpos[palm]
+        )
+        axis = (
+            palm_rotation.T
+            @ robot.sim.data.xmat[body].reshape(3, 3)[:, 2]
+        )
+        return position.copy(), axis.copy()
+    finally:
+        mujoco.mj_copyData(robot.sim.data, robot.sim.model, saved)
 from twin_sim.model import SimulationModel
 from twin_sim.robot import RightArmRobot
 from twin_sim.tasks.guarded_chop import (
@@ -100,3 +123,48 @@ def test_guard_synergy_retracts_finger3_pad_two_centimeters():
     )
     assert retreat == pytest.approx(0.020, abs=0.002)
     assert orthogonal <= 0.005
+
+
+def test_guard_synergy_moves_visible_middle_links():
+    robot = RightArmRobot(viewer=False)
+    try:
+        plan = _preflight_guarded_chop(robot, GuardedChopConfig())
+        link_displacements = {}
+        finger3_link3_axis_change = None
+        for finger in range(2, 6):
+            for link in (3, 4):
+                relaxed_position, relaxed_axis = _finger_link_state(
+                    robot,
+                    GUARD_RELAXED_RAD,
+                    plan.left_ready_rad,
+                    finger,
+                    link,
+                )
+                retracted_position, retracted_axis = _finger_link_state(
+                    robot,
+                    GUARD_RETRACTED_RAD,
+                    plan.left_ready_rad,
+                    finger,
+                    link,
+                )
+                link_displacements[(finger, link)] = np.linalg.norm(
+                    retracted_position - relaxed_position
+                )
+                if finger == 3 and link == 3:
+                    finger3_link3_axis_change = np.degrees(
+                        np.arccos(
+                            np.clip(
+                                relaxed_axis @ retracted_axis,
+                                -1.0,
+                                1.0,
+                            )
+                        )
+                    )
+    finally:
+        robot.close()
+
+    assert link_displacements[(3, 3)] >= 0.012
+    assert link_displacements[(3, 4)] >= 0.018
+    assert finger3_link3_axis_change >= 20.0
+    assert link_displacements[(2, 4)] > link_displacements[(4, 4)]
+    assert link_displacements[(4, 4)] >= link_displacements[(5, 4)]
