@@ -200,7 +200,7 @@ def load_recording(path: Path, model) -> GuardedChopRecording:
     return GuardedChopRecording(frames)
 
 
-def _validated_replay_rate(rate: float) -> float:
+def validate_replay_rate(rate: float) -> float:
     value = float(rate)
     if not np.isfinite(value) or value <= 0.0:
         raise ValueError("rate must be positive and finite")
@@ -215,7 +215,7 @@ def replay_recording(
     trace=None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    playback_rate = _validated_replay_rate(rate)
+    playback_rate = validate_replay_rate(rate)
     if recording.model_dimensions != (
         int(robot.sim.model.nq),
         int(robot.sim.model.nv),

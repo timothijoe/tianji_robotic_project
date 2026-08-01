@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import twin_sim.tasks.guarded_chop as guarded_chop
 from twin_sim.guarded_chop_safety import (
@@ -255,3 +256,37 @@ def test_rejected_safety_decision_aborts_both_arm_sequence():
     assert result.completed_cuts == 0
     assert result.completed_shifts == 0
     assert result.reason == "injected safety rejection"
+
+
+def test_replay_requires_viewer():
+    with pytest.raises(ValueError, match="replay requires a Viewer"):
+        run_guarded_chop(
+            GuardedChopConfig(final_hold_s=0.0),
+            viewer=False,
+            replay_rate=2.0,
+        )
+
+
+def test_record_path_saves_complete_state_sequence(monkeypatch, tmp_path):
+    saved = []
+
+    def save(recording, path):
+        saved.append((recording, path))
+
+    monkeypatch.setattr(
+        "twin_sim.guarded_chop_recording.save_recording", save
+    )
+    target = tmp_path / "guarded.npz"
+
+    result = run_guarded_chop(
+        GuardedChopConfig(final_hold_s=0.0),
+        viewer=False,
+        record_path=target,
+    )
+
+    assert result.success, result.reason
+    assert len(saved) == 1
+    recording, path = saved[0]
+    assert path == target
+    assert len(recording.frames) == len(result.samples)
+    assert recording.frames[-1].phase == "complete"

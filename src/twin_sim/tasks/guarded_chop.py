@@ -1,10 +1,12 @@
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Literal, Sequence
 
 import mujoco
 import numpy as np
 
+from twin_sim import guarded_chop_recording
 from twin_sim.guarded_chop_safety import (
     CAT_PAW_OPEN_RAD,
     CAT_PAW_RAD,
@@ -680,8 +682,18 @@ def run_guarded_chop(
     viewer: bool = False,
     trace=None,
     coordinator: SafetyCoordinator | None = None,
+    replay_rate: float | None = None,
+    record_path: Path | None = None,
 ) -> GuardedChopResult:
     config = config.validated()
+    playback_rate = (
+        guarded_chop_recording.validate_replay_rate(replay_rate)
+        if replay_rate is not None
+        else None
+    )
+    if playback_rate is not None and not viewer:
+        raise ValueError("replay requires a Viewer")
+    capture_requested = playback_rate is not None or record_path is not None
     safety = coordinator or SafetyCoordinator(
         config.minimum_distance_m,
         config.maximum_guard_penetration_m,
@@ -692,6 +704,7 @@ def run_guarded_chop(
     phase = GuardedChopPhase.INITIALIZE
     completed_cuts = 0
     completed_shifts = 0
+    recorded_frames = [] if capture_requested else None
     viewer_starting = False
     try:
         plan = _preflight_guarded_chop(robot, config)
@@ -775,6 +788,10 @@ def run_guarded_chop(
                 trace=trace,
             )
             samples.append(sample)
+            if recorded_frames is not None:
+                recorded_frames.append(
+                    guarded_chop_recording.capture_frame(robot, sample)
+                )
             last_left_target = robot._left_target.copy()
             last_right_target = robot._right_target.copy()
             if not sample.safety_allowed:
@@ -972,6 +989,20 @@ def run_guarded_chop(
             raise RuntimeError("guarded chopping did not complete 5 cuts/4 shifts")
         if minimum < config.minimum_distance_m:
             raise RuntimeError("knife-guard distance below final limit")
+        recording = (
+            guarded_chop_recording.GuardedChopRecording(recorded_frames)
+            if recorded_frames is not None
+            else None
+        )
+        if record_path is not None and recording is not None:
+            guarded_chop_recording.save_recording(recording, record_path)
+        if playback_rate is not None and recording is not None:
+            guarded_chop_recording.replay_recording(
+                robot,
+                recording,
+                rate=playback_rate,
+                trace=trace,
+            )
         return GuardedChopResult(
             success=True,
             final_phase=phase,
@@ -987,6 +1018,11 @@ def run_guarded_chop(
             raise
         if trace is not None and hasattr(trace, "set_abort"):
             trace.set_abort(str(error))
+        if record_path is not None and recorded_frames:
+            guarded_chop_recording.save_recording(
+                guarded_chop_recording.GuardedChopRecording(recorded_frames),
+                record_path,
+            )
         minimum = min(
             (sample.knife_guard_distance_m for sample in samples),
             default=float("inf"),
