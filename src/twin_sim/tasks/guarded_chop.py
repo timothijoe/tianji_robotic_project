@@ -67,15 +67,15 @@ class GuardedChopConfig:
     maximum_guard_penetration_m: float = 0.003
     maximum_guard_force_n: float = 35.0
     control_dt_s: float = 0.01
-    guard_ready_duration_s: float = 2.0
-    cut_duration_s: float = 1.0
-    knife_up_duration_s: float = 1.0
-    hand_open_duration_s: float = 0.6
-    hand_shift_duration_s: float = 3.0
-    hand_close_duration_s: float = 0.6
+    guard_ready_duration_s: float = 1.2
+    cut_duration_s: float = 0.7
+    knife_up_duration_s: float = 0.7
+    hand_open_duration_s: float = 0.4
+    hand_shift_duration_s: float = 2.0
+    hand_close_duration_s: float = 0.4
     interlock_settle_s: float = 0.3
     stability_timeout_s: float = 4.0
-    final_hold_s: float = 10.0
+    final_hold_s: float = 3.0
 
     def validated(self) -> "GuardedChopConfig":
         if self.scene_mode not in {"plane", "object"}:

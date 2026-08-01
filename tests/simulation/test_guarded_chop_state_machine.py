@@ -15,7 +15,16 @@ def test_guarded_chop_defaults_match_approved_motion():
     assert config.cuts == 5
     assert config.hand_shift_m == 0.02
     assert config.minimum_distance_m == 0.02
-    assert config.final_hold_s == 10.0
+    assert config.control_dt_s == 0.01
+    assert config.guard_ready_duration_s == 1.2
+    assert config.cut_duration_s == 0.7
+    assert config.knife_up_duration_s == 0.7
+    assert config.hand_open_duration_s == 0.4
+    assert config.hand_shift_duration_s == 2.0
+    assert config.hand_close_duration_s == 0.4
+    assert config.interlock_settle_s == 0.3
+    assert config.stability_timeout_s == 4.0
+    assert config.final_hold_s == 3.0
 
 
 def test_plane_mode_and_low_guard_phases_are_defaults():
