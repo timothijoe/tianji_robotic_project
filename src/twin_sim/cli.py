@@ -4,6 +4,8 @@ import time
 
 import numpy as np
 
+from twin_sim.guarded_chop_playback import play_guarded_chop_recording
+from twin_sim.guarded_chop_recording import validate_replay_rate
 from twin_sim.kinematics import Kinematics
 from twin_sim.pick_place_visualization import PickPlaceTrace
 from twin_sim.robot import RIGHT_HOME_RAD, RightArmRobot
@@ -149,6 +151,13 @@ def main(argv: list[str] | None = None) -> int:
             f"reason={result.reason or '-'}"
         )
         return 0 if result.success else 1
+    if args.command == "guarded-chop-replay":
+        try:
+            rate = validate_replay_rate(args.rate)
+        except ValueError as error:
+            parser.error(str(error))
+        play_guarded_chop_recording(args.recording, rate=rate)
+        return 0
     if args.command == "view":
         robot = RightArmRobot(viewer=True)
         try:
@@ -233,6 +242,13 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         const=Path("recordings/guarded_chop_latest.npz"),
     )
+    guarded_replay = commands.add_parser("guarded-chop-replay")
+    guarded_replay.add_argument(
+        "--recording",
+        type=Path,
+        default=Path("recordings/guarded_chop_latest.npz"),
+    )
+    guarded_replay.add_argument("--rate", type=float, default=2.0)
     return parser
 
 

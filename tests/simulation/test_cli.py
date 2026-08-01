@@ -48,6 +48,45 @@ def test_guarded_chop_cli_rejects_headless_replay():
         main(["guarded-chop", "--headless", "--replay-rate", "2.0"])
 
 
+def test_guarded_chop_replay_cli_defaults_to_latest_at_two_x():
+    args = build_parser().parse_args(["guarded-chop-replay"])
+
+    assert args.recording == Path("recordings/guarded_chop_latest.npz")
+    assert args.rate == 2.0
+
+
+def test_guarded_chop_replay_cli_dispatches_existing_recording(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(
+        cli,
+        "play_guarded_chop_recording",
+        lambda path, *, rate: captured.update(path=path, rate=rate),
+    )
+
+    status = main(
+        [
+            "guarded-chop-replay",
+            "--recording",
+            "recordings/demo.npz",
+            "--rate",
+            "1.5",
+        ]
+    )
+
+    assert status == 0
+    assert captured == {
+        "path": Path("recordings/demo.npz"),
+        "rate": 1.5,
+    }
+
+
+@pytest.mark.parametrize("rate", ("0", "-1", "nan", "inf"))
+def test_guarded_chop_replay_cli_rejects_invalid_rate(rate):
+    with pytest.raises(SystemExit):
+        main(["guarded-chop-replay", "--rate", rate])
+
+
 def test_guarded_chop_cli_prints_coordination_metrics(
     monkeypatch, capsys
 ):
