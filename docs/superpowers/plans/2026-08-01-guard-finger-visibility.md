@@ -27,23 +27,23 @@
 **Interfaces:**
 - Preserve `GUARD_RELAXED_RAD` and `GUARD_RETRACTED_RAD` names and 20-element layout.
 
-- [ ] **Step 1: Tighten the failing visibility contract**
+- [x] **Step 1: Tighten the failing visibility contract**
 
 Add assertions that the largest actual target delta in finger3 is 25–30°, finger2 has at least 15° principal change, finger4/finger5 each have at least 10° visible principal change, and thumb change stays at or below 5°. Keep existing FK displacement/range tests.
 
-- [ ] **Step 2: Run posture tests and verify RED**
+- [x] **Step 2: Run posture tests and verify RED**
 
 Run `.venv/bin/python -m pytest tests/simulation/test_guarded_chop_posture.py -v`. Expected: current 13–15° target changes fail the new visibility thresholds.
 
-- [ ] **Step 3: Run deterministic offline calibration and replace only the constant**
+- [x] **Step 3: Run deterministic offline calibration and replace only the constant**
 
 Search bounded finger3 joint combinations; derive layered finger2/finger4/finger5 changes with compensating proximal/distal motion; reject candidates outside FK displacement, orthogonal drift, range or thumb constraints. Store the best fixed pose, not the search routine.
 
-- [ ] **Step 4: Verify GREEN and safety preflight**
+- [x] **Step 4: Verify GREEN and safety preflight**
 
 Run posture, preflight and safety tests; expect all PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit as `feat: exaggerate visible guard finger curl`.
 
@@ -59,22 +59,22 @@ Commit as `feat: exaggerate visible guard finger curl`.
 **Interfaces:**
 - Add validated `GuardedChopConfig.finger_motion_duration_s: float = 2.5` and use it for all four plane guard motions only.
 
-- [ ] **Step 1: Write failing duration test**
+- [x] **Step 1: Write failing duration test**
 
 Assert the new default is 2.5, validates as an integer multiple of `control_dt_s`, and produces 251 samples per plane motion while object guard shifts retain their existing duration.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run state-machine/preflight tests. Expected: missing config field.
 
-- [ ] **Step 3: Implement dedicated duration**
+- [x] **Step 3: Implement dedicated duration**
 
 Add the field to config validation and replace the two plane-motion uses of `hand_shift_duration_s` with `finger_motion_duration_s`.
 
-- [ ] **Step 4: Verify actual tracking and full regression**
+- [x] **Step 4: Verify actual tracking and full regression**
 
 Run all guarded-chop tests and `.venv/bin/python -m pytest`. Record actual per-finger joint changes, pad displacement, cuts/shifts and minimum distance. Expect no new warnings.
 
-- [ ] **Step 5: Run 2× Viewer and document evidence**
+- [x] **Step 5: Run 2× Viewer and document evidence**
 
 Regenerate `recordings/guarded_chop_latest.npz`, directly replay at 2×, record the pending/completed user verdict, update the design/development log, and commit as `docs: record visible guard finger verification`.
