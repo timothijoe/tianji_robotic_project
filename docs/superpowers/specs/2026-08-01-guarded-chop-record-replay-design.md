@@ -92,3 +92,34 @@ headless 仍允许只录制到文件。
 人工验收运行组合脚本，确认第一遍与当前已验收的真实速度一致，结束后同一 Viewer 从
 起点明确进入 2× 回放；两遍姿态、物体和 marker 轨迹一致。连续两次使用默认 `--record`
 后目录中只有一个 `guarded_chop_latest.npz`，指定其他文件名时两个文件同时保留。
+
+## 实现进展
+
+2026-08-01 已完成不可变状态帧、版本 1 压缩 NPZ、模型维度校验、原子覆盖保存、纯状态
+Viewer 回放、回放轨迹重置与 `replay 2.0x` 状态栏。`run_guarded_chop` 仅在请求保存或
+回放时捕获帧；普通 1× 入口不承担录制开销。CLI 已支持 `--replay-rate` 和可选路径的
+`--record`，并拒绝无 Viewer 的回放请求。
+
+新增脚本为：
+
+```bash
+# 只看与真实时间一致的 1× 在线仿真
+./scripts/run_guarded_chop.sh
+
+# 先看 1× 在线仿真，再在同一窗口看 2× 状态回放；不落盘
+./scripts/run_guarded_chop_record_replay.sh
+
+# 同上，并原子覆盖默认 latest 文件
+./scripts/run_guarded_chop_record_replay.sh --record
+
+# 同上，保存为独立名称
+./scripts/run_guarded_chop_record_replay.sh --record recordings/demo_01.npz
+```
+
+完整自动回归结果为 `202 passed`，另有 1 条既有的 39.611 N 接触力观测告警。默认路径
+连续录制两次后只有一个 `guarded_chop_latest.npz`；随后指定不同路径得到第二个文件。
+两份文件均可重新加载，各包含 3115 帧且末帧 phase 为 `complete`。
+
+真实组合 Viewer 已完成一遍 1× 在线执行和同窗口 2× 状态回放，程序最终返回
+`success=True`、5 刀、4 次倒手、`0.080 m` 总退让和 `0.039 m` 最小刀手距离。自动与
+程序运行验收通过；两遍视觉节奏和状态栏辨识度等待用户确认。
