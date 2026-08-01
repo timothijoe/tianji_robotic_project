@@ -25,9 +25,11 @@ def test_viewer_opens_only_after_guarded_scene_and_ready_pose(monkeypatch):
     events = []
     constructor_viewer_values = []
     original_configure = guarded_chop._configure_guarded_scene
+    original_preflight = guarded_chop._preflight_guarded_chop
     original_robot = RightArmRobot
     original_forward = guarded_chop.mujoco.mj_forward
     robot_holder = []
+    plan_holder = []
     configured = False
 
     def robot_factory(*args, **kwargs):
@@ -43,18 +45,32 @@ def test_viewer_opens_only_after_guarded_scene_and_ready_pose(monkeypatch):
         configured = True
         return result
 
+    def preflight(robot, config):
+        plan = original_preflight(robot, config)
+        plan_holder.append(plan)
+        return plan
+
     def forward(model, data):
         result = original_forward(model, data)
-        if configured and robot_holder:
+        if configured and robot_holder and plan_holder:
             robot = robot_holder[0]
+            plan = plan_holder[0]
             ready = (
                 np.allclose(
                     data.qpos[robot.sim.right.qpos_ids],
-                    data.ctrl[robot.sim.right.actuator_ids],
+                    plan.right_ready_rad,
                 )
                 and np.allclose(
                     data.qpos[robot.sim.left.qpos_ids],
+                    plan.left_ready_rad,
+                )
+                and np.allclose(
+                    data.ctrl[robot.sim.right.actuator_ids],
+                    plan.right_ready_rad,
+                )
+                and np.allclose(
                     data.ctrl[robot.sim.left.actuator_ids],
+                    plan.left_ready_rad,
                 )
                 and np.allclose(
                     data.qpos[robot.sim.hand.qpos_ids], CAT_PAW_RAD
@@ -68,6 +84,7 @@ def test_viewer_opens_only_after_guarded_scene_and_ready_pose(monkeypatch):
         return result
 
     def open_viewer(robot):
+        plan = plan_holder[0]
         for name in (
             "pick_source_pedestal",
             "pick_target_pedestal",
@@ -83,11 +100,19 @@ def test_viewer_opens_only_after_guarded_scene_and_ready_pose(monkeypatch):
         )
         np.testing.assert_allclose(
             robot.sim.data.qpos[robot.sim.right.qpos_ids],
-            robot.sim.data.ctrl[robot.sim.right.actuator_ids],
+            plan.right_ready_rad,
         )
         np.testing.assert_allclose(
             robot.sim.data.qpos[robot.sim.left.qpos_ids],
+            plan.left_ready_rad,
+        )
+        np.testing.assert_allclose(
+            robot.sim.data.ctrl[robot.sim.right.actuator_ids],
+            plan.right_ready_rad,
+        )
+        np.testing.assert_allclose(
             robot.sim.data.ctrl[robot.sim.left.actuator_ids],
+            plan.left_ready_rad,
         )
         events.append("open_viewer")
 
@@ -97,6 +122,9 @@ def test_viewer_opens_only_after_guarded_scene_and_ready_pose(monkeypatch):
     monkeypatch.setattr(guarded_chop, "RightArmRobot", robot_factory)
     monkeypatch.setattr(
         guarded_chop, "_configure_guarded_scene", configure
+    )
+    monkeypatch.setattr(
+        guarded_chop, "_preflight_guarded_chop", preflight
     )
     monkeypatch.setattr(RightArmRobot, "open_viewer", open_viewer)
     monkeypatch.setattr(guarded_chop.mujoco, "mj_forward", forward)
