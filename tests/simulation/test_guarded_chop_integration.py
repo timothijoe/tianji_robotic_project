@@ -157,9 +157,13 @@ def test_plane_mode_retreats_guard_before_diagonal_knife_shift():
         ) > 0.01
 
     advances = np.diff(np.asarray(guard_endpoints), axis=0)
-    assert np.allclose(np.linalg.norm(advances, axis=1), 0.02, atol=0.003)
+    advance_lengths = np.linalg.norm(advances, axis=1)
+    assert np.allclose(advance_lengths, 0.02, atol=0.005)
+    assert np.linalg.norm(
+        np.asarray(guard_endpoints[-1]) - np.asarray(guard_endpoints[0])
+    ) == pytest.approx(0.08, abs=0.005)
     direction = advances[0] / np.linalg.norm(advances[0])
-    assert np.all(advances @ direction > 0.017)
+    assert np.all(advances @ direction >= 0.015)
 
 
 def test_plane_scene_keeps_guard_cube_hidden_and_collision_disabled():

@@ -22,6 +22,7 @@ def test_guarded_chop_defaults_match_approved_motion():
     assert config.hand_open_duration_s == 0.4
     assert config.hand_shift_duration_s == 2.0
     assert config.hand_close_duration_s == 0.4
+    assert config.finger_motion_duration_s == 2.5
     assert config.interlock_settle_s == 0.3
     assert config.stability_timeout_s == 4.0
     assert config.final_hold_s == 3.0
@@ -49,6 +50,7 @@ def test_plane_mode_and_low_guard_phases_are_defaults():
         {"hand_open_duration_s": 0.0},
         {"hand_close_duration_s": np.inf},
         {"hand_close_duration_s": 0.605},
+        {"finger_motion_duration_s": 0.0},
     ),
 )
 def test_invalid_config_is_rejected(changes):

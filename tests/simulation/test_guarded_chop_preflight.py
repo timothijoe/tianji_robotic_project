@@ -72,6 +72,7 @@ def test_plane_preflight_builds_two_cut_inchworm_guard_motions():
             GuardedChopPhase.FINGER_RETRACT,
             GuardedChopPhase.ARM_RESET_RELAX,
         ]
+        assert all(len(motion.hand) == 251 for motion in motions)
         previous = _finger_pad_position(
             robot, motions[0].hand[0], motions[0].left[0]
         )

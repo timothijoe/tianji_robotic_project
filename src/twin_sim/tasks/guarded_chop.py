@@ -78,6 +78,7 @@ class GuardedChopConfig:
     hand_open_duration_s: float = 0.4
     hand_shift_duration_s: float = 2.0
     hand_close_duration_s: float = 0.4
+    finger_motion_duration_s: float = 2.5
     interlock_settle_s: float = 0.3
     stability_timeout_s: float = 4.0
     final_hold_s: float = 3.0
@@ -112,6 +113,7 @@ class GuardedChopConfig:
             self.hand_open_duration_s,
             self.hand_shift_duration_s,
             self.hand_close_duration_s,
+            self.finger_motion_duration_s,
             self.interlock_settle_s,
             self.stability_timeout_s,
         )
@@ -666,7 +668,7 @@ def _plane_guard_motions(
     hand_retract = _minimum_jerk_joint_trajectory(
         GUARD_RELAXED_RAD,
         GUARD_RETRACTED_RAD,
-        config.hand_shift_duration_s,
+        config.finger_motion_duration_s,
         config.control_dt_s,
     )
     hand_relax = tuple(reversed(hand_retract))
@@ -685,7 +687,7 @@ def _plane_guard_motions(
                 start_target,
                 goal_target,
                 left,
-                config.hand_shift_duration_s,
+                config.finger_motion_duration_s,
                 config.control_dt_s,
             )
             left_path = tuple(point.joints_rad.copy() for point in arm_points)
