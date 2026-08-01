@@ -198,6 +198,27 @@ def test_viewer_launch_tracks_only_the_thread_created_for_its_target(
     robot.close()
 
 
+def test_open_viewer_is_idempotent(monkeypatch):
+    class FakeViewer:
+        def close(self):
+            pass
+
+    launches = []
+
+    def launch(model, data):
+        launches.append((model, data))
+        return FakeViewer()
+
+    monkeypatch.setattr(mujoco.viewer, "launch_passive", launch)
+    robot = RightArmRobot(viewer=False)
+
+    robot.open_viewer()
+    robot.open_viewer()
+
+    assert launches == [(robot.sim.model, robot.sim.data)]
+    robot.close()
+
+
 def test_close_bounds_the_passive_viewer_thread_wait():
     robot = RightArmRobot()
 

@@ -44,20 +44,27 @@ class RightArmRobot:
         self.reset()
 
         if viewer:
-            from mujoco import viewer as mujoco_viewer
+            self.open_viewer()
 
-            threads_before = set(threading.enumerate())
-            self._viewer = mujoco_viewer.launch_passive(self.sim.model, self.sim.data)
-            launch_target = getattr(mujoco_viewer, "_launch_internal", None)
-            launched_threads = set(threading.enumerate()) - threads_before
-            matching_threads = [
-                thread
-                for thread in launched_threads
-                if launch_target is not None
-                and getattr(thread, "_target", None) is launch_target
-            ]
-            if len(matching_threads) == 1:
-                self._viewer_thread = matching_threads[0]
+    def open_viewer(self) -> None:
+        if self._viewer is not None:
+            return
+        from mujoco import viewer as mujoco_viewer
+
+        threads_before = set(threading.enumerate())
+        self._viewer = mujoco_viewer.launch_passive(
+            self.sim.model, self.sim.data
+        )
+        launch_target = getattr(mujoco_viewer, "_launch_internal", None)
+        launched_threads = set(threading.enumerate()) - threads_before
+        matching_threads = [
+            thread
+            for thread in launched_threads
+            if launch_target is not None
+            and getattr(thread, "_target", None) is launch_target
+        ]
+        if len(matching_threads) == 1:
+            self._viewer_thread = matching_threads[0]
 
     def reset(self, joints_rad: Sequence[float] = RIGHT_HOME_RAD) -> None:
         joints = self._validated_target(joints_rad)
