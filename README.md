@@ -11,6 +11,8 @@
 - 左臂安装 20 自由度 Wuji Hand，并提供安全的位置目标接口；
 - 左臂与 Wuji Hand 通过真实 MuJoCo 接触完成方块抓取、搬运和放置；
 - 一次“接近—下压—停留—抬刀”切菜任务；
+- 双臂耦合完成 5 刀、4 次猫爪倒手的平面切菜演示；
+- 正常速度状态录制，以及不重新运行控制器的独立二倍速回放；
 - 接触力观测、阈值 warning 和 CSV 日志。
 
 ## 快速开始
@@ -32,6 +34,7 @@ Isaac Lab/强化学习依赖，也没有连接实体灵巧手。
 
 详细说明：
 
+- [当前版本复现与智能体交接](docs/simulation/current_version_handoff.md)
 - [环境安装](docs/simulation/setup.md)
 - [新架构](docs/simulation/architecture.md)
 - [使用方法](docs/simulation/usage.md)

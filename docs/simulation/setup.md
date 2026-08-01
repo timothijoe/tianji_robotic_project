@@ -2,7 +2,8 @@
 
 The MuJoCo simulation uses CPython 3.12 and the exact dependencies in
 `requirements-sim.lock`. Create a clean local environment from the repository
-root:
+root. Do not copy `.venv` from another machine; create it locally with any
+system package, pyenv, or conda installation that provides CPython 3.12.x:
 
 ```bash
 python3.12 -m venv .venv
@@ -32,6 +33,14 @@ Expected output is:
 旧系统归档前的 210 项收集结果记录在 `baseline.md`；当前命令只运行
 `tests/simulation/` 中的新仿真测试。
 
+没有桌面环境时可以运行 pytest、headless 任务和录制。交互 Viewer 还要求有效的
+`DISPLAY`/XWayland 会话和 OpenGL；`MUJOCO_GL=egl` 只适合离屏诊断，不能代替显示
+服务器。先运行以下无窗口 smoke：
+
+```bash
+.venv/bin/twin-sim guarded-chop --headless --final-hold 0
+```
+
 Before simulation work, also verify the protected real-robot and SDK files:
 
 ```bash
@@ -40,3 +49,6 @@ sha256sum --check docs/simulation/protected-files.sha256
 
 Run this command from the repository root; every manifest entry must report
 `OK`.
+
+新机器完整复现步骤、Viewer/SSH 排障、录制跨机器兼容条件和智能体接手清单见
+[当前仿真版本复现与智能体交接](current_version_handoff.md)。

@@ -270,3 +270,19 @@ Python 3.10 和独立 `.venv-ros2`，不要把两套 ABI 环境混在一起。RO
 `SDK_PYTHON/`、`test/` 和 `real_robot_debug/` 属于实体机器人或厂商代码。当前默认仿真
 入口不会调用它们。接入真实硬件前必须单独确认设备、急停、通信接口、控制模式和动作
 限位；MuJoCo 中成功不能作为实体机安全证明。
+
+## 本次验证基线
+
+2026-08-01 在 `develop_9_kinematic_branch` 对本交接版本进行了 fresh 验证：
+
+- MuJoCo `3.10.0`，NumPy `2.5.1`，CPython `3.12.7`；
+- headless guarded-chop：`success=True`、5 刀、4 次倒手、0.080 m 总推进、
+  0.057 m 最小刀手距离；
+- 文档与 launcher 集中验证：`8 passed`；
+- 完整回归：`221 passed`；
+- 仅有一条既有 39.611 N 接触力观测 warning；
+- 四个 guarded-chop shell 均通过 `bash -n`；
+- 本文件不含开发机绝对路径。
+
+测试数量会增长，后续智能体应以 fresh 运行的零失败结果为准，而不是要求数量永远等于
+221。目标分支仍应在 merge 或 push 前由用户明确确认。

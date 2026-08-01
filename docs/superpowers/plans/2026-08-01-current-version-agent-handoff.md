@@ -30,7 +30,7 @@
 - Consumes: repository documentation and scripts.
 - Produces: automated assertions for the canonical guide's paths, commands, version pins, safety statements, and absence of developer-specific absolute paths.
 
-- [ ] **Step 1: Write the failing documentation test**
+- [x] **Step 1: Write the failing documentation test**
 
 Create `tests/simulation/test_current_version_handoff.py`:
 
@@ -67,7 +67,7 @@ def test_current_version_handoff_is_cross_machine_and_complete():
     ))
 ```
 
-- [ ] **Step 2: Run the contract and verify RED**
+- [x] **Step 2: Run the contract and verify RED**
 
 Run:
 
@@ -77,7 +77,7 @@ Run:
 
 Expected: FAIL because `docs/simulation/current_version_handoff.md` does not exist.
 
-- [ ] **Step 3: Write the canonical handoff guide**
+- [x] **Step 3: Write the canonical handoff guide**
 
 Create `docs/simulation/current_version_handoff.md` with these exact top-level sections:
 
@@ -97,7 +97,7 @@ Create `docs/simulation/current_version_handoff.md` with these exact top-level s
 
 Include the exact setup and smoke commands from the design, the four-script comparison table, NPZ schema/model compatibility notes, `DISPLAY`/SSH/X11/EGL troubleshooting, module paths, and before/after modification checklists. Use only relative repository paths.
 
-- [ ] **Step 4: Run the documentation contract and verify GREEN**
+- [x] **Step 4: Run the documentation contract and verify GREEN**
 
 Run:
 
@@ -107,7 +107,7 @@ Run:
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/simulation/current_version_handoff.md tests/simulation/test_current_version_handoff.py
@@ -126,7 +126,7 @@ git commit -m "docs: add current simulation agent handoff"
 - Consumes: `docs/simulation/current_version_handoff.md` from Task 1.
 - Produces: discoverable README link, consistent setup/usage commands, and fresh cross-machine verification evidence.
 
-- [ ] **Step 1: Add discoverability and current commands**
+- [x] **Step 1: Add discoverability and current commands**
 
 Update `README.md` to add current guarded-chop capability bullets and place this link first in “详细说明”:
 
@@ -143,7 +143,7 @@ Update `docs/simulation/setup.md` to distinguish headless from Viewer prerequisi
 
 and a four-script behavior table identical to the canonical guide.
 
-- [ ] **Step 2: Verify documentation consistency**
+- [x] **Step 2: Verify documentation consistency**
 
 Run:
 
@@ -160,7 +160,7 @@ rg -n "/home/linux" docs/simulation/current_version_handoff.md
 
 Expected: pytest PASS, `bash -n` exit zero, and `rg` exit one with no matches.
 
-- [ ] **Step 3: Run fresh headless smoke and complete regression**
+- [x] **Step 3: Run fresh headless smoke and complete regression**
 
 Run:
 
@@ -171,11 +171,11 @@ Run:
 
 Expected: guarded-chop reports 5 cuts, 4 shifts, total 0.080 m, minimum distance at least 0.02 m; all tests PASS with only the existing 39.611 N observation warning.
 
-- [ ] **Step 4: Record exact verification and complete the plan**
+- [x] **Step 4: Record exact verification and complete the plan**
 
 Append a short “本次验证基线” section to the handoff with the current test count, warning, task metrics, branch name, and the rule that counts may grow while zero failures remains mandatory. Mark all evidenced plan checkboxes complete.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add README.md docs/simulation/setup.md docs/simulation/usage.md \
@@ -184,6 +184,6 @@ git add README.md docs/simulation/setup.md docs/simulation/usage.md \
 git commit -m "docs: connect cross-machine simulation runbook"
 ```
 
-- [ ] **Step 6: Report branch state**
+- [x] **Step 6: Report branch state**
 
 Verify `git status --short` is empty and report that all commits are already on `develop_9_kinematic_branch`. If the user names `develop_8_kinematic_branch` or `main` as a separate target, run the finishing-development-branch merge workflow; otherwise do not create a meaningless self-merge.

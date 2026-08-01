@@ -65,8 +65,33 @@ Python API 的最小示例位于 `examples/simulation_demo.py`。
 该脚本会自动定位仓库路径，并使用仓库内的 `.venv`。它只运行 MuJoCo 仿真，
 不会向实体机械臂、Wuji Hand 或 ROS 2 硬件接口发送命令。
 
-该入口只播放一遍 1× 在线仿真。若要先观看相同的 1× 在线执行，再在同一窗口
-自动观看一遍 2× 状态回放，运行：
+当前四个稳定入口的区别：
+
+| 入口 | 在线仿真 | 保存 NPZ | 状态回放 |
+|---|---:|---:|---:|
+| `./scripts/run_guarded_chop.sh` | 1× | 否 | 否 |
+| `./scripts/run_guarded_chop_record.sh` | 1× | 是 | 否 |
+| `./scripts/replay_guarded_chop_2x.sh` | 否 | 否 | 2× |
+| `./scripts/run_guarded_chop_record_replay.sh` | 1× | 可选 | 2× |
+
+正常速度运行并默认原子覆盖 latest：
+
+```bash
+./scripts/run_guarded_chop_record.sh
+./scripts/run_guarded_chop_record.sh recordings/demo_01.npz
+```
+
+只读取已有录制并二倍速播放，不重新执行仿真控制器：
+
+```bash
+./scripts/replay_guarded_chop_2x.sh
+./scripts/replay_guarded_chop_2x.sh recordings/demo_01.npz
+```
+
+默认录制路径为 `recordings/guarded_chop_latest.npz`。两个新脚本都只接受一个可选
+NPZ 路径，多余参数会明确报错。
+
+若要先观看相同的 1× 在线执行，再在同一窗口自动观看一遍 2× 状态回放，运行：
 
 ```bash
 ./scripts/run_guarded_chop_record_replay.sh
@@ -90,6 +115,10 @@ Python API 的最小示例位于 `examples/simulation_demo.py`。
 NPZ 保存仿真时间、完整 `qpos/qvel/ctrl`、动作阶段、刀次和 marker 数据。同一路径
 不会生成冗余副本；模型状态维度与当前 MuJoCo 模型不一致的录制会被拒绝加载。
 `recordings/` 已加入 `.gitignore`，不会被误提交。
+
+新的 clone 不包含录制文件。跨机器复制 NPZ 时应优先使用相同 Git 提交，并确认模型
+`nq/nv/nu` 和录制 schema 兼容；完整说明见
+[当前版本复现与智能体交接](current_version_handoff.md)。
 
 其他命令行模式：
 
