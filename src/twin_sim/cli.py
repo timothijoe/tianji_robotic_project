@@ -130,12 +130,16 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             robot.close()
     if args.command == "guarded-chop":
+        if args.headless and args.replay_rate is not None:
+            parser.error("guarded-chop replay requires a Viewer")
         result = run_guarded_chop(
             GuardedChopConfig(
                 scene_mode=args.scene,
                 final_hold_s=args.final_hold,
             ),
             viewer=not args.headless,
+            replay_rate=args.replay_rate,
+            record_path=args.record,
         )
         print(
             f"success={result.success} cuts={result.completed_cuts} "
@@ -221,6 +225,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--final-hold",
         type=float,
         default=GuardedChopConfig().final_hold_s,
+    )
+    guarded_chop.add_argument("--replay-rate", type=float)
+    guarded_chop.add_argument(
+        "--record",
+        type=Path,
+        nargs="?",
+        const=Path("recordings/guarded_chop_latest.npz"),
     )
     return parser
 

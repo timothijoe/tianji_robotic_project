@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -21,13 +22,44 @@ def test_guarded_chop_cli_accepts_object_scene():
     assert args.scene == "object"
 
 
+def test_guarded_chop_cli_accepts_replay_and_optional_record_path():
+    default_recording = build_parser().parse_args(
+        ["guarded-chop", "--record"]
+    )
+    named_recording = build_parser().parse_args(
+        [
+            "guarded-chop",
+            "--replay-rate",
+            "2.0",
+            "--record",
+            "recordings/demo.npz",
+        ]
+    )
+
+    assert default_recording.record == Path(
+        "recordings/guarded_chop_latest.npz"
+    )
+    assert named_recording.replay_rate == 2.0
+    assert named_recording.record.name == "demo.npz"
+
+
+def test_guarded_chop_cli_rejects_headless_replay():
+    with pytest.raises(SystemExit):
+        main(["guarded-chop", "--headless", "--replay-rate", "2.0"])
+
+
 def test_guarded_chop_cli_prints_coordination_metrics(
     monkeypatch, capsys
 ):
     captured = {}
 
-    def fake_run(config, *, viewer):
-        captured.update(config=config, viewer=viewer)
+    def fake_run(config, *, viewer, replay_rate=None, record_path=None):
+        captured.update(
+            config=config,
+            viewer=viewer,
+            replay_rate=replay_rate,
+            record_path=record_path,
+        )
         return SimpleNamespace(
             success=True,
             completed_cuts=5,
@@ -54,6 +86,8 @@ def test_guarded_chop_cli_prints_coordination_metrics(
     assert captured["viewer"] is False
     assert captured["config"].scene_mode == "object"
     assert captured["config"].final_hold_s == 0.0
+    assert captured["replay_rate"] is None
+    assert captured["record_path"] is None
     output = capsys.readouterr().out
     assert "cuts=5" in output
     assert "shifts=4" in output

@@ -3,6 +3,11 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).parents[2] / "scripts" / "run_guarded_chop.sh"
+REPLAY_SCRIPT = (
+    Path(__file__).parents[2]
+    / "scripts"
+    / "run_guarded_chop_record_replay.sh"
+)
 
 
 def test_launcher_resolves_repo_and_forwards_plane_command(tmp_path):
@@ -38,3 +43,33 @@ def test_launcher_reports_missing_virtual_environment(tmp_path):
     assert result.returncode != 0
     assert ".venv/bin/twin-sim" in result.stderr
     assert "python3.12 -m venv .venv" in result.stderr
+
+
+def test_record_replay_launcher_runs_live_then_replays_at_two_x(tmp_path):
+    fake_repo = tmp_path / "repo"
+    script = fake_repo / "scripts" / REPLAY_SCRIPT.name
+    executable = fake_repo / ".venv" / "bin" / "twin-sim"
+    script.parent.mkdir(parents=True)
+    executable.parent.mkdir(parents=True)
+    script.write_bytes(REPLAY_SCRIPT.read_bytes())
+    script.chmod(0o755)
+    executable.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$@\"\n")
+    executable.chmod(0o755)
+
+    result = subprocess.run(
+        [str(script), "--record", "recordings/demo.npz"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == [
+        "guarded-chop",
+        "--scene",
+        "plane",
+        "--replay-rate",
+        "2.0",
+        "--record",
+        "recordings/demo.npz",
+    ]
