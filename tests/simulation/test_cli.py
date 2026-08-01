@@ -10,6 +10,7 @@ def test_guarded_chop_cli_defaults_to_plane_scene():
     args = build_parser().parse_args(["guarded-chop", "--headless"])
 
     assert args.scene == "plane"
+    assert args.final_hold == 3.0
 
 
 def test_guarded_chop_cli_accepts_object_scene():

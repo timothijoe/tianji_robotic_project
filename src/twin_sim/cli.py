@@ -217,7 +217,11 @@ def build_parser() -> argparse.ArgumentParser:
     guarded_chop.add_argument(
         "--scene", choices=("plane", "object"), default="plane"
     )
-    guarded_chop.add_argument("--final-hold", type=float, default=10.0)
+    guarded_chop.add_argument(
+        "--final-hold",
+        type=float,
+        default=GuardedChopConfig().final_hold_s,
+    )
     return parser
 
 
