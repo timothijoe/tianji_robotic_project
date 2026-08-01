@@ -3,8 +3,9 @@ import pytest
 
 import twin_sim.tasks.guarded_chop as guarded_chop
 from twin_sim.guarded_chop_safety import (
-    CAT_PAW_OPEN_RAD,
     CAT_PAW_RAD,
+    GUARD_RELAXED_RAD,
+    GUARD_RETRACTED_RAD,
     SafetyDecision,
 )
 from twin_sim.robot import RightArmRobot
@@ -78,24 +79,23 @@ def test_plane_mode_retreats_guard_before_diagonal_knife_shift():
     assert max(sample.left_speed_rad_s for sample in clear) <= 0.05
     assert max(sample.hand_speed_rad_s for sample in clear) <= 0.05
 
+    guard_ready = [
+        sample
+        for sample in result.samples
+        if sample.phase is GuardedChopPhase.GUARD_READY
+    ]
+    guard_endpoints = [guard_ready[-1].guard_position]
     for index in range(1, 5):
-        opened = [
+        expected_phase = (
+            GuardedChopPhase.FINGER_RETRACT
+            if index % 2 == 1
+            else GuardedChopPhase.ARM_RESET_RELAX
+        )
+        guard_motion = [
             sample
             for sample in result.samples
             if sample.cut_index == index
-            and sample.phase is GuardedChopPhase.LOW_GUARD_OPEN
-        ]
-        shifted = [
-            sample
-            for sample in result.samples
-            if sample.cut_index == index
-            and sample.phase is GuardedChopPhase.LOW_GUARD_SHIFT
-        ]
-        closed = [
-            sample
-            for sample in result.samples
-            if sample.cut_index == index
-            and sample.phase is GuardedChopPhase.LOW_GUARD_CLOSE
+            and sample.phase is expected_phase
         ]
         lift = [
             sample
@@ -103,39 +103,40 @@ def test_plane_mode_retreats_guard_before_diagonal_knife_shift():
             if sample.cut_index == index
             and sample.phase is GuardedChopPhase.KNIFE_LIFT_SHIFT
         ]
-        assert opened and shifted and closed and lift
-        assert opened[-1].time_s < shifted[0].time_s
-        assert shifted[-1].time_s < closed[0].time_s
-        assert closed[-1].time_s < lift[0].time_s
-        np.testing.assert_allclose(
-            opened[-1].hand_target_rad,
-            CAT_PAW_OPEN_RAD,
-            rtol=0.0,
-            atol=1e-9,
-        )
-        assert np.max(
-            np.ptp(
-                np.asarray(
-                    [sample.hand_target_rad for sample in shifted]
-                ),
-                axis=0,
-            )
-        ) < 1e-9
-        np.testing.assert_allclose(
-            closed[-1].hand_target_rad,
-            CAT_PAW_RAD,
-            rtol=0.0,
-            atol=1e-9,
-        )
-        low = (*opened, *shifted, *closed)
+        assert guard_motion and lift
+        assert guard_motion[-1].time_s < lift[0].time_s
+        low = tuple(guard_motion)
         right_targets = np.asarray(
             [sample.right_target_rad for sample in low]
         )
         assert np.max(np.ptp(right_targets, axis=0)) <= 1e-12
         assert max(sample.right_speed_rad_s for sample in low) <= 0.05
-        assert shifted[-1].knife_guard_distance_m >= (
-            shifted[0].knife_guard_distance_m - 1e-6
+        assert guard_motion[-1].knife_guard_distance_m >= (
+            guard_motion[0].knife_guard_distance_m - 2e-6
         )
+        left_motion = np.asarray(
+            [sample.left_target_rad for sample in guard_motion]
+        )
+        hand_motion = np.asarray(
+            [sample.hand_target_rad for sample in guard_motion]
+        )
+        if index % 2 == 1:
+            assert np.max(np.ptp(left_motion, axis=0)) <= 1e-12
+            assert np.max(np.ptp(hand_motion, axis=0)) > 0.05
+            np.testing.assert_allclose(
+                guard_motion[-1].hand_target_rad,
+                GUARD_RETRACTED_RAD,
+                atol=1e-9,
+            )
+        else:
+            assert np.max(np.ptp(left_motion, axis=0)) > 0.01
+            assert np.max(np.ptp(hand_motion, axis=0)) > 0.05
+            np.testing.assert_allclose(
+                guard_motion[-1].hand_target_rad,
+                GUARD_RELAXED_RAD,
+                atol=1e-9,
+            )
+        guard_endpoints.append(guard_motion[-1].guard_position)
 
         left_targets = np.asarray(
             [sample.left_target_rad for sample in lift]
@@ -154,6 +155,11 @@ def test_plane_mode_retreats_guard_before_diagonal_knife_shift():
         assert np.linalg.norm(
             knife_positions[-1, :2] - knife_positions[0, :2]
         ) > 0.01
+
+    advances = np.diff(np.asarray(guard_endpoints), axis=0)
+    assert np.allclose(np.linalg.norm(advances, axis=1), 0.02, atol=0.003)
+    direction = advances[0] / np.linalg.norm(advances[0])
+    assert np.all(advances @ direction > 0.017)
 
 
 def test_plane_scene_keeps_guard_cube_hidden_and_collision_disabled():

@@ -8,7 +8,6 @@ import numpy as np
 
 from twin_sim import guarded_chop_recording
 from twin_sim.guarded_chop_safety import (
-    CAT_PAW_OPEN_RAD,
     CAT_PAW_RAD,
     GUARD_RELAXED_RAD,
     GUARD_RETRACTED_RAD,
@@ -989,31 +988,13 @@ def run_guarded_chop(
 
             if config.scene_mode == "plane":
                 wait_for_knife_stability(phase, index)
-
-                phase = GuardedChopPhase.LOW_GUARD_OPEN
-                for target in _joint_trajectory(
-                    CAT_PAW_RAD,
-                    CAT_PAW_OPEN_RAD,
-                    config.hand_open_duration_s,
-                    config.control_dt_s,
-                )[1:]:
-                    robot.hand.command(target)
-                    step_and_record(phase, index)
-
-                phase = GuardedChopPhase.LOW_GUARD_SHIFT
-                for point in plan.guard_shifts[index - 1][1:]:
-                    robot.command_left(point.joints_rad)
-                    robot.hand.command(CAT_PAW_OPEN_RAD)
-                    step_and_record(phase, index)
-
-                phase = GuardedChopPhase.LOW_GUARD_CLOSE
-                for target in _joint_trajectory(
-                    CAT_PAW_OPEN_RAD,
-                    CAT_PAW_RAD,
-                    config.hand_close_duration_s,
-                    config.control_dt_s,
-                )[1:]:
-                    robot.hand.command(target)
+                motion = plan.plane_guard_motions[index - 1]
+                phase = motion.phase
+                for left_target, hand_target in zip(
+                    motion.left[1:], motion.hand[1:], strict=True
+                ):
+                    robot.command_left(left_target)
+                    robot.hand.command(hand_target)
                     step_and_record(phase, index)
                 phase = GuardedChopPhase.GUARD_SETTLE
                 wait_for_guard_stability(
@@ -1251,8 +1232,8 @@ def _observe_sample(
     trace=None,
 ) -> GuardedChopSample:
     blade = robot.sim.require_geom("right_knife_blade")
-    knuckle = robot.sim.require_site("left_guard_knuckle_site")
-    guard_position = robot.sim.data.site_xpos[knuckle].copy()
+    finger_pad = robot.sim.require_geom("left_finger3_pad")
+    guard_position = robot.sim.data.geom_xpos[finger_pad].copy()
     distance = _blade_hand_distance(robot)
     observation = _safety_observation(
         robot,
