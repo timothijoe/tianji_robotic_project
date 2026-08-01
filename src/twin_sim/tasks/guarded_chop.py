@@ -597,6 +597,27 @@ def _guard_plan(
     return result.joints_rad, guard_targets, tuple(shifts)
 
 
+def _finger_pad_position(
+    robot: RightArmRobot,
+    hand_rad: Sequence[float],
+    left_rad: Sequence[float],
+) -> np.ndarray:
+    saved = mujoco.MjData(robot.sim.model)
+    mujoco.mj_copyData(saved, robot.sim.model, robot.sim.data)
+    try:
+        robot.sim.data.qpos[robot.sim.left.qpos_ids] = np.asarray(
+            left_rad, dtype=float
+        )
+        robot.sim.data.qpos[robot.sim.hand.qpos_ids] = np.asarray(
+            hand_rad, dtype=float
+        )
+        mujoco.mj_forward(robot.sim.model, robot.sim.data)
+        pad = robot.sim.require_geom("left_finger3_pad")
+        return robot.sim.data.geom_xpos[pad].copy()
+    finally:
+        mujoco.mj_copyData(robot.sim.data, robot.sim.model, saved)
+
+
 def _planned_clearances(
     robot: RightArmRobot,
     cuts: tuple[_CutTrajectories, ...],

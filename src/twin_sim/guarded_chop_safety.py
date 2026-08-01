@@ -17,6 +17,36 @@ CAT_PAW_OPEN_RAD = np.asarray(
 )
 
 
+GUARD_RELAXED_RAD = CAT_PAW_RAD.copy()
+GUARD_RETRACTED_RAD = np.asarray(
+    (
+        0.95,
+        -0.02,
+        0.95,
+        1.05,
+        0.3797769865,
+        0.0056731152,
+        1.2667563699,
+        1.2610415416,
+        0.4227338254,
+        0.0087278696,
+        1.3565482614,
+        1.3477562179,
+        0.3368201476,
+        0.0026183609,
+        1.1769644784,
+        1.1743268654,
+        0.3184100738,
+        0.0013091804,
+        1.1384822392,
+        1.1371634327,
+    ),
+    dtype=float,
+)
+GUARD_RELAXED_RAD.flags.writeable = False
+GUARD_RETRACTED_RAD.flags.writeable = False
+
+
 @dataclass(frozen=True)
 class SafetyObservation:
     phase: str
