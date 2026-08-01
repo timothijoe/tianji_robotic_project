@@ -43,3 +43,4 @@ data/
 # Simulation environment and runtime output
 *.csv
 logs/
+recordings/
