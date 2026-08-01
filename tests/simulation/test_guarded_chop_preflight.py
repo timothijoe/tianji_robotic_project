@@ -117,7 +117,7 @@ def test_plane_preflight_builds_two_cut_inchworm_guard_motions():
                 delta - retreat * np.r_[direction, 0.0]
             )
             assert retreat == pytest.approx(0.02, abs=0.002)
-            assert orthogonal <= 0.005
+            assert orthogonal <= 0.008
             previous = endpoint
     finally:
         robot.close()

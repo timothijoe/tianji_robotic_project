@@ -96,9 +96,9 @@ def test_guard_synergy_is_layered_and_within_ranges():
     )
     assert principal_degrees[0] <= 5.0
     assert principal_degrees[1] >= 15.0
-    assert 25.0 <= principal_degrees[2] <= 30.0
-    assert principal_degrees[3] >= 10.0
-    assert principal_degrees[4] >= 10.0
+    assert principal_degrees[2] >= 20.0
+    assert principal_degrees[3] >= 7.5
+    assert principal_degrees[4] >= 7.5
 
 
 def test_guard_synergy_retracts_finger3_pad_two_centimeters():

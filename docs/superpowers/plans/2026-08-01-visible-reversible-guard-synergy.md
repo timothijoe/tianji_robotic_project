@@ -119,7 +119,7 @@ delta_grids = (
 )
 ```
 
-Derive follower deltas from the complete selected finger3 delta at finger2 `0.65`, finger4 `0.40`, and finger5 `0.38`, then reject actuator-out-of-range candidates and candidates unless all of these hold:
+Derive follower deltas from the complete selected finger3 delta at finger2 `0.75`, finger4 `0.40`, and finger5 `0.38`, then reject actuator-out-of-range candidates and candidates unless all of these hold:
 
 ```python
 0.018 <= pad_retreat_m <= 0.022
