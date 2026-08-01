@@ -122,7 +122,7 @@ def test_guard_synergy_retracts_finger3_pad_two_centimeters():
         np.linalg.norm(delta - retreat * np.r_[direction, 0.0])
     )
     assert retreat == pytest.approx(0.020, abs=0.002)
-    assert orthogonal <= 0.005
+    assert orthogonal <= 0.008
 
 
 def test_guard_synergy_moves_visible_middle_links():

@@ -13,7 +13,7 @@
 - Visual salience in the normal full-scene Viewer is the primary acceptance criterion.
 - Retraction and relaxation must use the same 2.5-second trajectory in opposite directions.
 - `finger3` must lead; `finger2`, `finger4`, and `finger5` must follow in decreasing layers; the thumb remains tucked.
-- Planned finger3-pad retreat remains `0.020 ± 0.002 m` with orthogonal drift at or below `0.005 m`.
+- Planned finger3-pad retreat remains `0.020 ± 0.002 m` with user-approved orthogonal drift at or below `0.008 m`.
 - Actual four-step world advance remains monotonic and totals `0.080 ± 0.005 m`.
 - Never relax the 0.02 m knife-hand distance, zero blade-hand contact, speed interlocks, or actuator limits.
 - Do not change object mode, physical robot, ROS 2, or Wuji Hand SDK paths.
@@ -123,7 +123,7 @@ Derive follower deltas from the complete selected finger3 delta at finger2 `0.65
 
 ```python
 0.018 <= pad_retreat_m <= 0.022
-orthogonal_drift_m <= 0.005
+orthogonal_drift_m <= 0.008
 finger3_link3_displacement_m >= 0.012
 finger3_link4_displacement_m >= 0.018
 finger3_link3_axis_change_deg >= 20.0
@@ -145,7 +145,7 @@ Run:
 .venv/bin/python -m pytest tests/simulation/test_guarded_chop_posture.py -v
 ```
 
-Expected: all posture tests PASS, including visible link motion, layered followers, actuator ranges, 2 cm pad retreat, and at most 5 mm orthogonal drift.
+Expected: all posture tests PASS, including visible link motion, layered followers, actuator ranges, 2 cm pad retreat, and at most 8 mm orthogonal drift.
 
 - [ ] **Step 4: Run preflight and safety regressions**
 
