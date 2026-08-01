@@ -65,12 +65,40 @@ Python API 的最小示例位于 `examples/simulation_demo.py`。
 该脚本会自动定位仓库路径，并使用仓库内的 `.venv`。它只运行 MuJoCo 仿真，
 不会向实体机械臂、Wuji Hand 或 ROS 2 硬件接口发送命令。
 
+该入口只播放一遍 1× 在线仿真。若要先观看相同的 1× 在线执行，再在同一窗口
+自动观看一遍 2× 状态回放，运行：
+
+```bash
+./scripts/run_guarded_chop_record_replay.sh
+```
+
+第二遍只恢复第一遍记录的 MuJoCo `qpos`、`qvel`、`ctrl` 和时间戳并执行
+`mj_forward`，不会重新运行位置控制器、接触求解或安全决策。Viewer 状态栏会显示
+`replay 2.0x`，用于区分在线执行与状态回放。
+
+录制默认只保存在内存。需要保存时可以使用：
+
+```bash
+# 保存到 recordings/guarded_chop_latest.npz；重复运行时原子覆盖
+./scripts/run_guarded_chop_record_replay.sh --record
+
+# 指定不同名称时保留为独立文件
+./scripts/run_guarded_chop_record_replay.sh \
+  --record recordings/demo_01.npz
+```
+
+NPZ 保存仿真时间、完整 `qpos/qvel/ctrl`、动作阶段、刀次和 marker 数据。同一路径
+不会生成冗余副本；模型状态维度与当前 MuJoCo 模型不一致的录制会被拒绝加载。
+`recordings/` 已加入 `.gitignore`，不会被误提交。
+
 其他命令行模式：
 
 ```bash
 .venv/bin/twin-sim guarded-chop
 .venv/bin/twin-sim guarded-chop --headless --final-hold 0
 .venv/bin/twin-sim guarded-chop --scene object
+.venv/bin/twin-sim guarded-chop --replay-rate 2.0
+.venv/bin/twin-sim guarded-chop --replay-rate 2.0 --record
 ```
 
 默认 `plane` 场景在砧板平面上从屏幕右侧向左侧完成 5 刀。每次右刀下切并稳定

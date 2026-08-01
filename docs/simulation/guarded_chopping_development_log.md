@@ -149,3 +149,29 @@ Wuji Hand SDK。
 继续使用位置保持，但不依赖接触力闭环；
 刀手保持几何间隙，不模拟第二指节贴刀面；阶段 C 的实时误差恢复和导纳控制
 尚未实现；所有命令仅用于 MuJoCo。
+
+## 2026-08-01：1× 在线录制与 2× 状态回放
+
+在不改变 MuJoCo 控制时间和安全逻辑的前提下，新增了类似简化版 rosbag 的状态录制
+与回放路径。`./scripts/run_guarded_chop.sh` 继续只显示一遍 1× 在线仿真；新增的
+`./scripts/run_guarded_chop_record_replay.sh` 先执行并观看同一遍 1× 在线仿真，再在
+同一 Viewer 中按记录时间戳以 2× 回放。回放状态栏带有 `replay 2.0x` 标识。
+
+录制帧包含 MuJoCo `time`、`qpos`、`qvel`、`ctrl`，以及 phase、cut index、刀刃点、
+护手点、累计最小距离和下切许可。数组在捕获时复制并冻结，避免 MuJoCo 后续原地更新
+污染旧帧。2× 回放逐帧恢复状态并调用 `mj_forward`，不调用 `mj_step`，也不重新执行
+关节位置控制器、安全协调器或接触求解，因此不会产生第二套仿真结果。
+
+`--record` 是可选项。裸参数保存到 `recordings/guarded_chop_latest.npz`；同一路径通过
+临时文件加 `os.replace` 原子覆盖，避免重复文件和半写入文件。显式指定其他文件名时
+才保留多个版本。NPZ 使用 schema version 1，并在加载时校验当前模型的 `nq/nv/nu`。
+
+验证覆盖了不可变帧、NPZ 往返、维度拒绝、纯状态回放、marker 重建、CLI、两个 shell
+入口及完整仿真回归。最终结果为 `202 passed`，仅保留一条既有的 39.611 N 接触力
+观测告警。默认录制连续执行两次后仍只有一个 latest 文件；显式命名后两个文件并存。
+实测记录各包含 3115 帧，末帧 phase 为 `complete`。组合 Viewer 和从 latest 文件直接
+进行的 2× 回放均成功，任务指标保持 5 刀、4 次倒手、0.080 m 总退让和 0.039 m
+最小刀手距离。
+
+本轮开发直接提交到 `develop_9_kinematic_branch`，没有额外的临时 feature 分支需要
+合并。关键提交从 `bd3e314`（状态录制）到 `cffa447`（验证记录）。
