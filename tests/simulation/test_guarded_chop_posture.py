@@ -58,6 +58,24 @@ def test_guard_synergy_is_layered_and_within_ranges():
     )
     assert changes[2] > changes[1] > changes[3] >= changes[4]
     assert changes[0] <= 0.25
+    principal_degrees = np.asarray(
+        [
+            np.max(
+                np.abs(
+                    GUARD_RETRACTED_RAD[start : start + 4]
+                    - GUARD_RELAXED_RAD[start : start + 4]
+                )
+            )
+            * 180.0
+            / np.pi
+            for start in range(0, 20, 4)
+        ]
+    )
+    assert principal_degrees[0] <= 5.0
+    assert principal_degrees[1] >= 15.0
+    assert 25.0 <= principal_degrees[2] <= 30.0
+    assert principal_degrees[3] >= 10.0
+    assert principal_degrees[4] >= 10.0
 
 
 def test_guard_synergy_retracts_finger3_pad_two_centimeters():
