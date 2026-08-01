@@ -692,6 +692,7 @@ def run_guarded_chop(
     phase = GuardedChopPhase.INITIALIZE
     completed_cuts = 0
     completed_shifts = 0
+    viewer_starting = False
     try:
         plan = _preflight_guarded_chop(robot, config)
         _configure_guarded_scene(robot, config.scene_mode)
@@ -707,6 +708,7 @@ def run_guarded_chop(
         mujoco.mj_forward(robot.sim.model, robot.sim.data)
 
         if viewer:
+            viewer_starting = True
             robot.open_viewer()
             _prepare_guarded_chop_viewer(robot)
             if trace is None:
@@ -715,6 +717,7 @@ def run_guarded_chop(
                 )
 
                 trace = GuardedChopTrace(robot._viewer)
+            viewer_starting = False
         if trace is not None:
             blade_contact_heights = np.asarray(
                 [
@@ -980,6 +983,8 @@ def run_guarded_chop(
             minimum_distance_m=minimum,
         )
     except (AssertionError, PathIkError, RuntimeError, ValueError) as error:
+        if viewer_starting:
+            raise
         if trace is not None and hasattr(trace, "set_abort"):
             trace.set_abort(str(error))
         minimum = min(
