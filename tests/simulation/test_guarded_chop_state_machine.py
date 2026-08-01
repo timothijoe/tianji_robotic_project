@@ -65,6 +65,8 @@ def test_phase_order_contains_interlocked_actions():
         "low_guard_shift",
         "low_guard_close",
         "guard_settle",
+        "finger_retract",
+        "arm_reset_relax",
         "knife_lift_shift",
         "knife_clear",
         "complete",

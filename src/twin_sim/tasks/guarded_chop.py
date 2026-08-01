@@ -10,6 +10,8 @@ from twin_sim import guarded_chop_recording
 from twin_sim.guarded_chop_safety import (
     CAT_PAW_OPEN_RAD,
     CAT_PAW_RAD,
+    GUARD_RELAXED_RAD,
+    GUARD_RETRACTED_RAD,
     SafetyCoordinator,
     SafetyObservation,
 )
@@ -54,6 +56,8 @@ class GuardedChopPhase(str, Enum):
     LOW_GUARD_SHIFT = "low_guard_shift"
     LOW_GUARD_CLOSE = "low_guard_close"
     GUARD_SETTLE = "guard_settle"
+    FINGER_RETRACT = "finger_retract"
+    ARM_RESET_RELAX = "arm_reset_relax"
     KNIFE_LIFT_SHIFT = "knife_lift_shift"
     KNIFE_CLEAR = "knife_clear"
     COMPLETE = "complete"
@@ -185,8 +189,16 @@ class _GuardedChopPlan:
     cut_points_xy: np.ndarray
     guard_shifts: tuple[tuple[TrajectoryPoint, ...], ...]
     guard_targets: np.ndarray
+    plane_guard_motions: tuple["_PlaneGuardMotion", ...]
     minimum_planned_distances_m: np.ndarray
     safe_knife_height_m: float
+
+
+@dataclass(frozen=True)
+class _PlaneGuardMotion:
+    phase: GuardedChopPhase
+    left: tuple[np.ndarray, ...]
+    hand: tuple[np.ndarray, ...]
 
 
 def _point_to_box_distance(
@@ -312,12 +324,23 @@ def _preflight_guarded_chop(
             guard_offset_direction=line.cut_points_xy[1]
             - line.cut_points_xy[0],
         )
+        plane_guard_motions = (
+            _plane_guard_motions(
+                robot,
+                left_ready,
+                guard_targets,
+                config,
+            )
+            if config.scene_mode == "plane"
+            else ()
+        )
         distances = _planned_clearances(
             robot,
             cuts,
             knife_lift_shifts,
             guard_targets,
             guard_shifts,
+            plane_guard_motions,
             left_ready,
             config,
         )
@@ -339,6 +362,7 @@ def _preflight_guarded_chop(
             cut_points_xy=cut_points_xy,
             guard_shifts=guard_shifts,
             guard_targets=guard_targets,
+            plane_guard_motions=plane_guard_motions,
             minimum_planned_distances_m=distances,
             safe_knife_height_m=safe_height,
         )
@@ -618,12 +642,68 @@ def _finger_pad_position(
         mujoco.mj_copyData(robot.sim.data, robot.sim.model, saved)
 
 
+def _minimum_jerk_joint_trajectory(
+    start_rad: Sequence[float],
+    goal_rad: Sequence[float],
+    duration_s: float,
+    dt_s: float,
+) -> tuple[np.ndarray, ...]:
+    steps = int(round(duration_s / dt_s))
+    if steps < 1:
+        raise ValueError("trajectory duration must include at least one step")
+    progress = np.linspace(0.0, 1.0, steps + 1)
+    blend, _ = minimum_jerk(progress)
+    start = np.asarray(start_rad, dtype=float)
+    goal = np.asarray(goal_rad, dtype=float)
+    return tuple(start + value * (goal - start) for value in blend)
+
+
+def _plane_guard_motions(
+    robot: RightArmRobot,
+    left_ready_rad: np.ndarray,
+    guard_targets: np.ndarray,
+    config: GuardedChopConfig,
+) -> tuple[_PlaneGuardMotion, ...]:
+    hand_retract = _minimum_jerk_joint_trajectory(
+        GUARD_RELAXED_RAD,
+        GUARD_RETRACTED_RAD,
+        config.hand_shift_duration_s,
+        config.control_dt_s,
+    )
+    hand_relax = tuple(reversed(hand_retract))
+    left = np.asarray(left_ready_rad, dtype=float).copy()
+    motions = []
+    for logical_shift in range(4):
+        if logical_shift % 2 == 0:
+            left_path = tuple(left.copy() for _ in hand_retract)
+            hand_path = hand_retract
+            phase = GuardedChopPhase.FINGER_RETRACT
+        else:
+            start_target = guard_targets[logical_shift - 1]
+            goal_target = guard_targets[logical_shift + 1]
+            arm_points = cartesian_trajectory(
+                robot.left_kinematics,
+                start_target,
+                goal_target,
+                left,
+                config.hand_shift_duration_s,
+                config.control_dt_s,
+            )
+            left_path = tuple(point.joints_rad.copy() for point in arm_points)
+            hand_path = hand_relax
+            left = left_path[-1].copy()
+            phase = GuardedChopPhase.ARM_RESET_RELAX
+        motions.append(_PlaneGuardMotion(phase, left_path, hand_path))
+    return tuple(motions)
+
+
 def _planned_clearances(
     robot: RightArmRobot,
     cuts: tuple[_CutTrajectories, ...],
     knife_lift_shifts: tuple[tuple[TrajectoryPoint, ...], ...],
     guard_targets: np.ndarray,
     guard_shifts: tuple[tuple[TrajectoryPoint, ...], ...],
+    plane_guard_motions: tuple[_PlaneGuardMotion, ...],
     left_ready_rad: np.ndarray,
     config: GuardedChopConfig,
 ) -> np.ndarray:
@@ -642,9 +722,14 @@ def _planned_clearances(
         return distance
 
     left = left_ready_rad
+    hand = (
+        GUARD_RELAXED_RAD
+        if config.scene_mode == "plane"
+        else CAT_PAW_RAD
+    )
     for index, cut in enumerate(cuts):
         for point in cut.descent:
-            measure(point.joints_rad, left)
+            measure(point.joints_rad, left, hand)
         if config.scene_mode == "object":
             for point in (*cut.retract, *cut.shift):
                 measure(point.joints_rad, left)
@@ -654,46 +739,27 @@ def _planned_clearances(
                     measure(right, point.joints_rad)
                 left = guard_shifts[index][-1].joints_rad
             continue
-        if index >= len(guard_shifts):
+        if index >= len(plane_guard_motions):
             for point in cut.retract:
-                measure(point.joints_rad, left)
+                measure(point.joints_rad, left, hand)
             continue
 
         contact_right = cut.descent[-1].joints_rad
-        opening = _joint_trajectory(
-            CAT_PAW_RAD,
-            CAT_PAW_OPEN_RAD,
-            config.hand_open_duration_s,
-            config.control_dt_s,
-        )
-        for hand in opening:
-            measure(contact_right, left, hand)
-
-        retreat_distances = [
-            measure(contact_right, left, CAT_PAW_OPEN_RAD)
-        ]
-        for point in guard_shifts[index]:
+        motion = plane_guard_motions[index]
+        retreat_distances = []
+        for left_target, hand_target in zip(
+            motion.left, motion.hand, strict=True
+        ):
             retreat_distances.append(
-                measure(
-                    contact_right, point.joints_rad, CAT_PAW_OPEN_RAD
-                )
+                measure(contact_right, left_target, hand_target)
             )
-        left = guard_shifts[index][-1].joints_rad
-        retreat_distances.append(
-            measure(contact_right, left, CAT_PAW_OPEN_RAD)
+        left = motion.left[-1]
+        hand = motion.hand[-1]
+        _validate_nonapproaching_retreat(
+            retreat_distances, tolerance_m=2e-6
         )
-        _validate_nonapproaching_retreat(retreat_distances)
-
-        closing = _joint_trajectory(
-            CAT_PAW_OPEN_RAD,
-            CAT_PAW_RAD,
-            config.hand_close_duration_s,
-            config.control_dt_s,
-        )
-        for hand in closing:
-            measure(contact_right, left, hand)
         for point in knife_lift_shifts[index]:
-            measure(point.joints_rad, left)
+            measure(point.joints_rad, left, hand)
     return np.asarray(distances)
 
 

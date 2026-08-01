@@ -4,6 +4,8 @@ import pytest
 from twin_sim.robot import RightArmRobot
 from twin_sim.tasks.guarded_chop import (
     GuardedChopConfig,
+    GuardedChopPhase,
+    _finger_pad_position,
     _default_view_screen_x,
     _point_to_box_distance,
     _preflight_guarded_chop,
@@ -54,6 +56,61 @@ def test_preflight_builds_five_cuts_and_four_guard_shifts():
     ):
         np.testing.assert_array_equal(actual, expected)
     robot.close()
+
+
+def test_plane_preflight_builds_two_cut_inchworm_guard_motions():
+    robot = RightArmRobot(viewer=False)
+    try:
+        plan = _preflight_guarded_chop(robot, GuardedChopConfig())
+        motions = plan.plane_guard_motions
+        direction = plan.cut_points_xy[1] - plan.cut_points_xy[0]
+        direction /= np.linalg.norm(direction)
+
+        assert [motion.phase for motion in motions] == [
+            GuardedChopPhase.FINGER_RETRACT,
+            GuardedChopPhase.ARM_RESET_RELAX,
+            GuardedChopPhase.FINGER_RETRACT,
+            GuardedChopPhase.ARM_RESET_RELAX,
+        ]
+        previous = _finger_pad_position(
+            robot, motions[0].hand[0], motions[0].left[0]
+        )
+        for index, motion in enumerate(motions):
+            assert len(motion.left) == len(motion.hand)
+            if index % 2 == 0:
+                for target in motion.left:
+                    np.testing.assert_array_equal(target, motion.left[0])
+            else:
+                start = robot.left_kinematics.fk(motion.left[0])[:3, 3]
+                end = robot.left_kinematics.fk(motion.left[-1])[:3, 3]
+                assert np.linalg.norm(end - start) == pytest.approx(
+                    0.04, abs=0.002
+                )
+            sampled_positions = [
+                _finger_pad_position(robot, motion.hand[sample], motion.left[sample])
+                for sample in range(0, len(motion.hand), 20)
+            ]
+            if (len(motion.hand) - 1) % 20:
+                sampled_positions.append(
+                    _finger_pad_position(
+                        robot, motion.hand[-1], motion.left[-1]
+                    )
+                )
+            projected = np.asarray(sampled_positions)[:, :2] @ direction
+            assert np.all(np.diff(projected) >= -1e-6)
+            endpoint = _finger_pad_position(
+                robot, motion.hand[-1], motion.left[-1]
+            )
+            delta = endpoint - previous
+            retreat = float(delta[:2] @ direction)
+            orthogonal = np.linalg.norm(
+                delta - retreat * np.r_[direction, 0.0]
+            )
+            assert retreat == pytest.approx(0.02, abs=0.002)
+            assert orthogonal <= 0.005
+            previous = endpoint
+    finally:
+        robot.close()
 
 
 def test_preflight_builds_four_diagonal_lift_shift_paths():

@@ -64,6 +64,8 @@ def test_knife_clear_rejects_guard_motion_below_safe_height():
         "LOW_GUARD_SHIFT",
         "LOW_GUARD_CLOSE",
         "GUARD_SETTLE",
+        "FINGER_RETRACT",
+        "ARM_RESET_RELAX",
     ),
 )
 def test_low_guard_motion_requires_stationary_knife(phase):
