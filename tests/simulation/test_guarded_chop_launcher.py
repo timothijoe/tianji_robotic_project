@@ -30,6 +30,15 @@ def test_ubuntu24_wuji_setup_is_hardware_free_and_validates_siblings():
     assert "sudo" not in script
 
 
+def test_jazzy_build_script_limits_colcon_scope_to_message_and_sim_packages():
+    script = _read_script("build_ros2_jazzy_wuji_sim.sh")
+
+    assert "source /opt/ros/jazzy/setup.bash" in script
+    assert "--packages-select wujihand_msgs twin_wuji_sim" in script
+    assert "wujihand_driver" not in script
+    assert "wujihand_bringup" not in script
+
+
 def test_launcher_resolves_repo_and_forwards_plane_command(tmp_path):
     fake_repo = tmp_path / "repo"
     script = fake_repo / "scripts" / SCRIPT.name
