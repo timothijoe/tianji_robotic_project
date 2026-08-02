@@ -44,6 +44,23 @@ def test_trajectory_requires_strictly_increasing_timestamps():
         HandTrajectory(np.array([10, 10]), np.zeros((2, 20)), HAND_JOINT_NAMES, {})
 
 
+def test_trajectory_rejects_negative_timestamps():
+    with pytest.raises(ValueError, match="non-negative"):
+        HandTrajectory(np.array([-1, 10]), np.zeros((2, 20)), HAND_JOINT_NAMES, {})
+
+
+def test_trajectory_accepts_zero_to_int64_max_timestamps_without_overflow():
+    limits = np.iinfo(np.int64)
+    trajectory = HandTrajectory(
+        np.array([0, limits.max], dtype=np.int64),
+        np.zeros((2, 20)),
+        HAND_JOINT_NAMES,
+        {},
+    )
+
+    np.testing.assert_array_equal(trajectory.timestamps_ns, [0, limits.max])
+
+
 def test_trajectory_copies_arrays_and_metadata():
     timestamps = np.array([10, 20], dtype=np.int64)
     positions = np.zeros((2, 20), dtype=np.float64)
@@ -90,6 +107,36 @@ def test_trajectory_recursively_freezes_metadata_without_nested_aliases():
         trajectory.metadata["new"] = "value"  # type: ignore[index]
     with pytest.raises(TypeError):
         trajectory.metadata["nested"]["new"] = "value"  # type: ignore[index]
+
+
+def test_trajectory_metadata_copies_binary_values_and_normalizes_numpy_scalars():
+    binary = bytearray(b"safe")
+    view = memoryview(b"view")
+    trajectory = HandTrajectory(
+        np.array([10]),
+        np.zeros((1, 20)),
+        HAND_JOINT_NAMES,
+        {"binary": binary, "view": view, "scalar": np.int64(2)},
+    )
+
+    binary[0] = ord("u")
+
+    assert trajectory.metadata == {"binary": b"safe", "view": b"view", "scalar": 2}
+    assert type(trajectory.metadata["scalar"]) is int
+    with pytest.raises(TypeError):
+        trajectory.metadata["binary"] = b"changed"  # type: ignore[index]
+
+
+class MutableMetadataValue:
+    pass
+
+
+@pytest.mark.parametrize("value", [np.array([1]), MutableMetadataValue()])
+def test_trajectory_rejects_unsafe_metadata_values(value):
+    with pytest.raises(ValueError, match="metadata"):
+        HandTrajectory(
+            np.array([10]), np.zeros((1, 20)), HAND_JOINT_NAMES, {"unsafe": value}
+        )
 
 
 @pytest.mark.parametrize("timestamp", [True, 1.0, "1", -1])

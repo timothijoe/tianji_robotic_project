@@ -27,6 +27,14 @@ def _is_real_numeric_dtype(dtype: np.dtype[np.generic]) -> bool:
 
 
 def _freeze_metadata(value: object) -> object:
+    if isinstance(value, np.ndarray):
+        raise ValueError("metadata must not contain ndarrays")
+    if isinstance(value, np.generic):
+        return _freeze_metadata(value.item())
+    if value is None or isinstance(value, (bool, int, float, str, bytes)):
+        return value
+    if isinstance(value, (bytearray, memoryview)):
+        return bytes(value)
     if isinstance(value, Mapping):
         frozen: dict[str, object] = {}
         for key, nested_value in value.items():
@@ -38,7 +46,7 @@ def _freeze_metadata(value: object) -> object:
         return tuple(_freeze_metadata(item) for item in value)
     if isinstance(value, (set, frozenset)):
         return frozenset(_freeze_metadata(item) for item in value)
-    return value
+    raise ValueError(f"metadata contains unsupported value type: {type(value).__name__}")
 
 
 @dataclass(frozen=True)
@@ -84,13 +92,15 @@ class HandTrajectory:
             raise ValueError("timestamps_ns must be a non-empty one-dimensional array")
         if not np.issubdtype(timestamps.dtype, np.integer):
             raise ValueError("timestamps_ns must contain real integers")
+        if np.any(timestamps < 0):
+            raise ValueError("timestamps_ns must be non-negative")
         if positions.shape != (timestamps.size, 20):
             raise ValueError("positions_rad must have shape (N, 20)")
         if not _is_real_numeric_dtype(positions.dtype):
             raise ValueError("positions_rad must contain real numbers")
         if not np.isfinite(positions).all():
             raise ValueError("positions_rad must be finite")
-        if not np.all(np.diff(timestamps) > 0):
+        if not np.all(timestamps[1:] > timestamps[:-1]):
             raise ValueError("timestamps_ns must be strictly increasing")
         if joint_names != HAND_JOINT_NAMES or len(set(joint_names)) != 20:
             raise ValueError("joint_names must be the 20 unique canonical joint names")
