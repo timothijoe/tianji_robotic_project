@@ -2,7 +2,8 @@
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Literal, Mapping
+from collections.abc import Mapping
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -11,9 +12,33 @@ from .names import HAND_JOINT_NAMES
 
 
 def _copied_readonly_array(value: object) -> NDArray[np.generic]:
-    result = np.array(value, copy=True)
-    result.setflags(write=False)
-    return result
+    """Copy into an ndarray backed by immutable bytes.
+
+    A normal non-writeable ndarray can be made writeable again by callers when it
+    owns its memory. A bytes-backed array cannot, which preserves value-object
+    immutability while retaining the public ndarray API.
+    """
+    normalized = np.array(value, copy=True)
+    return np.frombuffer(normalized.tobytes(), dtype=normalized.dtype).reshape(normalized.shape)
+
+
+def _is_real_numeric_dtype(dtype: np.dtype[np.generic]) -> bool:
+    return np.issubdtype(dtype, np.number) and not np.issubdtype(dtype, np.complexfloating)
+
+
+def _freeze_metadata(value: object) -> object:
+    if isinstance(value, Mapping):
+        frozen: dict[str, object] = {}
+        for key, nested_value in value.items():
+            if not isinstance(key, str):
+                raise ValueError("metadata keys must be strings")
+            frozen[key] = _freeze_metadata(nested_value)
+        return MappingProxyType(frozen)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_metadata(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze_metadata(item) for item in value)
+    return value
 
 
 @dataclass(frozen=True)
@@ -24,6 +49,12 @@ class SkeletonFrame:
     keypoints_m: NDArray[np.floating]
 
     def __post_init__(self) -> None:
+        if (
+            isinstance(self.timestamp_ns, bool)
+            or not isinstance(self.timestamp_ns, (int, np.integer))
+            or self.timestamp_ns < 0
+        ):
+            raise ValueError("timestamp_ns must be a non-negative integer")
         if not self.frame_id:
             raise ValueError("frame_id must be non-empty")
         if self.side not in ("left", "right"):
@@ -31,7 +62,9 @@ class SkeletonFrame:
         keypoints = _copied_readonly_array(self.keypoints_m)
         if keypoints.shape != (21, 3):
             raise ValueError("keypoints_m must have shape (21, 3)")
-        if not np.issubdtype(keypoints.dtype, np.number) or not np.isfinite(keypoints).all():
+        if not _is_real_numeric_dtype(keypoints.dtype):
+            raise ValueError("keypoints_m must contain real numbers")
+        if not np.isfinite(keypoints).all():
             raise ValueError("keypoints_m must be finite")
         object.__setattr__(self, "keypoints_m", keypoints)
 
@@ -50,10 +83,12 @@ class HandTrajectory:
         if timestamps.ndim != 1 or timestamps.size == 0:
             raise ValueError("timestamps_ns must be a non-empty one-dimensional array")
         if not np.issubdtype(timestamps.dtype, np.integer):
-            raise ValueError("timestamps_ns must contain integers")
+            raise ValueError("timestamps_ns must contain real integers")
         if positions.shape != (timestamps.size, 20):
             raise ValueError("positions_rad must have shape (N, 20)")
-        if not np.issubdtype(positions.dtype, np.number) or not np.isfinite(positions).all():
+        if not _is_real_numeric_dtype(positions.dtype):
+            raise ValueError("positions_rad must contain real numbers")
+        if not np.isfinite(positions).all():
             raise ValueError("positions_rad must be finite")
         if not np.all(np.diff(timestamps) > 0):
             raise ValueError("timestamps_ns must be strictly increasing")
@@ -62,4 +97,7 @@ class HandTrajectory:
         object.__setattr__(self, "timestamps_ns", timestamps)
         object.__setattr__(self, "positions_rad", positions)
         object.__setattr__(self, "joint_names", joint_names)
-        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        frozen_metadata = _freeze_metadata(self.metadata)
+        if not isinstance(frozen_metadata, Mapping):
+            raise ValueError("metadata must be a mapping")
+        object.__setattr__(self, "metadata", frozen_metadata)

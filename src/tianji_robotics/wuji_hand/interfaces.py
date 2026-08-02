@@ -4,7 +4,6 @@ from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
 
 import numpy as np
-from numpy.typing import NDArray
 
 from .models import SkeletonFrame
 
@@ -16,14 +15,14 @@ class SkeletonSource(Protocol):
 
 @runtime_checkable
 class Retargeter(Protocol):
-    def step(self, keypoints_m: NDArray[np.floating]) -> NDArray[np.floating]: ...
+    def step(self, keypoints_m: np.ndarray) -> np.ndarray: ...
 
 
 @runtime_checkable
 class WujiHandBackend(Protocol):
-    def read_position_rad(self) -> NDArray[np.floating]: ...
+    def read_position_rad(self) -> np.ndarray: ...
 
-    def command_position_rad(self, target: NDArray[np.floating]) -> None: ...
+    def command_position_rad(self, target: np.ndarray) -> None: ...
 
     def step(self, duration_s: float) -> None: ...
 
