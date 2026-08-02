@@ -25,8 +25,14 @@ Expected output is:
 3.10.0 2.5.1
 ```
 
-运行当前仿真测试。若环境预设了 ROS 的 `PYTHONPATH`，请取消该变量并禁用 pytest
-的第三方插件自动加载；否则 ROS 插件可能从核心仿真测试中被意外加载：
+运行当前仿真测试：
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+在干净 shell 中应使用上面的常规命令。若终端预设了 ROS 的 `PYTHONPATH`，并因此
+触发无关 pytest 插件自动加载（例如缺少 PyYAML 的 ROS 插件），请改用隔离命令：
 
 ```bash
 env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
@@ -56,8 +62,8 @@ Run this command from the repository root; every manifest entry must report
 
 The bridge build is deliberately message-only: it builds `wujihand_msgs` and
 `twin_wuji_sim`, but does not build or launch a USB hardware driver. The smoke
-test is import-only/headless and must not be used to discover, enable, or
-write to a physical hand.
+test is headless, simulation-only end-to-end control: it launches no hardware
+driver and sends no USB or hardware commands.
 
 ```bash
 ./scripts/build_ros2_jazzy_wuji_sim.sh

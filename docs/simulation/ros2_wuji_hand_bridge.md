@@ -153,7 +153,7 @@ finally:
 ## 7. 自动验证
 
 ```bash
-env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -q
 
 ./scripts/build_ros2_jazzy_wuji_sim.sh
 source /opt/ros/jazzy/setup.bash
@@ -162,9 +162,16 @@ export PYTHONPATH="$PWD/src:${PYTHONPATH:-}"
 .venv-ros2/bin/python tests/ros2/ros2_bridge_smoke.py
 ```
 
-核心测试必须隔离预设的 ROS `PYTHONPATH` 和第三方 pytest 自动加载；否则可能加载
-不属于核心 suite 的 ROS 插件。ROS smoke 是 import-only/headless 验证，不搜索、
-使能或写入实体硬件；成功时输出 `ROS2_WUJI_SIM_SMOKE_OK`。
+在干净 shell 中使用上面的常规核心测试命令。若终端预设了 ROS 的 `PYTHONPATH`，并
+因此触发无关 pytest 插件自动加载（例如缺少 PyYAML 的 ROS 插件），请改用：
+
+```bash
+env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
+```
+
+ROS smoke 是 headless、simulation-only 的端到端控制验证；它不启动硬件驱动，也不
+发送 USB 或硬件命令，成功时输出 `ROS2_WUJI_SIM_SMOKE_OK`。SDK 验证则单独是
+`wujihandpy` 的 import/version-only 检查。
 
 ## 8. 明天接实体手的安全顺序
 
