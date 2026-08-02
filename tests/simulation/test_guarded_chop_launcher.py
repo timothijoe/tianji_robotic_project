@@ -16,6 +16,20 @@ REPLAY_ONLY_SCRIPT = (
 )
 
 
+def _read_script(name):
+    return (Path(__file__).parents[2] / "scripts" / name).read_text()
+
+
+def test_ubuntu24_wuji_setup_is_hardware_free_and_validates_siblings():
+    script = _read_script("setup_ubuntu24_wuji_env.sh")
+
+    assert "wujihandros2/wujihand_msgs/package.xml" in script
+    assert "wujihandpy/pyproject.toml" in script
+    assert 'pip install -e "${WUJI_HAND_PY}"' in script
+    assert "wujihandpy.Hand" not in script
+    assert "sudo" not in script
+
+
 def test_launcher_resolves_repo_and_forwards_plane_command(tmp_path):
     fake_repo = tmp_path / "repo"
     script = fake_repo / "scripts" / SCRIPT.name
