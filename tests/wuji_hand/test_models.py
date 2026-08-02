@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import warnings
 
 from tianji_robotics.wuji_hand.models import HandTrajectory, SkeletonFrame
 from tianji_robotics.wuji_hand.names import HAND_JOINT_NAMES
@@ -30,6 +31,25 @@ def test_models_normalize_real_coordinate_arrays_to_float64_and_timestamps_to_in
     assert frame.keypoints_m.dtype == np.float64
     assert trajectory.positions_rad.dtype == np.float64
     assert trajectory.timestamps_ns.dtype == np.int64
+
+
+@pytest.mark.skipif(
+    np.finfo(np.longdouble).max <= np.finfo(np.float64).max,
+    reason="platform longdouble is not wider than float64",
+)
+def test_models_reject_longdouble_values_that_overflow_float64_without_warning():
+    overflowing = np.longdouble(np.finfo(np.float64).max) * 2
+    keypoints = np.zeros((21, 3), dtype=np.longdouble)
+    positions = np.zeros((1, 20), dtype=np.longdouble)
+    keypoints[0, 0] = overflowing
+    positions[0, 0] = overflowing
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        with pytest.raises(ValueError, match="finite"):
+            SkeletonFrame(1, "right_wrist", "right", keypoints)
+        with pytest.raises(ValueError, match="finite"):
+            HandTrajectory(np.array([10]), positions, HAND_JOINT_NAMES, {})
 
 
 def test_skeleton_frame_keypoints_cannot_be_made_writeable():

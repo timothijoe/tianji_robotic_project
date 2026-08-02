@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from collections.abc import Mapping
 from typing import Literal
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
@@ -20,7 +21,9 @@ def _copied_readonly_array(
     owns its memory. A bytes-backed array cannot, which preserves value-object
     immutability while retaining the public ndarray API.
     """
-    normalized = np.array(value, dtype=dtype, copy=True)
+    with np.errstate(over="ignore", invalid="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        normalized = np.array(value, dtype=dtype, copy=True)
     return np.frombuffer(normalized.tobytes(), dtype=normalized.dtype).reshape(normalized.shape)
 
 
@@ -87,6 +90,8 @@ class SkeletonFrame:
         if not np.isfinite(keypoints_source).all():
             raise ValueError("keypoints_m must be finite")
         keypoints = _copied_readonly_array(keypoints_source, dtype=np.float64)
+        if not np.isfinite(keypoints).all():
+            raise ValueError("keypoints_m must be finite after float64 normalization")
         object.__setattr__(self, "keypoints_m", keypoints)
 
 
@@ -120,6 +125,8 @@ class HandTrajectory:
             raise ValueError("positions_rad must be finite")
         timestamps = _copied_readonly_array(timestamps_source, dtype=np.int64)
         positions = _copied_readonly_array(positions_source, dtype=np.float64)
+        if not np.isfinite(positions).all():
+            raise ValueError("positions_rad must be finite after float64 normalization")
         if not np.all(timestamps[1:] > timestamps[:-1]):
             raise ValueError("timestamps_ns must be strictly increasing")
         if joint_names != HAND_JOINT_NAMES or len(set(joint_names)) != 20:
