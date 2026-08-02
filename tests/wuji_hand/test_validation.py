@@ -47,6 +47,16 @@ def test_validation_reports_excessive_frame_step():
         validate_trajectory(trajectory, ranges(), max_step_rad=0.2)
 
 
+def test_validation_rejects_large_int64_step_without_integer_overflow():
+    positions = np.zeros((2, 20), dtype=np.int64)
+    positions[0, 0] = np.iinfo(np.int64).min
+    trajectory = trajectory_with(positions)
+    wide_ranges = {name: (-1e20, 1e20) for name in HAND_JOINT_NAMES}
+
+    with pytest.raises(ValueError, match="frame 1.*max step"):
+        validate_trajectory(trajectory, wide_ranges, max_step_rad=0.2)
+
+
 def test_validation_requires_a_range_for_every_canonical_joint():
     with pytest.raises(ValueError, match="left_finger5_joint4"):
         validate_trajectory(

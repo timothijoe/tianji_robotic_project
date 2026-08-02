@@ -11,14 +11,16 @@ from numpy.typing import NDArray
 from .names import HAND_JOINT_NAMES
 
 
-def _copied_readonly_array(value: object) -> NDArray[np.generic]:
+def _copied_readonly_array(
+    value: object, *, dtype: np.dtype[np.generic] | type[np.generic] | None = None
+) -> NDArray[np.generic]:
     """Copy into an ndarray backed by immutable bytes.
 
     A normal non-writeable ndarray can be made writeable again by callers when it
     owns its memory. A bytes-backed array cannot, which preserves value-object
     immutability while retaining the public ndarray API.
     """
-    normalized = np.array(value, copy=True)
+    normalized = np.array(value, dtype=dtype, copy=True)
     return np.frombuffer(normalized.tobytes(), dtype=normalized.dtype).reshape(normalized.shape)
 
 
@@ -31,8 +33,18 @@ def _freeze_metadata(value: object) -> object:
         raise ValueError("metadata must not contain ndarrays")
     if isinstance(value, np.generic):
         return _freeze_metadata(value.item())
-    if value is None or isinstance(value, (bool, int, float, str, bytes)):
+    if value is None:
         return value
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, float):
+        return float(value)
+    if isinstance(value, str):
+        return str(value)
+    if isinstance(value, bytes):
+        return bytes(value)
     if isinstance(value, (bytearray, memoryview)):
         return bytes(value)
     if isinstance(value, Mapping):
@@ -67,13 +79,14 @@ class SkeletonFrame:
             raise ValueError("frame_id must be non-empty")
         if self.side not in ("left", "right"):
             raise ValueError("side must be 'left' or 'right'")
-        keypoints = _copied_readonly_array(self.keypoints_m)
-        if keypoints.shape != (21, 3):
+        keypoints_source = np.asarray(self.keypoints_m)
+        if keypoints_source.shape != (21, 3):
             raise ValueError("keypoints_m must have shape (21, 3)")
-        if not _is_real_numeric_dtype(keypoints.dtype):
+        if not _is_real_numeric_dtype(keypoints_source.dtype):
             raise ValueError("keypoints_m must contain real numbers")
-        if not np.isfinite(keypoints).all():
+        if not np.isfinite(keypoints_source).all():
             raise ValueError("keypoints_m must be finite")
+        keypoints = _copied_readonly_array(keypoints_source, dtype=np.float64)
         object.__setattr__(self, "keypoints_m", keypoints)
 
 
@@ -85,21 +98,28 @@ class HandTrajectory:
     metadata: Mapping[str, object]
 
     def __post_init__(self) -> None:
-        timestamps = _copied_readonly_array(self.timestamps_ns)
-        positions = _copied_readonly_array(self.positions_rad)
+        timestamps_source = np.asarray(self.timestamps_ns)
+        positions_source = np.asarray(self.positions_rad)
         joint_names = tuple(self.joint_names)
-        if timestamps.ndim != 1 or timestamps.size == 0:
+        if timestamps_source.ndim != 1 or timestamps_source.size == 0:
             raise ValueError("timestamps_ns must be a non-empty one-dimensional array")
-        if not np.issubdtype(timestamps.dtype, np.integer):
+        if not np.issubdtype(timestamps_source.dtype, np.integer):
             raise ValueError("timestamps_ns must contain real integers")
-        if np.any(timestamps < 0):
+        if np.any(timestamps_source < 0):
             raise ValueError("timestamps_ns must be non-negative")
-        if positions.shape != (timestamps.size, 20):
+        if (
+            np.issubdtype(timestamps_source.dtype, np.unsignedinteger)
+            and np.any(timestamps_source > np.iinfo(np.int64).max)
+        ):
+            raise ValueError("timestamps_ns must fit in int64")
+        if positions_source.shape != (timestamps_source.size, 20):
             raise ValueError("positions_rad must have shape (N, 20)")
-        if not _is_real_numeric_dtype(positions.dtype):
+        if not _is_real_numeric_dtype(positions_source.dtype):
             raise ValueError("positions_rad must contain real numbers")
-        if not np.isfinite(positions).all():
+        if not np.isfinite(positions_source).all():
             raise ValueError("positions_rad must be finite")
+        timestamps = _copied_readonly_array(timestamps_source, dtype=np.int64)
+        positions = _copied_readonly_array(positions_source, dtype=np.float64)
         if not np.all(timestamps[1:] > timestamps[:-1]):
             raise ValueError("timestamps_ns must be strictly increasing")
         if joint_names != HAND_JOINT_NAMES or len(set(joint_names)) != 20:

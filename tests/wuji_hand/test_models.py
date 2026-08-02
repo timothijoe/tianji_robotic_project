@@ -18,6 +18,20 @@ def test_skeleton_frame_copies_and_validates_keypoints():
     assert not np.shares_memory(frame.keypoints_m, keypoints)
 
 
+def test_models_normalize_real_coordinate_arrays_to_float64_and_timestamps_to_int64():
+    frame = SkeletonFrame(1, "right_wrist", "right", np.zeros((21, 3), dtype=np.int16))
+    trajectory = HandTrajectory(
+        np.array([10, 20], dtype=np.int32),
+        np.zeros((2, 20), dtype=np.int64),
+        HAND_JOINT_NAMES,
+        {},
+    )
+
+    assert frame.keypoints_m.dtype == np.float64
+    assert trajectory.positions_rad.dtype == np.float64
+    assert trajectory.timestamps_ns.dtype == np.int64
+
+
 def test_skeleton_frame_keypoints_cannot_be_made_writeable():
     frame = SkeletonFrame(1, "right_wrist", "right", np.zeros((21, 3)))
 
@@ -137,6 +151,23 @@ def test_trajectory_rejects_unsafe_metadata_values(value):
         HandTrajectory(
             np.array([10]), np.zeros((1, 20)), HAND_JOINT_NAMES, {"unsafe": value}
         )
+
+
+class IntMetadataSubclass(int):
+    pass
+
+
+def test_trajectory_normalizes_primitive_metadata_subclasses_to_builtin_values():
+    value = IntMetadataSubclass(2)
+    value.mutable_attribute = []
+    trajectory = HandTrajectory(
+        np.array([10]), np.zeros((1, 20)), HAND_JOINT_NAMES, {"value": value}
+    )
+
+    value.mutable_attribute.append("changed")
+
+    assert trajectory.metadata["value"] == 2
+    assert type(trajectory.metadata["value"]) is int
 
 
 @pytest.mark.parametrize("timestamp", [True, 1.0, "1", -1])
