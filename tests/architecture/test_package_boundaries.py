@@ -17,11 +17,29 @@ def imported_roots(directory: Path) -> set[str]:
             for alias in node.names
         )
         modules.update(
-            node.module or ""
+            module
             for node in ast.walk(tree)
             if isinstance(node, ast.ImportFrom)
+            for module in imported_from_modules(path, node)
         )
     return modules
+
+
+def imported_from_modules(path: Path, node: ast.ImportFrom) -> set[str]:
+    if node.level:
+        source_root = next(parent for parent in path.parents if parent.name == "src")
+        package = list(path.relative_to(source_root).parent.parts)
+        package = package[: len(package) - (node.level - 1)]
+        if node.module:
+            package.extend(node.module.split("."))
+    else:
+        package = (node.module or "").split(".") if node.module else []
+
+    return {
+        ".".join([*package, alias.name])
+        for alias in node.names
+        if alias.name != "*"
+    }
 
 
 def forbidden_imports(modules: set[str], forbidden: set[str]) -> set[str]:
@@ -42,11 +60,24 @@ def test_imported_roots_preserves_full_sdk_module_paths(tmp_path: Path):
 
     assert imported_roots(tmp_path) == {
         "wuji_sdk.client",
-        "tianji_robotics.wuji_sdk",
+        "tianji_robotics.wuji_sdk.transport",
     }
     assert forbidden_imports(
         imported_roots(tmp_path), {"wuji_sdk", "tianji_robotics.wuji_sdk"}
-    ) == {"wuji_sdk.client", "tianji_robotics.wuji_sdk"}
+    ) == {"wuji_sdk.client", "tianji_robotics.wuji_sdk.transport"}
+
+
+def test_imported_roots_detects_sdk_from_absolute_and_relative_imports(tmp_path: Path):
+    (tmp_path / "absolute.py").write_text(
+        "from tianji_robotics import wuji_sdk\n", encoding="utf-8"
+    )
+    relative_source = tmp_path / "src/tianji_robotics/simulation/example.py"
+    relative_source.parent.mkdir(parents=True)
+    relative_source.write_text("from .. import wuji_sdk\n", encoding="utf-8")
+
+    assert forbidden_imports(
+        imported_roots(tmp_path), {"tianji_robotics.wuji_sdk"}
+    ) == {"tianji_robotics.wuji_sdk"}
 
 
 def test_new_package_is_importable():
