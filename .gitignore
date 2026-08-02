@@ -30,6 +30,7 @@ venv/
 .venv/
 .venv-ros2/
 .venv-wujihand/
+.venv-wuji-teleop/
 ros2_ws/build/
 ros2_ws/install/
 ros2_ws/log/
@@ -38,7 +39,7 @@ env/
 .worktrees/
 
 # Local generated data
-data/
+/data/
 
 # Simulation environment and runtime output
 *.csv
