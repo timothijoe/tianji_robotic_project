@@ -25,7 +25,8 @@ def test_ubuntu24_wuji_setup_is_hardware_free_and_validates_siblings():
 
     assert "wujihandros2/wujihand_msgs/package.xml" in script
     assert "wujihandpy/pyproject.toml" in script
-    assert 'pip install -e "${WUJI_HAND_PY}"' in script
+    assert '.venv-wujihand/bin/python -m pip install "${WUJI_HAND_PY}"' in script
+    assert 'pip install -e "${WUJI_HAND_PY}"' not in script
     assert "wujihandpy.Hand" not in script
     assert "sudo" not in script
 

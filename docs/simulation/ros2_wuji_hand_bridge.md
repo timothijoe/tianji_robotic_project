@@ -16,7 +16,7 @@ MuJoCo 左手。当前链路只连接仿真，不会搜索、使能或写入实�
 三个 checkout 必须是同一父目录下的 sibling checkouts；脚本由 Git common
 directory 推导该目录，因此 linked worktree 也适用，且不含开发者机器的绝对路径。
 
-## 2. 重建两个隔离环境
+## 2. 重建三个隔离环境
 
 请保持仿真、ROS 和厂商 SDK 环境分离。Ubuntu 24.04/Jazzy 的 ROS Python 与项目
 Python 3.12 兼容，但隔离环境仍避免 ROS 与 SDK 依赖相互污染：

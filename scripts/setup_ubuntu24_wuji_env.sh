@@ -36,4 +36,4 @@ cd -- "${ROOT}"
 /usr/bin/python3.12 -m venv --system-site-packages .venv-ros2
 .venv-ros2/bin/python -m pip install mujoco==3.10.0 numpy==2.5.1
 /usr/bin/python3.12 -m venv .venv-wujihand
-.venv-wujihand/bin/python -m pip install -e "${WUJI_HAND_PY}"
+.venv-wujihand/bin/python -m pip install "${WUJI_HAND_PY}"
