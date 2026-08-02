@@ -30,5 +30,5 @@ where = ["src"]
 include = ["twin_sim*", "tianji_robotics*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/simulation"]
+testpaths = ["tests/simulation", "tests/architecture"]
 pythonpath = ["src"]

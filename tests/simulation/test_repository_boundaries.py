@@ -1,4 +1,5 @@
 import ast
+import tomllib
 from pathlib import Path
 
 
@@ -15,6 +16,15 @@ def test_pytest_does_not_collect_archive():
     assert "archive" not in {
         part for path in (ROOT / "tests").rglob("*.py") for part in path.parts
     }
+
+
+def test_pytest_collects_simulation_and_architecture_tests_by_default():
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert config["tool"]["pytest"]["ini_options"]["testpaths"] == [
+        "tests/simulation",
+        "tests/architecture",
+    ]
 
 
 def test_new_simulator_does_not_import_real_sdk():
