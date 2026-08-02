@@ -11,7 +11,10 @@
 ## Global Constraints
 
 - Use `/opt/ros/jazzy`; do not install Humble, Kilted, a container, or a virtual machine.
-- Use sibling checkouts `../wujihandros2` and `../wujihandpy`, without modifying either.
+- Use sibling checkouts of the primary Git worktree, `../wujihandros2` and
+  `../wujihandpy`, without modifying either. Resolve the primary worktree from
+  `git rev-parse --path-format=absolute --git-common-dir` so scripts also work
+  from a linked worktree.
 - Build only `wujihand_msgs` and `twin_wuji_sim`; never build or launch `wujihand_driver` or `wujihand_bringup`.
 - Never run `sudo`, create USB rules, probe USB, instantiate `wujihandpy.Hand`, or send hardware commands.
 - Local `.venv`, `.venv-ros2`, `.venv-wujihand`, and ROS build output remain Git-ignored.
@@ -62,7 +65,9 @@ Expected: `FAIL` because `scripts/setup_ubuntu24_wuji_env.sh` does not exist.
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-PARENT="$(cd -- "${ROOT}/.." && pwd -P)"
+COMMON_GIT_DIR="$(git -C "${ROOT}" rev-parse --path-format=absolute --git-common-dir)"
+PRIMARY_ROOT="$(dirname -- "${COMMON_GIT_DIR}")"
+PARENT="$(cd -- "${PRIMARY_ROOT}/.." && pwd -P)"
 ROS_ROOT="/opt/ros/jazzy"
 WUJI_ROS="${PARENT}/wujihandros2"
 WUJI_HAND_PY="${PARENT}/wujihandpy"

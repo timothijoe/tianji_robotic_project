@@ -10,8 +10,10 @@ command a physical hand.
 ## Constraints
 
 - The host is Ubuntu 24.04 with ROS 2 Jazzy and CPython 3.12.
-- Existing upstream checkouts are siblings of this repository:
-  `../wujihandros2` and `../wujihandpy`.
+- Existing upstream checkouts are siblings of the primary repository checkout:
+  `../wujihandros2` and `../wujihandpy`.  Setup entry points must locate that
+  primary checkout through Git's common directory so they also work from a
+  linked worktree.
 - Upstream documents Humble and Kilted, not Jazzy.  The integration therefore
   builds only its interface package, `wujihand_msgs`, rather than the upstream
   USB driver.
