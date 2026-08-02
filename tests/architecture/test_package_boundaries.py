@@ -86,3 +86,4 @@ def test_runtime_directories_are_ignored():
 
     assert "recordings/" in text
     assert ".venv-wuji-teleop/" in text
+    assert ".superpowers/sdd/" in text

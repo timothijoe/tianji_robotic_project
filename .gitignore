@@ -45,3 +45,6 @@ env/
 *.csv
 logs/
 recordings/
+
+# Agent workflow scratch reports
+.superpowers/sdd/
