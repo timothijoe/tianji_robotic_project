@@ -36,9 +36,8 @@ def imported_from_modules(path: Path, node: ast.ImportFrom) -> set[str]:
         package = (node.module or "").split(".") if node.module else []
 
     return {
-        ".".join([*package, alias.name])
+        ".".join(package if alias.name == "*" else [*package, alias.name])
         for alias in node.names
-        if alias.name != "*"
     }
 
 
@@ -78,6 +77,18 @@ def test_imported_roots_detects_sdk_from_absolute_and_relative_imports(tmp_path:
     assert forbidden_imports(
         imported_roots(tmp_path), {"tianji_robotics.wuji_sdk"}
     ) == {"tianji_robotics.wuji_sdk"}
+
+
+def test_imported_roots_detects_sdk_star_imports(tmp_path: Path):
+    (tmp_path / "star_imports.py").write_text(
+        "from tianji_robotics.wuji_sdk import *\n"
+        "from wuji_sdk import *\n",
+        encoding="utf-8",
+    )
+
+    assert forbidden_imports(
+        imported_roots(tmp_path), {"tianji_robotics.wuji_sdk", "wuji_sdk"}
+    ) == {"tianji_robotics.wuji_sdk", "wuji_sdk"}
 
 
 def test_new_package_is_importable():
