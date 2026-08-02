@@ -16,6 +16,42 @@ REPLAY_ONLY_SCRIPT = (
 )
 
 
+def _read_script(name):
+    return (Path(__file__).parents[2] / "scripts" / name).read_text()
+
+
+def test_ubuntu24_wuji_setup_is_hardware_free_and_validates_siblings():
+    script = _read_script("setup_ubuntu24_wuji_env.sh")
+
+    assert "wujihandros2/wujihand_msgs/package.xml" in script
+    assert "wujihandpy/pyproject.toml" in script
+    assert '.venv-wujihand/bin/python -m pip install "${WUJI_HAND_PY}"' in script
+    assert 'pip install -e "${WUJI_HAND_PY}"' not in script
+    assert "wujihandpy.Hand" not in script
+    assert "sudo" not in script
+
+
+def test_jazzy_build_script_limits_colcon_scope_to_message_and_sim_packages():
+    script = _read_script("build_ros2_jazzy_wuji_sim.sh")
+
+    assert "source /opt/ros/jazzy/setup.bash" in script
+    assert "--packages-select wujihand_msgs twin_wuji_sim" in script
+    assert "wujihand_driver" not in script
+    assert "wujihand_bringup" not in script
+
+
+def test_jazzy_build_script_disables_nounset_only_while_sourcing_jazzy():
+    script = _read_script("build_ros2_jazzy_wuji_sim.sh")
+
+    assert "set +u\nsource /opt/ros/jazzy/setup.bash\nset -u" in script
+
+
+def test_jazzy_build_script_passes_colcon_log_base_before_build_verb():
+    script = _read_script("build_ros2_jazzy_wuji_sim.sh")
+
+    assert '"${PYTHON}" -m colcon --log-base ros2_ws/log build' in script
+
+
 def test_launcher_resolves_repo_and_forwards_plane_command(tmp_path):
     fake_repo = tmp_path / "repo"
     script = fake_repo / "scripts" / SCRIPT.name
