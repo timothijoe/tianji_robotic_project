@@ -48,7 +48,8 @@ def test_ubuntu24_wuji_setup_is_hardware_free_and_validates_siblings():
     script = _read_script("setup_ubuntu24_wuji_env.sh")
     assert 'wujihandros2/wujihand_msgs/package.xml' in script
     assert 'wujihandpy/pyproject.toml' in script
-    assert 'pip install -e "${WUJI_HAND_PY}"' in script
+    assert '.venv-wujihand/bin/python -m pip install "${WUJI_HAND_PY}"' in script
+    assert 'pip install -e "${WUJI_HAND_PY}"' not in script
     assert "wujihandpy.Hand" not in script
     assert "sudo" not in script
 ```
@@ -83,7 +84,7 @@ cd -- "${ROOT}"
 /usr/bin/python3.12 -m venv --system-site-packages .venv-ros2
 .venv-ros2/bin/python -m pip install mujoco==3.10.0 numpy==2.5.1
 /usr/bin/python3.12 -m venv .venv-wujihand
-.venv-wujihand/bin/python -m pip install -e "${WUJI_HAND_PY}"
+.venv-wujihand/bin/python -m pip install "${WUJI_HAND_PY}"
 ```
 
 - [ ] **Step 4: Verify focused test and shell syntax**

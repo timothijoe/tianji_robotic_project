@@ -54,3 +54,11 @@ git diff --check
 ## Commit
 
 Functional fix commit: `3316b6a fix: install Wuji SDK non-editably`.
+
+## Follow-up: stale Task 1 plan correction
+
+The Task 1 snippets in
+`docs/superpowers/plans/2026-08-02-ubuntu-24-wuji-environment.md` now match the
+implemented safe behavior: the source-level test asserts the exact non-editable
+SDK install command and asserts the editable variant is absent; the setup snippet
+uses `.venv-wujihand/bin/python -m pip install "${WUJI_HAND_PY}"`.
