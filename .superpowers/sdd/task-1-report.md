@@ -73,4 +73,4 @@ The prior agent's RED run cannot be confirmed from a persistent report or comman
 
 ### Fix commit
 
-Pending commit: `test: enforce full SDK import boundaries`
+`ed554d3` — `test: enforce full SDK import boundaries`
