@@ -129,7 +129,9 @@ Expected: `FAIL` because `scripts/build_ros2_jazzy_wuji_sim.sh` does not exist.
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-PARENT="$(cd -- "${ROOT}/.." && pwd -P)"
+COMMON_GIT_DIR="$(git -C "${ROOT}" rev-parse --path-format=absolute --git-common-dir)"
+PRIMARY_ROOT="$(dirname -- "${COMMON_GIT_DIR}")"
+PARENT="$(cd -- "${PRIMARY_ROOT}/.." && pwd -P)"
 PYTHON="${ROOT}/.venv-ros2/bin/python"
 MSG_SOURCE="${PARENT}/wujihandros2/wujihand_msgs"
 [[ -x "${PYTHON}" ]] || { echo "Run setup_ubuntu24_wuji_env.sh first" >&2; exit 1; }
