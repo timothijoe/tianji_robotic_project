@@ -8,11 +8,13 @@ PYTHON="${ROOT}/.venv-ros2/bin/python"
 MSG_SOURCE="${PARENT}/wujihandros2/wujihand_msgs"
 [[ -x "${PYTHON}" ]] || { echo "Run setup_ubuntu24_wuji_env.sh first" >&2; exit 1; }
 [[ -f "${MSG_SOURCE}/package.xml" ]] || { echo "Missing ${MSG_SOURCE}" >&2; exit 1; }
+set +u
 source /opt/ros/jazzy/setup.bash
+set -u
 export PATH="${ROOT}/.venv-ros2/bin:${PATH}"
 cd -- "${ROOT}"
-"${PYTHON}" -m colcon build \
+"${PYTHON}" -m colcon --log-base ros2_ws/log build \
   --base-paths "${MSG_SOURCE}" ros2_ws/src/twin_wuji_sim \
-  --build-base ros2_ws/build --install-base ros2_ws/install --log-base ros2_ws/log \
+  --build-base ros2_ws/build --install-base ros2_ws/install \
   --symlink-install --packages-select wujihand_msgs twin_wuji_sim \
   --cmake-args -DPython3_EXECUTABLE="${PYTHON}"

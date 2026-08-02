@@ -39,6 +39,18 @@ def test_jazzy_build_script_limits_colcon_scope_to_message_and_sim_packages():
     assert "wujihand_bringup" not in script
 
 
+def test_jazzy_build_script_disables_nounset_only_while_sourcing_jazzy():
+    script = _read_script("build_ros2_jazzy_wuji_sim.sh")
+
+    assert "set +u\nsource /opt/ros/jazzy/setup.bash\nset -u" in script
+
+
+def test_jazzy_build_script_passes_colcon_log_base_before_build_verb():
+    script = _read_script("build_ros2_jazzy_wuji_sim.sh")
+
+    assert '"${PYTHON}" -m colcon --log-base ros2_ws/log build' in script
+
+
 def test_launcher_resolves_repo_and_forwards_plane_command(tmp_path):
     fake_repo = tmp_path / "repo"
     script = fake_repo / "scripts" / SCRIPT.name
