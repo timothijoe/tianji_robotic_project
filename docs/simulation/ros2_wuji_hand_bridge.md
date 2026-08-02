@@ -1,79 +1,59 @@
 # ROS 2 与 Wuji Hand 仿真桥接
 
-本文说明如何通过 ROS 2 Humble 或类似 `wujihandpy` 的 Python API 控制
+本文说明如何通过 ROS 2 Jazzy 或类似 `wujihandpy` 的 Python API 控制
 MuJoCo 左手。当前链路只连接仿真，不会搜索、使能或写入实体电机。
 
 ## 1. 当前安装状态
 
-- 操作系统：Ubuntu 22.04，ROS 2 Humble 安装于 `/opt/ros/humble`。
+- 操作系统：Ubuntu 24.04，ROS 2 Jazzy 安装于 `/opt/ros/jazzy`。
 - 仿真开发环境：项目根目录 `.venv`，Python 3.12。
-- ROS 仿真环境：项目根目录 `.venv-ros2`，系统 Python 3.10、
+- ROS 仿真环境：项目根目录 `.venv-ros2`，Python 3.12、
   `--system-site-packages`、MuJoCo 3.10.0。
-- 厂商 SDK 环境：项目根目录 `.venv-wujihand`，Python 3.12、
-  `wujihandpy 1.8.0`。
-- ROS 消息源码：`/home/linux/august_folder/wujihandros2/wujihand_msgs`。
+- 厂商 SDK 环境：项目根目录 `.venv-wujihand`，Python 3.12，安装相邻
+  `wujihandpy` checkout。
+- ROS 消息源码：相邻 `wujihandros2/wujihand_msgs` checkout。
 
-安装 ROS 时发现无关的 ToDesk apt 源已经失效，因此将
-`/etc/apt/sources.list.d/todesk.list` 可恢复地改名为
-`todesk.list.disabled`。ROS 官方源仍位于
-`/etc/apt/sources.list.d/ros2.list`。
-
-当前机器未检测到 USB VID/PID `0483:2000`。只执行 SDK 构造检查时，
-`wujihandpy.Hand(side="left")` 按预期返回
-`ConnectionError: No device found`；这说明 SDK 已安装，但不代表硬件异常。
+三个 checkout 必须是同一父目录下的 sibling checkouts；脚本由 Git common
+directory 推导该目录，因此 linked worktree 也适用，且不含开发者机器的绝对路径。
 
 ## 2. 重建两个隔离环境
 
-ROS 2 Humble 的 `rclpy` 面向 Ubuntu 的 Python 3.10，不能直接装入项目的
-Python 3.12 环境。请保持两个环境分离：
+请保持仿真、ROS 和厂商 SDK 环境分离。Ubuntu 24.04/Jazzy 的 ROS Python 与项目
+Python 3.12 兼容，但隔离环境仍避免 ROS 与 SDK 依赖相互污染：
 
 ```bash
-/usr/bin/python3 -m venv --system-site-packages .venv-ros2
-.venv-ros2/bin/python -m pip install mujoco==3.10.0
-
-python3.12 -m venv .venv-wujihand
-.venv-wujihand/bin/python -m pip install wujihandpy
+./scripts/setup_ubuntu24_wuji_env.sh
 ```
 
 验证：
 
 ```bash
-source /opt/ros/humble/setup.bash
+source /opt/ros/jazzy/setup.bash
 .venv-ros2/bin/python -c \
   "import rclpy, mujoco, numpy; print(mujoco.__version__, numpy.__version__)"
 .venv-wujihand/bin/python -c \
-  "import importlib.metadata as m; print(m.version('wujihandpy'))"
+  "import importlib.metadata as m; import wujihandpy; print(m.version('wujihandpy'))"
 ```
 
 ## 3. 构建 ROS 工作区
 
-只构建上游 `wujihand_msgs` 和本项目仿真节点，不构建或启动 USB 硬件驱动：
+只构建上游 `wujihand_msgs` 和本项目仿真节点，不构建或启动 USB 硬件驱动。该构建是
+message-only：没有设备搜索、使能或写入操作：
 
 ```bash
-source /opt/ros/humble/setup.bash
-export PATH="$PWD/.venv-ros2/bin:/usr/bin:/bin"
-python -m colcon --log-base ros2_ws/log build \
-  --base-paths \
-    /home/linux/august_folder/wujihandros2/wujihand_msgs \
-    ros2_ws/src/twin_wuji_sim \
-  --build-base ros2_ws/build \
-  --install-base ros2_ws/install \
-  --symlink-install \
-  --cmake-args -DPython3_EXECUTABLE="$PWD/.venv-ros2/bin/python"
+./scripts/build_ros2_jazzy_wuji_sim.sh
 ```
 
-显式设置 `PATH` 和 `Python3_EXECUTABLE` 很重要；否则 Anaconda Python 可能被
-CMake 误选，导致 ROS 消息生成器与 Python ABI 不匹配。
+脚本显式选择 `.venv-ros2` Python，避免 CMake 误选其他 Python ABI。
 
 ## 4. 启动 MuJoCo 桥接
 
 每个新终端先执行：
 
 ```bash
-cd /home/linux/august_folder/tianji_robotic_project
-source /opt/ros/humble/setup.bash
+source /opt/ros/jazzy/setup.bash
 source ros2_ws/install/setup.bash
-export PYTHONPATH="$PWD/src:$PYTHONPATH"
+export PYTHONPATH="$PWD/src:${PYTHONPATH:-}"
 ```
 
 Headless 启动：
@@ -173,16 +153,18 @@ finally:
 ## 7. 自动验证
 
 ```bash
-.venv/bin/pytest tests/simulation tests/ros2/test_bridge_validation.py -q
+env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 
-source /opt/ros/humble/setup.bash
+./scripts/build_ros2_jazzy_wuji_sim.sh
+source /opt/ros/jazzy/setup.bash
 source ros2_ws/install/setup.bash
-export PYTHONPATH="$PWD/src:$PYTHONPATH"
+export PYTHONPATH="$PWD/src:${PYTHONPATH:-}"
 .venv-ros2/bin/python tests/ros2/ros2_bridge_smoke.py
 ```
 
-端到端测试会启动 Headless 桥接、校验 20 个名称、发送命令、观察实际位置朝目标
-变化，并验证失能时拒绝新命令，最后清理桥接进程。
+核心测试必须隔离预设的 ROS `PYTHONPATH` 和第三方 pytest 自动加载；否则可能加载
+不属于核心 suite 的 ROS 插件。ROS smoke 是 import-only/headless 验证，不搜索、
+使能或写入实体硬件；成功时输出 `ROS2_WUJI_SIM_SMOKE_OK`。
 
 ## 8. 明天接实体手的安全顺序
 
