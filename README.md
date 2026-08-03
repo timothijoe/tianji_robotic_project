@@ -36,6 +36,7 @@ Isaac Lab/强化学习依赖，也没有连接实体灵巧手。
 
 - [Wuji 手套录制离线回放](docs/wuji/offline_replay.md)
 - [Wuji SDK 与 ROS 2 真机接口边界](docs/wuji/hardware_interfaces.md)
+- [Tianji + Wuji 集成进展、问题与后续计划](docs/wuji/development_status.md)
 - [当前版本复现与智能体交接](docs/simulation/current_version_handoff.md)
 - [环境安装](docs/simulation/setup.md)
 - [新架构](docs/simulation/architecture.md)
