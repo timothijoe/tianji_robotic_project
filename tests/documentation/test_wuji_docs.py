@@ -27,3 +27,10 @@ def test_hardware_docs_make_preflight_non_motion_guarantee_explicit():
     assert "tianji-robot hardware wuji-sdk preflight" in documentation
     assert "不会连接" in documentation
     assert "ROS 2" in documentation
+
+
+def test_table_retreat_docs_publish_command_thresholds_and_safety_boundary():
+    documentation=(ROOT/"docs/wuji/table_retreat.md").read_text()
+    assert "wuji-table-retreat" in documentation
+    assert "30 mm" in documentation and "10 mm" in documentation and "3 mm" in documentation
+    assert "不会连接" in documentation
