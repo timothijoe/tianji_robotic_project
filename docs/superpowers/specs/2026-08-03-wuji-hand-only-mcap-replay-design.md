@@ -18,7 +18,7 @@ tianji_robotic_project/
 └── robot_assets/mujoco/wuji_hand_standalone/
     ├── LICENSE
     ├── README.md
-    ├── left.xml
+    ├── mjcf/left.xml
     └── meshes/left/*.STL
 ```
 
@@ -36,7 +36,7 @@ The runtime model path is derived from the installed source package's project
 asset resolver, never from the current working directory:
 
 ```text
-<project-root>/robot_assets/mujoco/wuji_hand_standalone/left.xml
+<project-root>/robot_assets/mujoco/wuji_hand_standalone/mjcf/left.xml
 ```
 
 A missing asset raises a concise error showing the resolved project path.

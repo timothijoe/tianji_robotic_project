@@ -3,6 +3,10 @@
 本流程读取 Wuji Studio 的右手骨架 MCAP，经官方 `wuji-sdk` 离线重定向为
 第一代左手 20 关节轨迹，再由项目内 MuJoCo 后端回放。它不会发现或连接真机。
 
+回放使用 hand-only 场景，只加载 `robot_assets/mujoco/wuji_hand_standalone/`
+中按 MIT 许可证迁入的官方左手模型，**不会加载机械臂**。双臂及机械臂挂载手的
+联合仿真仍由独立的 `twin-sim` 命令负责。
+
 ## 环境
 
 ```bash

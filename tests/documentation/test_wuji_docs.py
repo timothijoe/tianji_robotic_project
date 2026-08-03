@@ -17,6 +17,9 @@ def test_offline_docs_publish_the_supported_cli():
     documentation = (ROOT / "docs/wuji/offline_replay.md").read_text()
     assert "tianji-robot sim wuji-replay" in documentation
     assert "recordings/wuji" in documentation
+    assert "hand-only" in documentation
+    assert "不会加载机械臂" in documentation
+    assert "wuji_hand_standalone" in documentation
 
 
 def test_hardware_docs_make_preflight_non_motion_guarantee_explicit():
