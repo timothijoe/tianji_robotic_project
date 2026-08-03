@@ -87,24 +87,35 @@ def _preflight_trajectory(path: Path) -> int:
 
 def _run_wuji_table_retreat(args: argparse.Namespace) -> int:
     try:
-        from tianji_robotics.data.mcap import StudioMcapSkeletonSource
+        from tianji_robotics.data.mcap import (
+            JointStateMcapSource,
+            StudioMcapSkeletonSource,
+            detect_hand_mcap_kind,
+        )
         from tianji_robotics.data.table_retreat import save_corrected_trajectory_npz, write_correction_report_json
         from tianji_robotics.simulation.tabletop_wuji_hand import TabletopWujiHand
         from tianji_robotics.workflows.wuji_glove_replay import retarget_recording
-        from tianji_robotics.workflows.wuji_table_retreat import TableRetreatConfig, build_table_retreat, replay_table_retreat
-        from tianji_robotics.wuji_sdk.retargeter import OfficialWujiRetargeter
+        from tianji_robotics.workflows.wuji_table_retreat import TableRetreatConfig, build_recorded_table_retreat, replay_table_retreat
 
-        trajectory=retarget_recording(StudioMcapSkeletonSource(args.source),OfficialWujiRetargeter.create_left_first_generation())
+        source_kind = detect_hand_mcap_kind(args.source)
+        if source_kind == "joint_states":
+            trajectory = JointStateMcapSource(args.source).trajectory()
+        else:
+            from tianji_robotics.wuji_sdk.retargeter import OfficialWujiRetargeter
+            trajectory = retarget_recording(
+                StudioMcapSkeletonSource(args.source),
+                OfficialWujiRetargeter.create_left_first_generation(),
+            )
         planner=TabletopWujiHand(viewer=False,table_height_m=args.table_height)
         try:
-            corrected,report=build_table_retreat(trajectory,planner,TableRetreatConfig(retreat_distance_m=args.retreat_distance,place_duration_s=args.place_duration,retreat_duration_s=args.retreat_duration,hold_duration_s=args.hold_duration,source_frame=args.source_frame))
+            corrected,report=build_recorded_table_retreat(trajectory,planner,TableRetreatConfig(retreat_distance_m=args.retreat_distance,place_duration_s=args.place_duration,retreat_duration_s=args.retreat_duration,hold_duration_s=args.hold_duration,source_frame=args.source_frame),source_kind=source_kind)
         finally: planner.close()
         if args.npz: save_corrected_trajectory_npz(corrected,args.npz)
         if args.report: write_correction_report_json(report,args.report)
         backend=TabletopWujiHand(viewer=not args.headless,table_height_m=args.table_height)
         try: replay_table_retreat(corrected,backend)
         finally: backend.close()
-        print(f"table retreat: source_frame={report.source_frame} frames={len(corrected.timestamps_ns)} retreat_m={report.actual_retreat_m:.3f} thumb_clearance_m={report.minimum_thumb_clearance_m:.4f} penetration_m={report.maximum_hand_penetration_m:.6f} tip_lift_m={report.maximum_retreat_fingertip_lift_m:.4f}")
+        print(f"table retreat: source_kind={report.source_kind} frames={len(corrected.timestamps_ns)} motion={report.motion_start_frame}:{report.motion_end_frame} retreat_m={report.actual_retreat_m:.3f} palm_down={report.palm_down_verified} thumb_clearance_m={report.minimum_thumb_clearance_m:.4f} penetration_m={report.maximum_hand_penetration_m:.6f} max_joint_correction_rad={report.maximum_joint_correction_rad:.4f}")
         return 0
     except ModuleNotFoundError as exc:
         if exc.name in {"mcap","wuji_sdk"}:

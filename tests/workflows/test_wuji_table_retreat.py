@@ -6,6 +6,7 @@ from tianji_robotics.workflows.wuji_table_retreat import (
     TableRetreatConfig,
     _calibrated_palm_down_quaternion,
     _fit_palm_down_quaternion,
+    build_recorded_table_retreat,
     build_table_retreat,
 )
 from tianji_robotics.wuji_hand.models import HandTrajectory
@@ -124,3 +125,35 @@ def test_explicit_source_frame_is_range_checked():
             build_table_retreat(_trajectory(), backend, TableRetreatConfig(source_frame=5, place_duration_s=.1, retreat_duration_s=.2, hold_duration_s=.1))
     finally:
         backend.close()
+
+
+def test_recorded_workflow_preserves_samples_and_source_timing():
+    backend = TabletopWujiHand(viewer=False)
+    recording = _trajectory()
+    try:
+        corrected, report = build_recorded_table_retreat(
+            recording, backend, source_kind="joint_states"
+        )
+    finally:
+        backend.close()
+
+    assert len(corrected.positions_rad) == len(recording.positions_rad)
+    np.testing.assert_array_equal(
+        np.diff(corrected.timestamps_ns), np.diff(recording.timestamps_ns)
+    )
+    assert report.source_kind == "joint_states"
+    assert report.actual_retreat_m == pytest.approx(.03, abs=.002)
+    assert report.palm_down_verified is True
+    assert report.maximum_joint_correction_rad < .12
+
+
+def test_recorded_workflow_never_zeros_or_replaces_recorded_pose():
+    backend = TabletopWujiHand(viewer=False)
+    recording = _trajectory()
+    try:
+        corrected, report = build_recorded_table_retreat(recording, backend)
+    finally:
+        backend.close()
+
+    np.testing.assert_allclose(corrected.positions_rad, recording.positions_rad)
+    assert report.maximum_hand_penetration_m <= .0005

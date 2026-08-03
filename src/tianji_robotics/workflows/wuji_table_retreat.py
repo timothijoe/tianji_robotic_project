@@ -5,6 +5,11 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
+from tianji_robotics.workflows.recorded_hand_motion import (
+    detect_motion_interval,
+    finger_displacement_correlations,
+    smooth_joint_step_outliers,
+)
 from tianji_robotics.wuji_hand.models import HandTrajectory
 
 
@@ -42,6 +47,133 @@ class CorrectionReport:
     maximum_contact_slip_m: float
     maximum_hand_penetration_m: float
     maximum_retreat_fingertip_lift_m: float
+    motion_start_frame: int = 0
+    motion_end_frame: int = 0
+    source_kind: str = "right_glove_skeleton"
+    palm_down_verified: bool = False
+    maximum_joint_correction_rad: float = 0.0
+    rms_joint_correction_rad: float = 0.0
+    per_finger_maximum_correction_rad: tuple[float, ...] = ()
+    source_middle_ring_correlation: float = 0.0
+    source_ring_little_correlation: float = 0.0
+    corrected_middle_ring_correlation: float = 0.0
+    corrected_ring_little_correlation: float = 0.0
+
+
+def build_recorded_table_retreat(
+    trajectory: HandTrajectory,
+    backend,
+    config: TableRetreatConfig = TableRetreatConfig(),
+    *,
+    source_kind: str = "joint_states",
+):
+    """Place and retreat the palm while retaining recorded finger samples."""
+    _validate_config(config)
+    source = np.asarray(trajectory.positions_rad, dtype=float)
+    ranges = np.asarray(list(backend.joint_ranges_rad.values()))
+    corrected_joints = np.clip(source, ranges[:, 0], ranges[:, 1])
+    corrected_joints = smooth_joint_step_outliers(corrected_joints, limit_rad=0.12)
+    correction = corrected_joints - source
+    interval = detect_motion_interval(trajectory)
+    quaternion = _calibrated_palm_down_quaternion(backend, corrected_joints[0])
+
+    backend.set_kinematic_pose(corrected_joints[0], np.zeros(3), quaternion)
+    tips = backend.fingertip_positions_m()
+    base_palm = np.array(
+        [0.0, 0.0, backend.table_height_m + 0.003 - float(tips[:, 2].min())]
+    )
+    base_palm = _project_above_table(
+        backend, corrected_joints[0], base_palm, quaternion
+    )
+    backend.set_kinematic_pose(corrected_joints[0], base_palm, quaternion)
+    thumb_height = backend.thumb_position_m()[2] - backend.table_height_m
+    if thumb_height < config.thumb_clearance_m:
+        base_palm[2] += config.thumb_clearance_m - thumb_height
+
+    palms = []
+    phases = []
+    max_penetration = 0.0
+    min_thumb = float("inf")
+    for index, joints in enumerate(corrected_joints):
+        if index < interval.start_frame:
+            fraction = 0.0
+            phase = "PREPARE"
+        elif index >= interval.end_frame:
+            fraction = 1.0
+            phase = "HOLD"
+        else:
+            raw = (index - interval.start_frame) / max(
+                1, interval.end_frame - interval.start_frame
+            )
+            fraction = raw * raw * (3.0 - 2.0 * raw)
+            phase = "RETREAT"
+        palm = base_palm + np.array([config.retreat_distance_m * fraction, 0.0, 0.0])
+        palm = _project_above_table(backend, joints, palm, quaternion)
+        backend.set_kinematic_pose(joints, palm, quaternion)
+        thumb = backend.thumb_position_m()[2] - backend.table_height_m
+        if thumb < config.thumb_clearance_m:
+            palm[2] += config.thumb_clearance_m - thumb
+            backend.set_kinematic_pose(joints, palm, quaternion)
+        max_penetration = max(max_penetration, backend.maximum_table_penetration_m())
+        min_thumb = min(
+            min_thumb,
+            float(backend.thumb_position_m()[2] - backend.table_height_m),
+        )
+        palms.append(palm)
+        phases.append(phase)
+
+    palms_array = np.asarray(palms)
+    quaternions = np.tile(quaternion, (len(corrected_joints), 1))
+    source_correlations = finger_displacement_correlations(source)
+    corrected_correlations = finger_displacement_correlations(corrected_joints)
+    palmar_below = bool(
+        backend.palmar_reference_position_m()[2]
+        < backend.dorsal_reference_position_m()[2]
+    )
+    per_finger = tuple(
+        float(np.max(np.abs(correction[:, base : base + 4])))
+        for base in range(0, 20, 4)
+    )
+    timestamps = trajectory.timestamps_ns - trajectory.timestamps_ns[0]
+    corrected = CorrectedHandTrajectory(
+        timestamps,
+        corrected_joints,
+        palms_array,
+        quaternions,
+        tuple(phases),
+        interval.start_frame,
+    )
+    report = CorrectionReport(
+        source_frame=interval.start_frame,
+        source_timestamp_ns=int(trajectory.timestamps_ns[interval.start_frame]),
+        candidate_score=0.0,
+        retreat_vector_m=(config.retreat_distance_m, 0.0, 0.0),
+        actual_retreat_m=float(
+            np.linalg.norm(
+                palms_array[interval.end_frame, :2]
+                - palms_array[interval.start_frame, :2]
+            )
+        ),
+        minimum_thumb_clearance_m=min_thumb,
+        maximum_fingertip_height_error_m=0.0,
+        maximum_contact_slip_m=0.0,
+        maximum_hand_penetration_m=max_penetration,
+        maximum_retreat_fingertip_lift_m=0.0,
+        motion_start_frame=interval.start_frame,
+        motion_end_frame=interval.end_frame,
+        source_kind=source_kind,
+        palm_down_verified=palmar_below,
+        maximum_joint_correction_rad=float(np.max(np.abs(correction))),
+        rms_joint_correction_rad=float(np.sqrt(np.mean(correction * correction))),
+        per_finger_maximum_correction_rad=per_finger,
+        source_middle_ring_correlation=source_correlations["middle_ring"],
+        source_ring_little_correlation=source_correlations["ring_little"],
+        corrected_middle_ring_correlation=corrected_correlations["middle_ring"],
+        corrected_ring_little_correlation=corrected_correlations["ring_little"],
+    )
+    if not palmar_below or min_thumb < config.thumb_clearance_m or max_penetration > 0.0005:
+        raise ValueError("recorded table retreat failed palm or collision preflight")
+    return corrected, report
 
 
 def build_table_retreat(trajectory: HandTrajectory, backend, config: TableRetreatConfig = TableRetreatConfig()):
