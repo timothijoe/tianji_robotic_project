@@ -5,6 +5,10 @@
 最新修正：Wuji MCAP 默认回放已从双臂组合场景切换为官方 hand-only 左手模型；
 模型严格包含 20 个关节/actuator，不再显示或加载天机机械臂。
 
+修正后全量测试为 `240 passed, 1 warning in 391.29s`。真实 1676 帧录制已在
+Headless 与 Viewer 两条 hand-only 路径完成，CLI 均返回 0；Viewer 在窗口失效后
+不会继续执行 `sync()`。唯一 warning 仍是原有切菜仿真的接触力观察阈值。
+
 ## 本轮目标与结论
 
 本轮完成的是“Wuji 手套录制到左手 MuJoCo 回放”的本地闭环，以及后续真机
