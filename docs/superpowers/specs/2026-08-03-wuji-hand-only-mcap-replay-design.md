@@ -11,42 +11,38 @@ unchanged.
 
 ## Ownership and repository boundary
 
-Official, read-only assets remain in the adjacent official repository:
+The exact official hand-only subset is vendored into our repository:
 
 ```text
-<workspace>/
-├── tianji_robotic_project/                 # our Git repository
-└── wuji-technology/
-    └── mujoco-sim/                         # official Git repository
-        └── wuji_hand_description/mjcf/left.xml
+tianji_robotic_project/
+└── robot_assets/mujoco/wuji_hand_standalone/
+    ├── LICENSE
+    ├── README.md
+    ├── left.xml
+    └── meshes/left/*.STL
 ```
 
-All non-official integration code, path resolution, validation, replay,
-tests, CLI and documentation remain under `tianji_robotic_project`.
-Implementation must not edit, copy from, or write generated files into the
-official repository.
+This subset consists of one 24 KB MJCF, 52 left-hand meshes (about 3.17 MB),
+the MIT license and a provenance record containing source repository and commit
+`63d2785932eb5b91523e44222f5d0bcffbce1e74`. It excludes the right hand, URDF,
+RViz, ROS launch files, demo video, sample trajectory and official Python
+script. The adjacent official repositories remain unchanged as upgrade
+references. All non-official integration code, validation, replay, tests, CLI
+and documentation remain under `tianji_robotic_project`.
 
-## Path contract
+## Asset path contract
 
-The default official root is derived from the Tianji project root, never from
-the current working directory:
+The runtime model path is derived from the installed source package's project
+asset resolver, never from the current working directory:
 
 ```text
-<project-root>/../wuji-technology
+<project-root>/robot_assets/mujoco/wuji_hand_standalone/left.xml
 ```
 
-The exact default left-hand model is:
-
-```text
-<project-root>/../wuji-technology/mujoco-sim/
-wuji_hand_description/mjcf/left.xml
-```
-
-`WUJI_TECHNOLOGY_ROOT` may override only the `wuji-technology` root for a
-different workspace layout. Relative override values are rejected to avoid
-working-directory-dependent behavior. A missing model raises a concise error
-showing the resolved path and expected sibling layout; there is no silent
-fallback to the arm scene or a copied model.
+A missing asset raises a concise error showing the resolved project path.
+There is no environment override and no silent fallback to the arm scene or
+the adjacent official checkout. Updating assets is an explicit, reviewed
+vendor operation rather than a runtime dependency.
 
 ## Hand-only backend
 
@@ -101,8 +97,8 @@ options.
 
 Automated tests must prove:
 
-- default and environment-overridden paths resolve deterministically;
-- missing and relative override paths fail clearly;
+- the vendored asset path resolves independently of the current directory;
+- missing assets fail clearly;
 - the loaded model has `nq == nv == nu == 20`;
 - it contains the Wuji palm and all 20 hand joints;
 - it contains no Tianji/Marvin arm bodies, joints or actuators;
