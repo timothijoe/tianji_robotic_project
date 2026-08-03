@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Any
+import warnings
 
 import numpy as np
 
@@ -17,7 +18,9 @@ class OfficialWujiRetargeter:
         """Create the first-generation left-hand retargeter without device access."""
         from wuji_sdk import HandModel, Handedness, RetargetSession
 
-        return cls(RetargetSession.for_hand(HandModel.WujiHand, Handedness.Left))
+        return cls(
+            RetargetSession.for_hand(HandModel.WujiHand, side=Handedness.Left)
+        )
 
     def step(self, keypoints_m: np.ndarray) -> np.ndarray:
         """Retarget keypoints and reject malformed SDK commands."""
@@ -30,4 +33,9 @@ class OfficialWujiRetargeter:
             raise ValueError("official Wuji retargeter returned non-numeric commands")
         if not np.isfinite(command).all():
             raise ValueError("official Wuji retargeter returned non-finite commands")
-        return np.array(command, dtype=np.float64, copy=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            normalized = np.array(command, dtype=np.float64, copy=True)
+        if not np.isfinite(normalized).all():
+            raise ValueError("official Wuji retargeter returned non-finite commands")
+        return normalized

@@ -28,13 +28,22 @@ def _write_messages(path, messages):
 
 def test_frames_reads_only_right_glove_skeleton_messages(tmp_path):
     path = tmp_path / "glove.mcap"
-    keypoints = np.arange(63, dtype=float).reshape(21, 3).tolist()
+    keypoints = np.arange(63, dtype=float).reshape(21, 3)
+
+    def studio_payload(timestamp_us):
+        return {
+            "header": {"timestamp_us": timestamp_us, "frame_id": "r_wrist"},
+            "joints": [
+                {"pose": {"position": point.tolist()}} for point in keypoints
+            ],
+        }
+
     _write_messages(
         path,
         [
-            ("skeleton", {"timestamp_us": 17, "keypoints_m": keypoints}),
-            ("other", {"timestamp_us": 99, "keypoints_m": keypoints}),
-            ("skeleton", {"timestamp_us": 23, "keypoints_m": keypoints}),
+            ("skeleton", studio_payload(17)),
+            ("other", studio_payload(99)),
+            ("skeleton", studio_payload(23)),
         ],
     )
 
@@ -48,7 +57,31 @@ def test_frames_reads_only_right_glove_skeleton_messages(tmp_path):
 
 def test_frames_reports_source_path_for_malformed_skeleton(tmp_path):
     path = tmp_path / "broken.mcap"
-    _write_messages(path, [("skeleton", {"timestamp_us": 17, "keypoints_m": []})])
+    _write_messages(
+        path,
+        [("skeleton", {"header": {"timestamp_us": 17}, "joints": []})],
+    )
 
     with pytest.raises(ValueError, match="broken\\.mcap"):
         list(StudioMcapSkeletonSource(path).frames())
+
+
+def test_frames_preserves_recorded_frame_id(tmp_path):
+    path = tmp_path / "frame.mcap"
+    point = {"pose": {"position": [0.0, 0.0, 0.0]}}
+    _write_messages(
+        path,
+        [
+            (
+                "skeleton",
+                {
+                    "header": {"timestamp_us": 17, "frame_id": "custom_wrist"},
+                    "joints": [point for _ in range(21)],
+                },
+            )
+        ],
+    )
+
+    [frame] = StudioMcapSkeletonSource(path).frames()
+
+    assert frame.frame_id == "custom_wrist"

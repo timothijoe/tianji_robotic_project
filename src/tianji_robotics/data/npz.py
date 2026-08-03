@@ -48,6 +48,7 @@ def _metadata_from_json_value(value: object) -> object:
 def save_trajectory_npz(trajectory: HandTrajectory, destination: Path) -> Path:
     """Serialize a validated trajectory without relying on pickle."""
     destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
     metadata = json.dumps(_metadata_to_json_value(trajectory.metadata), separators=(",", ":"))
     np.savez_compressed(
         destination,

@@ -37,13 +37,26 @@ def test_npz_round_trip_preserves_trajectory_values_and_metadata(tmp_path):
 
 def test_joint_state_mcap_contains_each_trajectory_sample(tmp_path):
     trajectory = _trajectory()
-    path = write_joint_state_mcap(trajectory, tmp_path / "trajectory.mcap")
+    path = write_joint_state_mcap(trajectory, tmp_path / "nested" / "trajectory.mcap")
 
     with path.open("rb") as stream:
         messages = list(make_reader(stream).iter_messages(topics="/joint_states"))
 
-    assert path == tmp_path / "trajectory.mcap"
+    assert path == tmp_path / "nested" / "trajectory.mcap"
     assert len(messages) == 2
     payload = json.loads(messages[0][2].data)
     assert payload["name"] == list(HAND_JOINT_NAMES)
     assert payload["position"] == trajectory.positions_rad[0].tolist()
+    assert payload["header"] == {
+        "seq": 0,
+        "timestamp_ns": 1_000,
+        "frame_id": "left_palm_link",
+    }
+    assert payload["velocity"] == []
+    assert payload["effort"] == []
+
+
+def test_npz_writer_creates_destination_parent(tmp_path):
+    path = save_trajectory_npz(_trajectory(), tmp_path / "nested" / "trajectory.npz")
+
+    assert path.is_file()
