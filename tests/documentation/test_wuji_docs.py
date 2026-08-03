@@ -1,0 +1,26 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_setup_script_is_project_relative_and_reproducible():
+    script = (ROOT / "scripts/setup_wuji_teleop_env.sh").read_text()
+    assert 'PROJECT_ROOT=' in script
+    assert '.venv-wuji-teleop' in script
+    assert 'python3.12 -m venv' in script
+    assert '[wuji-offline,test]' in script
+    assert '/home/zhoutong' not in script
+
+
+def test_offline_docs_publish_the_supported_cli():
+    documentation = (ROOT / "docs/wuji/offline_replay.md").read_text()
+    assert "tianji-robot sim wuji-replay" in documentation
+    assert "recordings/wuji" in documentation
+
+
+def test_hardware_docs_make_preflight_non_motion_guarantee_explicit():
+    documentation = (ROOT / "docs/wuji/hardware_interfaces.md").read_text()
+    assert "tianji-robot hardware wuji-sdk preflight" in documentation
+    assert "不会连接" in documentation
+    assert "ROS 2" in documentation
