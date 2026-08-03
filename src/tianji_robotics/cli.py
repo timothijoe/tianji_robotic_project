@@ -18,6 +18,19 @@ def _parser() -> argparse.ArgumentParser:
     replay.add_argument("--joint-state-mcap", type=Path)
     replay.set_defaults(handler=_run_wuji_replay)
 
+    retreat = sim_commands.add_parser("wuji-table-retreat", help="derive a four-finger tabletop retreat")
+    retreat.add_argument("source", type=Path)
+    retreat.add_argument("--headless", action="store_true")
+    retreat.add_argument("--retreat-distance", type=float, default=0.03)
+    retreat.add_argument("--place-duration", type=float, default=1.0)
+    retreat.add_argument("--retreat-duration", type=float, default=2.0)
+    retreat.add_argument("--hold-duration", type=float, default=2.0)
+    retreat.add_argument("--table-height", type=float, default=0.0)
+    retreat.add_argument("--source-frame", type=int)
+    retreat.add_argument("--npz", type=Path)
+    retreat.add_argument("--report", type=Path)
+    retreat.set_defaults(handler=_run_wuji_table_retreat)
+
     hardware = domains.add_parser("hardware", help="guarded real-device tools")
     vendors = hardware.add_subparsers(dest="hardware_vendor", required=True)
     wuji = vendors.add_parser("wuji-sdk", help="Wuji SDK boundary")
@@ -70,6 +83,34 @@ def _preflight_trajectory(path: Path) -> int:
     duration_s = float(trajectory.timestamps_ns[-1] - trajectory.timestamps_ns[0]) / 1e9
     print(f"trajectory valid: {trajectory.positions_rad.shape[0]} frames, {duration_s:.3f}s; no device accessed")
     return 0
+
+
+def _run_wuji_table_retreat(args: argparse.Namespace) -> int:
+    try:
+        from tianji_robotics.data.mcap import StudioMcapSkeletonSource
+        from tianji_robotics.data.table_retreat import save_corrected_trajectory_npz, write_correction_report_json
+        from tianji_robotics.simulation.tabletop_wuji_hand import TabletopWujiHand
+        from tianji_robotics.workflows.wuji_glove_replay import retarget_recording
+        from tianji_robotics.workflows.wuji_table_retreat import TableRetreatConfig, build_table_retreat, replay_table_retreat
+        from tianji_robotics.wuji_sdk.retargeter import OfficialWujiRetargeter
+
+        trajectory=retarget_recording(StudioMcapSkeletonSource(args.source),OfficialWujiRetargeter.create_left_first_generation())
+        planner=TabletopWujiHand(viewer=False,table_height_m=args.table_height)
+        try:
+            corrected,report=build_table_retreat(trajectory,planner,TableRetreatConfig(retreat_distance_m=args.retreat_distance,place_duration_s=args.place_duration,retreat_duration_s=args.retreat_duration,hold_duration_s=args.hold_duration,source_frame=args.source_frame))
+        finally: planner.close()
+        if args.npz: save_corrected_trajectory_npz(corrected,args.npz)
+        if args.report: write_correction_report_json(report,args.report)
+        backend=TabletopWujiHand(viewer=not args.headless,table_height_m=args.table_height)
+        try: replay_table_retreat(corrected,backend)
+        finally: backend.close()
+        print(f"table retreat: source_frame={report.source_frame} frames={len(corrected.timestamps_ns)} retreat_m={report.actual_retreat_m:.3f} thumb_clearance_m={report.minimum_thumb_clearance_m:.4f} max_slip_m={report.maximum_contact_slip_m:.4f}")
+        return 0
+    except ModuleNotFoundError as exc:
+        if exc.name in {"mcap","wuji_sdk"}:
+            print("missing Wuji offline dependency; install with 'pip install -e .[wuji-offline]'",file=sys.stderr)
+            return 2
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:

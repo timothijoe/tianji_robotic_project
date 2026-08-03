@@ -84,6 +84,12 @@ def build_table_retreat(trajectory: HandTrajectory, backend, config: TableRetrea
     return corrected, report
 
 
+def replay_table_retreat(corrected: CorrectedHandTrajectory, backend) -> None:
+    for joints,palm,quaternion in zip(corrected.positions_rad,corrected.palm_positions_m,corrected.palm_quaternions_wxyz,strict=True):
+        backend.command_pose(joints,palm,quaternion)
+        backend.step(backend.timestep_s)
+
+
 def _select_frame(trajectory, backend, config):
     candidates = [config.source_frame] if config.source_frame is not None else list(range(0, len(trajectory.positions_rad), config.candidate_stride))
     if candidates[-1] != len(trajectory.positions_rad)-1 and config.source_frame is None: candidates.append(len(trajectory.positions_rad)-1)

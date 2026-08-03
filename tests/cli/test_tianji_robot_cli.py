@@ -28,3 +28,10 @@ def test_hardware_cli_rejects_arm_option(tmp_path):
 def test_simulation_parser_rejects_hardware_options(tmp_path):
     with pytest.raises(SystemExit):
         cli.main(["sim", "wuji-replay", str(tmp_path / "x.mcap"), "--arm"])
+
+
+def test_table_retreat_routes_as_an_independent_simulation(monkeypatch, tmp_path):
+    calls=[]
+    monkeypatch.setattr(cli,"_run_wuji_table_retreat",lambda args: calls.append(args) or 0)
+    assert cli.main(["sim","wuji-table-retreat",str(tmp_path/"in.mcap"),"--headless","--retreat-distance", "0.04"])==0
+    assert calls[0].headless is True and calls[0].retreat_distance==0.04
