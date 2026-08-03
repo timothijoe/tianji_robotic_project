@@ -11,7 +11,7 @@
 最新修正：Wuji MCAP 默认回放已从双臂组合场景切换为官方 hand-only 左手模型；
 模型严格包含 20 个关节/actuator，不再显示或加载天机机械臂。
 
-修正后全量测试为 `240 passed, 1 warning in 391.29s`。真实 1676 帧录制已在
+hand-only 修正当时的基线为 `240 passed, 1 warning in 391.29s`。真实 1676 帧录制已在
 Headless 与 Viewer 两条 hand-only 路径完成，CLI 均返回 0；Viewer 在窗口失效后
 不会继续执行 `sync()`。唯一 warning 仍是原有切菜仿真的接触力观察阈值。
 
@@ -44,7 +44,7 @@ SDK/ROS 2 接入所需的安全接口。所有自研实现归入同一个
 
 ## 最新验证证据
 
-- 全量测试：`240 passed, 1 warning in 391.29s`；警告为已有切菜仿真接触力
+- 最新全量测试：`244 passed, 1 warning in 409.06s`；警告为已有切菜仿真接触力
   39.611 N 超过 30 N 观察阈值，不是 Wuji 回放失败；
 - Wuji 专用测试：`54 passed in 0.19s`；
 - 真实录制 `session_20260802_162909_764.mcap`：成功回放 1676 帧、
