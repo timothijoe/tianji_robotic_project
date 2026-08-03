@@ -2,7 +2,11 @@ import numpy as np
 import pytest
 
 from tianji_robotics.simulation.tabletop_wuji_hand import TabletopWujiHand
-from tianji_robotics.workflows.wuji_table_retreat import TableRetreatConfig, build_table_retreat
+from tianji_robotics.workflows.wuji_table_retreat import (
+    TableRetreatConfig,
+    _fit_palm_down_quaternion,
+    build_table_retreat,
+)
 from tianji_robotics.wuji_hand.models import HandTrajectory
 from tianji_robotics.wuji_hand.names import HAND_JOINT_NAMES
 
@@ -23,10 +27,80 @@ def test_builds_contact_retreat_and_uses_earliest_equal_candidate():
     assert report.source_frame == 0
     assert report.actual_retreat_m == pytest.approx(.03)
     assert report.minimum_thumb_clearance_m >= .010
-    assert report.maximum_fingertip_height_error_m <= .002
-    assert report.maximum_contact_slip_m <= .003
+    assert report.maximum_retreat_fingertip_lift_m > 0
+    assert report.maximum_hand_penetration_m <= .0005
     assert corrected.phases[0] == "PLACE" and "RETREAT" in corrected.phases and corrected.phases[-1] == "HOLD"
     assert np.max(np.abs(np.diff(corrected.positions_rad, axis=0))) <= .12
+
+
+def test_fitted_palm_frame_makes_anatomical_axes_horizontal():
+    backend = TabletopWujiHand(viewer=False)
+    try:
+        quaternion = _fit_palm_down_quaternion(backend, FEASIBLE_POSE)
+        backend.set_kinematic_pose(FEASIBLE_POSE, np.zeros(3), quaternion)
+        roots = backend.long_finger_root_positions_m()
+        tips = backend.fingertip_positions_m()
+        assert abs((tips.mean(axis=0) - roots.mean(axis=0))[2]) <= 0.005
+        assert abs((roots[-1] - roots[0])[2]) <= 0.005
+    finally:
+        backend.close()
+
+
+def test_place_keeps_real_hand_geometry_above_table():
+    backend = TabletopWujiHand(viewer=False)
+    try:
+        corrected, _ = build_table_retreat(
+            _trajectory(),
+            backend,
+            TableRetreatConfig(
+                place_duration_s=.1,
+                retreat_duration_s=.2,
+                hold_duration_s=.1,
+                candidate_stride=1,
+            ),
+        )
+        place_end = corrected.phases.index("RETREAT") - 1
+        backend.set_kinematic_pose(
+            corrected.positions_rad[place_end],
+            corrected.palm_positions_m[place_end],
+            corrected.palm_quaternions_wxyz[place_end],
+        )
+        assert backend.maximum_table_penetration_m() <= .0005
+        assert backend.thumb_position_m()[2] >= .010
+    finally:
+        backend.close()
+
+
+def test_retreat_releases_tip_contact_but_never_crosses_table():
+    backend = TabletopWujiHand(viewer=False)
+    try:
+        corrected, report = build_table_retreat(
+            _trajectory(),
+            backend,
+            TableRetreatConfig(
+                place_duration_s=.1,
+                retreat_duration_s=.2,
+                hold_duration_s=.1,
+                candidate_stride=1,
+            ),
+        )
+        retreat = [
+            index for index, phase in enumerate(corrected.phases)
+            if phase == "RETREAT"
+        ]
+        heights = []
+        for index in retreat:
+            backend.set_kinematic_pose(
+                corrected.positions_rad[index],
+                corrected.palm_positions_m[index],
+                corrected.palm_quaternions_wxyz[index],
+            )
+            assert backend.maximum_table_penetration_m() <= .0005
+            heights.append(backend.fingertip_positions_m()[:, 2].copy())
+        assert np.max(heights[-1] - heights[0]) > 0
+        assert report.maximum_hand_penetration_m <= .0005
+    finally:
+        backend.close()
 
 
 def test_explicit_source_frame_is_range_checked():

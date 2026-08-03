@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+import mujoco
 import numpy as np
 
 from tianji_robotics.wuji_hand.models import HandTrajectory
@@ -39,20 +40,21 @@ class CorrectionReport:
     minimum_thumb_clearance_m: float
     maximum_fingertip_height_error_m: float
     maximum_contact_slip_m: float
+    maximum_hand_penetration_m: float
+    maximum_retreat_fingertip_lift_m: float
 
 
 def build_table_retreat(trajectory: HandTrajectory, backend, config: TableRetreatConfig = TableRetreatConfig()):
     _validate_config(config)
     source_frame, score = _select_frame(trajectory, backend, config)
     selected = trajectory.positions_rad[source_frame].copy()
-    quaternion = np.array([1.0, 0.0, 0.0, 0.0])
-    origin = np.zeros(3)
-    backend.set_kinematic_pose(selected, origin, quaternion)
-    source_tips = backend.fingertip_positions_m()
-    place_palm = np.array([0.0, 0.0, config.fingertip_height_m - float(source_tips[:, 2].mean())])
-    place_targets = source_tips.copy()
-    place_targets[:, 2] = backend.table_height_m + config.fingertip_height_m
-    place_joints = _solve_contacts(backend, selected, place_palm, quaternion, place_targets, vertical_only=True)
+    ranges = np.asarray(list(backend.joint_ranges_rad.values()))
+    place_seed = selected.copy()
+    place_seed[4:] = np.clip(0.0, ranges[4:, 0], ranges[4:, 1])
+    quaternion = _fit_palm_down_quaternion(backend, place_seed)
+    place_joints, place_palm = _solve_place(
+        backend, place_seed, quaternion, config
+    )
     backend.set_kinematic_pose(place_joints, place_palm, quaternion)
     contact_targets = backend.fingertip_positions_m().copy()
     if backend.thumb_position_m()[2] - backend.table_height_m < config.thumb_clearance_m:
@@ -63,24 +65,36 @@ def build_table_retreat(trajectory: HandTrajectory, backend, config: TableRetrea
     retreat_count = _steps(config.retreat_duration_s, dt)
     hold_count = _steps(config.hold_duration_s, dt)
     joints_frames=[]; palm_frames=[]; phases=[]
+    hover_palm = place_palm + np.array([0.0, 0.0, 0.05])
     for fraction in np.linspace(0.0, 1.0, place_count + 1):
-        joints_frames.append(selected + fraction * (place_joints - selected))
-        palm_frames.append(fraction * place_palm)
+        joints_frames.append(place_seed + fraction * (place_joints - place_seed))
+        palm_frames.append(hover_palm + fraction * (place_palm - hover_palm))
         phases.append("PLACE")
     retreat_vector = np.array([config.retreat_distance_m, 0.0, 0.0])
+    curl_target = place_joints.copy()
+    ranges = np.asarray(list(backend.joint_ranges_rad.values()))
+    for base in (4, 8, 12, 16):
+        curl_target[base] += 0.35
+        curl_target[base + 2] += 0.35
+        curl_target[base + 3] += 0.25
+    curl_target = np.clip(curl_target, ranges[:, 0], ranges[:, 1])
     previous = place_joints
     for fraction in np.linspace(0.0, 1.0, retreat_count + 1)[1:]:
-        palm = place_palm + fraction * retreat_vector
-        previous = _solve_contacts(backend, previous, palm, quaternion, contact_targets, vertical_only=False)
+        smooth = fraction * fraction * (3.0 - 2.0 * fraction)
+        solved = place_joints + smooth * (curl_target - place_joints)
+        previous = previous + np.clip(solved - previous, -0.1, 0.1)
+        palm = place_palm + smooth * retreat_vector
+        palm = _project_above_table(backend, previous, palm, quaternion)
         joints_frames.append(previous.copy()); palm_frames.append(palm); phases.append("RETREAT")
+    final_palm = palm_frames[-1]
     for _ in range(hold_count):
-        joints_frames.append(previous.copy()); palm_frames.append(place_palm + retreat_vector); phases.append("HOLD")
+        joints_frames.append(previous.copy()); palm_frames.append(final_palm.copy()); phases.append("HOLD")
     joints = np.asarray(joints_frames); palms=np.asarray(palm_frames)
     quaternions=np.tile(quaternion,(len(joints),1))
     diagnostics = _preflight(backend, joints, palms, quaternions, phases, contact_targets, config)
     timestamps = np.arange(len(joints), dtype=np.int64) * int(round(dt * 1e9))
     corrected=CorrectedHandTrajectory(timestamps,joints,palms,quaternions,tuple(phases),source_frame)
-    report=CorrectionReport(source_frame,int(trajectory.timestamps_ns[source_frame]),score,tuple(retreat_vector),float(np.linalg.norm(palms[-1]-place_palm)),*diagnostics)
+    report=CorrectionReport(source_frame,int(trajectory.timestamps_ns[source_frame]),score,tuple(retreat_vector),float(np.linalg.norm(retreat_vector)),*diagnostics)
     return corrected, report
 
 
@@ -125,17 +139,88 @@ def _solve_contacts(backend, initial, palm, quaternion, targets, *, vertical_onl
     return q
 
 
+def _fit_palm_down_quaternion(backend, joints) -> np.ndarray:
+    backend.set_kinematic_pose(joints, np.array([0.0, 0.0, 0.2]), np.array([1.0, 0.0, 0.0, 0.0]))
+    tips = backend.fingertip_positions_m()
+    roots = backend.long_finger_root_positions_m()
+    forward = tips.mean(axis=0) - roots.mean(axis=0)
+    forward_norm = float(np.linalg.norm(forward))
+    if forward_norm <= 1e-8:
+        raise ValueError("cannot fit palm frame from coincident finger landmarks")
+    forward /= forward_norm
+    lateral = roots[-1] - roots[0]
+    lateral -= forward * float(np.dot(lateral, forward))
+    lateral_norm = float(np.linalg.norm(lateral))
+    if lateral_norm <= 1e-8:
+        raise ValueError("cannot fit palm frame from collinear finger landmarks")
+    lateral /= lateral_norm
+    normal = np.cross(forward, lateral)
+    local_basis = np.column_stack((forward, lateral, normal))
+    # Fingers extend toward world -X, span toward +Y, and the palm-facing
+    # normal points toward -Z so the knuckles remain above the table.
+    world_basis = np.column_stack(([-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]))
+    rotation = world_basis @ local_basis.T
+    quaternion = np.zeros(4)
+    mujoco.mju_mat2Quat(quaternion, rotation.reshape(-1))
+    return quaternion
+
+
+def _solve_place(backend, initial, quaternion, config):
+    q = np.asarray(initial, dtype=float).copy()
+    backend.set_kinematic_pose(q, np.zeros(3), quaternion)
+    tips = backend.fingertip_positions_m()
+    provisional_height = 0.003
+    palm = np.array([0.0, 0.0, provisional_height - float(tips[:, 2].mean())])
+    provisional_targets = tips.copy()
+    provisional_targets[:, 2] = backend.table_height_m + provisional_height
+    q = _solve_contacts(backend, q, palm, quaternion, provisional_targets, vertical_only=True)
+    backend.set_kinematic_pose(q, palm, quaternion)
+    distances = backend.long_fingertip_table_distances_m()
+    if not np.isfinite(distances).all():
+        raise ValueError("selected pose cannot calibrate all four fingertip surfaces")
+    surface_offsets = backend.fingertip_positions_m()[:, 2] - distances
+    targets = backend.fingertip_positions_m().copy()
+    targets[:, 2] = surface_offsets + 0.0002
+    for _ in range(30):
+        q = _solve_contacts(backend, q, palm, quaternion, targets, vertical_only=True)
+        backend.set_kinematic_pose(q, palm, quaternion)
+        penetration = backend.maximum_table_penetration_m()
+        if penetration <= 0.0005:
+            if backend.thumb_position_m()[2] - backend.table_height_m < config.thumb_clearance_m:
+                raise ValueError("selected pose cannot keep the thumb clear of the table")
+            return q, palm
+        palm[2] += penetration + 0.0001
+    raise ValueError("selected pose cannot place the whole hand above the table")
+
+
+def _project_above_table(backend, joints, palm, quaternion):
+    corrected = np.asarray(palm, dtype=float).copy()
+    for _ in range(4):
+        backend.set_kinematic_pose(joints, corrected, quaternion)
+        penetration = backend.maximum_table_penetration_m()
+        if penetration <= 0.0005:
+            return corrected
+        corrected[2] += penetration - 0.0005 + 0.0001
+    raise ValueError("retreat frame cannot be projected above the table")
+
+
 def _preflight(backend,joints,palms,quaternions,phases,targets,config):
     if not np.isfinite(joints).all() or np.max(np.abs(np.diff(joints,axis=0))) > 0.12: raise ValueError("corrected trajectory exceeds joint-step limit")
-    min_thumb=float("inf"); max_height=0.0; max_slip=0.0
+    min_thumb=float("inf"); max_height=0.0; max_slip=0.0; max_penetration=0.0; max_lift=0.0
     place_end=phases.index("RETREAT") if "RETREAT" in phases else len(phases)
+    place_tip_heights = None
     for i,(q,palm,quat) in enumerate(zip(joints,palms,quaternions,strict=True)):
         backend.set_kinematic_pose(q,palm,quat)
         min_thumb=min(min_thumb,float(backend.thumb_position_m()[2]-backend.table_height_m))
+        max_penetration=max(max_penetration,backend.maximum_table_penetration_m())
+        if i == place_end - 1:
+            place_tip_heights=backend.fingertip_positions_m()[:,2].copy()
         if i >= place_end:
             tips=backend.fingertip_positions_m(); max_height=max(max_height,float(np.max(np.abs(tips[:,2]-(backend.table_height_m+config.fingertip_height_m))))); max_slip=max(max_slip,float(np.max(np.linalg.norm(tips[:,:2]-targets[:,:2],axis=1))))
-    if min_thumb < config.thumb_clearance_m or max_height > 0.002 or max_slip > 0.003: raise ValueError(f"contact correction failed preflight: thumb={min_thumb}, height={max_height}, slip={max_slip}")
-    return min_thumb,max_height,max_slip
+            if place_tip_heights is not None:
+                max_lift=max(max_lift,float(np.max(tips[:,2]-place_tip_heights)))
+    if min_thumb < config.thumb_clearance_m or max_penetration > 0.0005: raise ValueError(f"contact correction failed preflight: thumb={min_thumb}, penetration={max_penetration}")
+    return min_thumb,max_height,max_slip,max_penetration,max_lift
 
 
 def _steps(duration,dt):

@@ -158,6 +158,26 @@ class TabletopWujiHand:
     def maximum_table_penetration_m(self) -> float:
         return max(0.0, -self.minimum_hand_table_clearance_m())
 
+    def long_fingertip_table_distances_m(self) -> np.ndarray:
+        """Return the shallowest contact distance for each long fingertip body."""
+        distances = np.full(4, np.nan)
+        tip_body_ids = {
+            int(mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"finger{i}_link4")): i - 2
+            for i in range(2, 6)
+        }
+        for index in range(self.data.ncon):
+            contact = self.data.contact[index]
+            if self._table_geom_id not in (contact.geom1, contact.geom2):
+                continue
+            other = contact.geom2 if contact.geom1 == self._table_geom_id else contact.geom1
+            finger = tip_body_ids.get(int(self.model.geom_bodyid[other]))
+            if finger is None:
+                continue
+            distance = float(contact.dist)
+            if not np.isfinite(distances[finger]) or distance < distances[finger]:
+                distances[finger] = distance
+        return distances
+
     def step(self, duration_s: float) -> None:
         if not np.isclose(float(duration_s), self.timestep_s):
             raise ValueError("tabletop backend step must equal the MuJoCo timestep")
