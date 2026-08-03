@@ -1,0 +1,121 @@
+# Wuji Hand-Only MCAP MuJoCo Replay Design
+
+Date: 2026-08-03
+
+## Goal
+
+Make `tianji-robot sim wuji-replay` a pure Wuji Hand validation path. The
+MuJoCo model must contain only the official left Wuji Hand, never the Tianji or
+Marvin arms. Existing arm-plus-hand simulations under `twin-sim` remain
+unchanged.
+
+## Ownership and repository boundary
+
+Official, read-only assets remain in the adjacent official repository:
+
+```text
+<workspace>/
+├── tianji_robotic_project/                 # our Git repository
+└── wuji-technology/
+    └── mujoco-sim/                         # official Git repository
+        └── wuji_hand_description/mjcf/left.xml
+```
+
+All non-official integration code, path resolution, validation, replay,
+tests, CLI and documentation remain under `tianji_robotic_project`.
+Implementation must not edit, copy from, or write generated files into the
+official repository.
+
+## Path contract
+
+The default official root is derived from the Tianji project root, never from
+the current working directory:
+
+```text
+<project-root>/../wuji-technology
+```
+
+The exact default left-hand model is:
+
+```text
+<project-root>/../wuji-technology/mujoco-sim/
+wuji_hand_description/mjcf/left.xml
+```
+
+`WUJI_TECHNOLOGY_ROOT` may override only the `wuji-technology` root for a
+different workspace layout. Relative override values are rejected to avoid
+working-directory-dependent behavior. A missing model raises a concise error
+showing the resolved path and expected sibling layout; there is no silent
+fallback to the arm scene or a copied model.
+
+## Hand-only backend
+
+Replace the `RightArmRobot`-based implementation of
+`tianji_robotics.simulation.wuji_hand.MujocoWujiHand` with a backend that:
+
+- loads the official left MJCF with `mujoco.MjModel.from_xml_path`;
+- requires exactly the canonical 20 `fingerN_jointM` joints and actuators;
+- maps the project-facing canonical names `left_fingerN_jointM` to the
+  official names without changing trajectory order;
+- derives safe command ranges from the intersection of joint and actuator
+  ranges;
+- commands `data.ctrl`, steps with `mujoco.mj_step`, and reads `data.qpos`;
+- contains no import of `twin_sim.robot` or `SimWujiHand`;
+- uses the official demo camera (`lookat [0,0,0.05]`, distance `0.5`, azimuth
+  `180`, elevation `-20`) when Viewer is enabled;
+- closes Viewer resources idempotently.
+
+The existing backend-neutral replay and trajectory validation contracts remain
+unchanged. Headless and Viewer modes use the same model and control mapping.
+
+## CLI and data flow
+
+The public command remains stable:
+
+```bash
+.venv-wuji-teleop/bin/tianji-robot sim wuji-replay SOURCE [--headless]
+```
+
+Data flow remains:
+
+```text
+Studio right-glove MCAP
+  -> right-to-left skeleton mirror
+  -> official wuji-sdk retargeting
+  -> validated 20-joint trajectory
+  -> official hand-only MuJoCo model
+```
+
+Optional NPZ and JointState MCAP outputs remain byte-format compatible. No
+physical Wuji runtime is imported or connected.
+
+## Failure behavior and safety
+
+Before sending the first MuJoCo command, the implementation validates model
+identity, all joint/actuator mappings, finite ranges, the whole trajectory and
+maximum per-frame step. Missing or incompatible official assets fail before
+Viewer launch. The hand-only command exposes no arm or physical-hardware
+options.
+
+## Verification
+
+Automated tests must prove:
+
+- default and environment-overridden paths resolve deterministically;
+- missing and relative override paths fail clearly;
+- the loaded model has `nq == nv == nu == 20`;
+- it contains the Wuji palm and all 20 hand joints;
+- it contains no Tianji/Marvin arm bodies, joints or actuators;
+- command/read/step/close behavior satisfies the backend contract;
+- the real 1676-frame recording completes Headless replay;
+- Viewer initialization receives the official hand camera values;
+- existing twin-arm and guarded-chop behavior remains unchanged.
+
+Manual acceptance is one command: the Viewer must show only the left Wuji Hand
+performing the recorded motion, with no mechanical arm visible.
+
+## Deferred interfaces
+
+Arm-mounted Wuji replay remains a separate future simulation backend rather
+than a flag on the hand-only command. Physical SDK and ROS 2 adapters retain
+their existing interfaces and are not implemented or connected by this work.
