@@ -108,7 +108,10 @@ def build_recorded_table_retreat(
             fraction = raw * raw * (3.0 - 2.0 * raw)
             phase = "RETREAT"
         palm = base_palm + np.array([config.retreat_distance_m * fraction, 0.0, 0.0])
-        palm = _project_above_table(backend, joints, palm, quaternion)
+        if phase == "PREPARE":
+            palm = _settle_to_table_contact(backend, joints, palm, quaternion)
+        else:
+            palm = _project_above_table(backend, joints, palm, quaternion)
         backend.set_kinematic_pose(joints, palm, quaternion)
         thumb = backend.thumb_position_m()[2] - backend.table_height_m
         if thumb < config.thumb_clearance_m:
@@ -298,26 +301,29 @@ def _fit_palm_down_quaternion(backend, joints) -> np.ndarray:
 
 
 def _calibrated_palm_down_quaternion(backend, joints) -> np.ndarray:
-    backend.set_kinematic_pose(joints, np.array([0.0, 0.0, 0.2]), np.array([1.0, 0.0, 0.0, 0.0]))
-    tips = backend.fingertip_positions_m()
+    origin = np.array([0.0, 0.0, 0.2])
+    backend.set_kinematic_pose(joints, origin, np.array([1.0, 0.0, 0.0, 0.0]))
     roots = backend.long_finger_root_positions_m()
-    forward = tips.mean(axis=0) - roots.mean(axis=0)
+    # Palm forward is the fixed wrist-to-finger-root direction. The previous
+    # implementation used root-to-tip, which tilts with recorded finger curl.
+    forward = roots.mean(axis=0) - origin
     forward /= np.linalg.norm(forward)
     lateral = roots[-1] - roots[0]
     lateral -= forward * float(np.dot(lateral, forward))
     lateral /= np.linalg.norm(lateral)
     normal = np.cross(forward, lateral)
     local_basis = np.column_stack((forward, lateral, normal))
-    # The official left-hand palmar reference lies toward local -Z. Mapping
-    # anatomical +normal to world +Z therefore places the palmar side down.
-    world_basis = np.column_stack(([-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]))
-    rotation = world_basis @ local_basis.T
-    quaternion = np.zeros(4)
-    mujoco.mju_mat2Quat(quaternion, rotation.reshape(-1))
-    backend.set_kinematic_pose(joints, np.array([0.0, 0.0, 0.2]), quaternion)
-    if backend.palmar_reference_position_m()[2] >= backend.dorsal_reference_position_m()[2]:
-        raise ValueError("official Wuji palm-side calibration is inverted")
-    return quaternion
+    candidates = (
+        np.column_stack(([-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0])),
+        np.column_stack(([-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0])),
+    )
+    for world_basis in candidates:
+        quaternion = np.zeros(4)
+        mujoco.mju_mat2Quat(quaternion, (world_basis @ local_basis.T).reshape(-1))
+        backend.set_kinematic_pose(joints, origin, quaternion)
+        if backend.palmar_reference_position_m()[2] < backend.dorsal_reference_position_m()[2]:
+            return quaternion
+    raise ValueError("official Wuji palm-side calibration is inverted")
 
 
 def _solve_place(backend, initial, quaternion, config):
@@ -357,6 +363,23 @@ def _project_above_table(backend, joints, palm, quaternion):
             return corrected
         corrected[2] += penetration - 0.0005 + 0.0001
     raise ValueError("retreat frame cannot be projected above the table")
+
+
+def _settle_to_table_contact(backend, joints, palm, quaternion):
+    """Lower a prepare pose to first contact without exceeding tolerance."""
+    corrected = np.asarray(palm, dtype=float).copy()
+    for _ in range(1000):
+        backend.set_kinematic_pose(joints, corrected, quaternion)
+        clearance = backend.minimum_hand_table_clearance_m()
+        if np.isfinite(clearance):
+            if clearance < -0.0005:
+                corrected[2] += -0.0004 - clearance
+                backend.set_kinematic_pose(joints, corrected, quaternion)
+            if backend.thumb_position_m()[2] - backend.table_height_m < 0.010:
+                raise ValueError("prepare contact would place the thumb on the table")
+            return corrected
+        corrected[2] -= 0.00025
+    raise ValueError("prepare pose cannot reach the table")
 
 
 def _preflight(backend,joints,palms,quaternions,phases,targets,config):

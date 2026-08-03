@@ -6,6 +6,7 @@ from tianji_robotics.workflows.wuji_table_retreat import (
     TableRetreatConfig,
     _calibrated_palm_down_quaternion,
     _fit_palm_down_quaternion,
+    _settle_to_table_contact,
     build_recorded_table_retreat,
     build_table_retreat,
 )
@@ -53,10 +54,27 @@ def test_calibrated_place_has_palmar_side_below_dorsal_side():
     try:
         quaternion = _calibrated_palm_down_quaternion(backend, FEASIBLE_POSE)
         backend.set_kinematic_pose(FEASIBLE_POSE, [0, 0, .2], quaternion)
+        roots = backend.long_finger_root_positions_m()
+        assert abs(roots.mean(axis=0)[2] - .2) <= .005
+        assert backend.fingertip_positions_m()[:, 2].mean() < roots[:, 2].mean()
         assert (
             backend.palmar_reference_position_m()[2]
             < backend.dorsal_reference_position_m()[2]
         )
+    finally:
+        backend.close()
+
+
+def test_prepare_pose_settles_to_first_table_contact_without_thumb_contact():
+    backend = TabletopWujiHand(viewer=False)
+    try:
+        quaternion = _calibrated_palm_down_quaternion(backend, FEASIBLE_POSE)
+        palm = _settle_to_table_contact(
+            backend, FEASIBLE_POSE, np.array([0.0, 0.0, 0.2]), quaternion
+        )
+        backend.set_kinematic_pose(FEASIBLE_POSE, palm, quaternion)
+        assert -0.0005 <= backend.minimum_hand_table_clearance_m() <= 0.0
+        assert backend.thumb_position_m()[2] >= 0.010
     finally:
         backend.close()
 

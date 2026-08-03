@@ -70,8 +70,8 @@ class TabletopWujiHand:
         if world is None or palm is None:
             raise RuntimeError("official Wuji model has no palm_link")
         palm.set("mocap", "true")
-        ET.SubElement(palm, "site", name="palmar_reference", pos="0 0 -0.015", size="0.002", rgba="0.9 0.2 0.2 1")
-        ET.SubElement(palm, "site", name="dorsal_reference", pos="0 0 0.015", size="0.002", rgba="0.2 0.2 0.9 1")
+        ET.SubElement(palm, "site", name="palmar_reference", pos="0 0 0.015", size="0.002", rgba="0.9 0.2 0.2 1")
+        ET.SubElement(palm, "site", name="dorsal_reference", pos="0 0 -0.015", size="0.002", rgba="0.2 0.2 0.9 1")
         ET.SubElement(world, "geom", name="table", type="plane", pos=f"0 0 {table_height_m:.17g}", size="0.5 0.5 0.02", rgba="0.55 0.55 0.58 1", contype="1", conaffinity="1")
         for finger in range(1, 6):
             body = palm.find(f".//body[@name='finger{finger}_link4']")
