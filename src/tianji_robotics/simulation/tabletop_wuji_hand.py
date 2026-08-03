@@ -49,10 +49,10 @@ class TabletopWujiHand:
         if viewer:
             from mujoco import viewer as mujoco_viewer
             self._viewer = mujoco_viewer.launch_passive(self.model, self.data)
-            self._viewer.cam.azimuth = 180.0
-            self._viewer.cam.elevation = -25.0
-            self._viewer.cam.distance = 0.55
-            self._viewer.cam.lookat[:] = (0.0, 0.0, 0.04)
+            self._viewer.cam.azimuth = 90.0
+            self._viewer.cam.elevation = -8.0
+            self._viewer.cam.distance = 0.34
+            self._viewer.cam.lookat[:] = (-0.09, 0.0, 0.04)
             self._viewer.sync()
 
     @staticmethod

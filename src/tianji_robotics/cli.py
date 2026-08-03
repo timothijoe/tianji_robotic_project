@@ -104,7 +104,7 @@ def _run_wuji_table_retreat(args: argparse.Namespace) -> int:
         backend=TabletopWujiHand(viewer=not args.headless,table_height_m=args.table_height)
         try: replay_table_retreat(corrected,backend)
         finally: backend.close()
-        print(f"table retreat: source_frame={report.source_frame} frames={len(corrected.timestamps_ns)} retreat_m={report.actual_retreat_m:.3f} thumb_clearance_m={report.minimum_thumb_clearance_m:.4f} max_slip_m={report.maximum_contact_slip_m:.4f}")
+        print(f"table retreat: source_frame={report.source_frame} frames={len(corrected.timestamps_ns)} retreat_m={report.actual_retreat_m:.3f} thumb_clearance_m={report.minimum_thumb_clearance_m:.4f} penetration_m={report.maximum_hand_penetration_m:.6f} tip_lift_m={report.maximum_retreat_fingertip_lift_m:.4f}")
         return 0
     except ModuleNotFoundError as exc:
         if exc.name in {"mcap","wuji_sdk"}:
