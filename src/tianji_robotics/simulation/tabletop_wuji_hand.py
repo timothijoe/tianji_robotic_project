@@ -122,6 +122,15 @@ class TabletopWujiHand:
     def thumb_position_m(self) -> np.ndarray:
         return self.data.site_xpos[self._thumb_site_id].copy()
 
+    def fingertip_position_jacobian(self) -> np.ndarray:
+        """Return stacked world-position Jacobians in canonical joint order."""
+        blocks = []
+        for site_id in self._tip_site_ids:
+            jacobian = np.zeros((3, self.model.nv))
+            mujoco.mj_jacSite(self.model, self.data, jacobian, None, int(site_id))
+            blocks.append(jacobian[:, self.model.jnt_dofadr[self._joint_ids]])
+        return np.vstack(blocks)
+
     def contact_diagnostics(self) -> ContactDiagnostics:
         heights = self.fingertip_positions_m()[:, 2] - self.table_height_m
         thumb = float(self.thumb_position_m()[2] - self.table_height_m)
