@@ -23,8 +23,9 @@ SDK/ROS 2 接入所需的安全接口。所有自研实现归入同一个
 - 解析 Wuji Studio 右手骨架 MCAP，镜像到左手坐标并调用官方离线重定向；
 - 使用不可变、有限值、严格时间戳的 20 关节轨迹模型；
 - 保存安全 NPZ，输出 ROS 2 JointState 语义 MCAP；
-- 用现有 `SimWujiHand` 封装 MuJoCo 后端，完成按录制时间戳的 Headless/Viewer
-  回放和关节范围、单步变化量预检；
+- 使用项目内 vendored 的官方 hand-only 左手 MJCF 实现独立 MuJoCo 后端，完成
+  按录制时间戳的 Headless/Viewer 回放和关节范围、单步变化量预检；该后端不
+  导入或加载机械臂；
 - 提供 `tianji-robot sim wuji-replay`；
 - 提供注入式 `SdkWujiHand` 生命周期契约，以及只读的
   `tianji-robot hardware wuji-sdk preflight`；
@@ -37,7 +38,7 @@ SDK/ROS 2 接入所需的安全接口。所有自研实现归入同一个
 
 ## 最新验证证据
 
-- 全量测试：`234 passed, 1 warning in 364.56s`；警告为已有切菜仿真接触力
+- 全量测试：`240 passed, 1 warning in 391.29s`；警告为已有切菜仿真接触力
   39.611 N 超过 30 N 观察阈值，不是 Wuji 回放失败；
 - Wuji 专用测试：`54 passed in 0.19s`；
 - 真实录制 `session_20260802_162909_764.mcap`：成功回放 1676 帧、
@@ -46,6 +47,32 @@ SDK/ROS 2 接入所需的安全接口。所有自研实现归入同一个
   操作者在目标显示器前做人工确认；
 - 硬件预检输出明确为 `no device accessed`，代码路径不导入物理 runtime；
 - 10 个官方嵌套 Git 仓库均为 clean，remote 未变化。
+
+## 当前有效的 shell 脚本
+
+以下 5 个文件真实存在、具有可执行权限，并已通过 `bash -n` 语法检查：
+
+| 脚本 | 功能 | 窗口 | 真机访问 |
+|---|---|---|---|
+| `scripts/setup_wuji_teleop_env.sh` | 创建/更新 `.venv-wuji-teleop` 并安装 Wuji 离线依赖 | 无 | 否 |
+| `scripts/run_guarded_chop.sh` | 双臂猫爪倒手切菜在线仿真 | Viewer | 否 |
+| `scripts/run_guarded_chop_record.sh` | 双臂切菜并保存 MuJoCo 状态 NPZ | Viewer | 否 |
+| `scripts/replay_guarded_chop_2x.sh` | 读取已有状态 NPZ 并以二倍速回放 | Viewer | 否 |
+| `scripts/run_guarded_chop_record_replay.sh` | 在线执行后在同一 Viewer 二倍速状态回放 | Viewer | 否 |
+
+脚本依赖的 `.venv/bin/twin-sim` 与 `.venv-wuji-teleop/bin/tianji-robot` 当前均
+可执行，默认 `recordings/guarded_chop_latest.npz` 也存在。此前讨论的
+`scripts/verification/...` 尚未创建，因此不能列为有效脚本。
+
+Wuji 手套 MCAP hand-only 回放目前使用已验证的 CLI，而不是 shell 包装：
+
+```bash
+.venv-wuji-teleop/bin/tianji-robot sim wuji-replay \
+  recordings/wuji/august_02/session_20260802_162909_764.mcap
+```
+
+该命令只显示官方左 Wuji Hand。真实录制已完成 1676 帧、13.958 秒的
+Headless 与 Viewer 验证，两个路径均返回 0。
 
 ## 已知问题与边界
 
