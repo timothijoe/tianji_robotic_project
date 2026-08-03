@@ -1,6 +1,6 @@
 """Backend-neutral Wuji hand capability contracts."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -20,6 +20,12 @@ class Retargeter(Protocol):
 
 @runtime_checkable
 class WujiHandBackend(Protocol):
+    @property
+    def joint_ranges_rad(self) -> Mapping[str, tuple[float, float]]: ...
+
+    @property
+    def range_tolerance_rad(self) -> float: ...
+
     def read_position_rad(self) -> np.ndarray: ...
 
     def command_position_rad(self, target: np.ndarray) -> None: ...
