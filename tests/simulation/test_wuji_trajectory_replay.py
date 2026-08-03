@@ -20,11 +20,11 @@ def _trajectory():
 
 def test_headless_replay_advances_mujoco_and_accepts_every_target():
     backend = MujocoWujiHand(viewer=False)
-    start_time = float(backend.robot.sim.data.time)
+    start_time = float(backend.data.time)
     try:
         summary = replay_trajectory(_trajectory(), backend, realtime=False)
 
-        assert float(backend.robot.sim.data.time) > start_time
+        assert float(backend.data.time) > start_time
         np.testing.assert_allclose(
             backend.read_target_position_rad(), DEFAULT_OPEN_RAD + 0.01
         )
