@@ -33,6 +33,25 @@ def test_command_pose_updates_palm_joints_and_observations():
         hand.close()
 
 
+def test_anatomical_landmarks_return_four_world_positions():
+    hand = TabletopWujiHand(viewer=False)
+    try:
+        hand.set_kinematic_pose(np.zeros(20), [0, 0, 0.2], [1, 0, 0, 0])
+        assert hand.long_finger_root_positions_m().shape == (4, 3)
+    finally:
+        hand.close()
+
+
+def test_real_collision_clearance_detects_table_crossing():
+    hand = TabletopWujiHand(viewer=False)
+    try:
+        hand.set_kinematic_pose(np.zeros(20), [0, 0, -0.05], [1, 0, 0, 0])
+        assert hand.maximum_table_penetration_m() > 0.01
+        assert hand.minimum_hand_table_clearance_m() < -0.01
+    finally:
+        hand.close()
+
+
 @pytest.mark.parametrize("position,quaternion", [([0, 0], [1, 0, 0, 0]), ([0, 0, 0], [0, 0, 0, 0])])
 def test_command_pose_rejects_invalid_palm_pose(position, quaternion):
     hand = TabletopWujiHand(viewer=False)

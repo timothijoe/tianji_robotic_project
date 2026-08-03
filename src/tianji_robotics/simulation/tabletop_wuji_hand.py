@@ -32,6 +32,13 @@ class TabletopWujiHand:
         self._qpos_ids = self.model.jnt_qposadr[self._joint_ids].copy()
         self._tip_site_ids = self._ids(mujoco.mjtObj.mjOBJ_SITE, tuple(f"finger{i}_contact" for i in range(2, 6)))
         self._thumb_site_id = int(self._ids(mujoco.mjtObj.mjOBJ_SITE, ("thumb_clearance",))[0])
+        self._long_finger_root_body_ids = self._ids(
+            mujoco.mjtObj.mjOBJ_BODY,
+            tuple(f"finger{i}_link1" for i in range(2, 6)),
+        )
+        self._table_geom_id = int(
+            mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "table")
+        )
         palm_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "palm_link")
         self._mocap_id = int(self.model.body_mocapid[palm_id])
         self.timestep_s = float(self.model.opt.timestep)
@@ -122,6 +129,9 @@ class TabletopWujiHand:
     def thumb_position_m(self) -> np.ndarray:
         return self.data.site_xpos[self._thumb_site_id].copy()
 
+    def long_finger_root_positions_m(self) -> np.ndarray:
+        return self.data.xpos[self._long_finger_root_body_ids].copy()
+
     def fingertip_position_jacobian(self) -> np.ndarray:
         """Return stacked world-position Jacobians in canonical joint order."""
         blocks = []
@@ -135,6 +145,18 @@ class TabletopWujiHand:
         heights = self.fingertip_positions_m()[:, 2] - self.table_height_m
         thumb = float(self.thumb_position_m()[2] - self.table_height_m)
         return ContactDiagnostics(heights.copy(), thumb, max(0.0, float(-heights.min())))
+
+    def minimum_hand_table_clearance_m(self) -> float:
+        distances = [
+            float(self.data.contact[index].dist)
+            for index in range(self.data.ncon)
+            if self._table_geom_id
+            in (self.data.contact[index].geom1, self.data.contact[index].geom2)
+        ]
+        return min(distances, default=float("inf"))
+
+    def maximum_table_penetration_m(self) -> float:
+        return max(0.0, -self.minimum_hand_table_clearance_m())
 
     def step(self, duration_s: float) -> None:
         if not np.isclose(float(duration_s), self.timestep_s):
