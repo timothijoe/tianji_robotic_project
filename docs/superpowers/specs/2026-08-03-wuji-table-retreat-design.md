@@ -6,8 +6,10 @@ Date: 2026-08-03
 
 Derive a deterministic tabletop retreat gesture from a Wuji glove MCAP. The
 system automatically selects a feasible source pose, places four long
-fingertips on a table, curls those fingers while translating the palm backward,
-and holds the final pose for inspection. The thumb remains clear of the table.
+fingertips on a table, then curls those fingers while translating the palm
+backward. The fingertips may lift gradually during retreat, but every hand
+collision geometry remains above the table. The thumb remains clear of the
+table.
 
 The original MCAP and original retargeted trajectory are immutable inputs. Raw
 playback remains available through `tianji-robot sim wuji-replay`.
@@ -60,8 +62,8 @@ including the first and last frames. For each candidate:
 
 1. Set the 20 joint positions kinematically and run `mj_forward`.
 2. Fit a table-facing palm orientation and vertical translation.
-3. Reject joint-limit violations, self-collision, table penetration beyond
-   `0.002 m`, or thumb clearance below `0.010 m`.
+3. Reject joint-limit violations, self-collision, table penetration beyond the
+   numerical tolerance of `0.0005 m`, or thumb clearance below `0.010 m`.
 4. Score the remaining candidate using:
    - variance of four long-fingertip heights;
    - distance to simultaneous table contact;
@@ -83,18 +85,23 @@ not rely on uncontrolled contact dynamics to create the trajectory.
 ### PLACE
 
 Interpolate for `1.0 s` from the selected recorded pose to a corrected pose.
-Optimize palm pose and small joint deltas so fingers 2–5 reach `1.5 mm` above
-the plane with low height variance. Keep the thumb at least `10 mm` above the
-plane. Penalize deviation from the selected recording and joint-limit margins.
+Build the palm frame from the palm root, the long-finger extension direction,
+and the finger-root lateral direction. Rotate this anatomical frame so the
+palm plane is parallel to the table. Optimize palm height and small joint
+deltas so fingers 2–5 are no more than `3 mm` above the plane with low height
+variance. Keep the thumb at least `10 mm` above the plane and verify clearance
+using every collision geom, not only named sites. Penalize deviation from the
+selected recording and joint-limit margins.
 
 ### RETREAT
 
-For `2.0 s`, interpolate the palm backward by `30 mm` along the table. At each
-sample, solve the four long-finger joints so their distal contact sites remain
-near the PLACE world positions. Penalize contact slip, vertical error,
-joint-step size and deviation from the previous solution. The resulting
-finger curl is therefore coupled to the palm retreat rather than scripted as
-an unrelated offset.
+For `2.0 s`, interpolate the palm backward by `30 mm` along the table and curl
+the four long fingers. Release the PLACE fingertip-position constraint: the
+fingertips may slide or lift gradually as the palm withdraws. At each sample,
+preserve joint continuity and query real MuJoCo hand/table collision distances.
+If any hand geom would cross the plane, raise the palm along world `+Z` by the
+minimum correction and recompute that frame. The resulting retreat is coupled
+to finger curl without forcing an infeasible planted-fingertip posture.
 
 ### HOLD
 
@@ -106,10 +113,11 @@ complete corrected trajectory is preflighted before the first dynamic step.
 
 ## Coordinate and direction contract
 
-The table normal is world `+Z`. The palm is fitted palm-down. Retreat is the
-negative direction of the palm's table-projected forward axis at the PLACE
-pose, not a hard-coded world axis. The report stores both the palm-local
-definition and resolved world retreat vector.
+The table normal is world `+Z`. The palm anatomical plane remains approximately
+parallel to the table. Retreat is the negative direction of the palm's
+table-projected forward axis at the PLACE pose, not a hard-coded world axis.
+The report stores both the palm-local definition and resolved world retreat
+vector.
 
 ## Outputs
 
@@ -132,11 +140,13 @@ are local generated data under ignored `recordings/` paths by default.
 
 Before playback, reject nonfinite values, invalid durations/distances, missing
 model landmarks, nonconverged optimization, joint steps above `0.12 rad`,
-joint-limit violations, thumb/table clearance below `10 mm`, long-finger
-penetration beyond `2 mm`, contact-site slip above `3 mm`, contact-site height
-error above `2 mm`, or palm retreat outside `±2 mm`. No partial trajectory is played after a failed
-preflight. The workflow imports no physical SDK runtime, discovers no device,
-and publishes no ROS command.
+joint-limit violations, thumb/table clearance below `10 mm`, any hand-geometry
+penetration beyond the `0.5 mm` numerical tolerance, initial long-fingertip
+height above `3 mm`, or palm retreat outside `±2 mm`. Retreat fingertip lift is
+reported but is not rejected when it is continuous and the hand remains above
+the plane. No partial trajectory is played after a failed preflight. The
+workflow imports no physical SDK runtime, discovers no device, and publishes
+no ROS command.
 
 ## Verification
 
@@ -145,20 +155,23 @@ Unit and integration tests must prove:
 - deterministic candidate scoring and earliest-index tie breaking;
 - explicit frame override still validates feasibility;
 - four long-finger targets and thumb clearance are correctly identified;
-- PLACE reaches all four target heights;
+- PLACE brings all four long fingertips within `3 mm` of the table;
 - RETREAT moves the palm `0.030 ± 0.002 m` in the resolved direction;
-- maximum long-finger contact-site slip is at most `0.003 m` and reported;
+- RETREAT allows continuous fingertip lift instead of requiring planted tips;
 - thumb clearance remains at least `0.010 m`;
+- every real hand/table collision remains within the `0.5 mm` numerical
+  penetration tolerance;
 - joint ranges and frame-to-frame steps remain valid;
 - output timestamps, phases, palm poses and reports round-trip without pickle;
 - the derived scene contains one hand and a table but no arm;
 - real-recording Headless execution succeeds;
 - existing raw hand-only replay and all twin-arm simulations remain unchanged.
 
-Manual Viewer acceptance checks that the four long fingers visibly touch the
-table, the thumb stays raised, the fingers curl while the palm moves backward,
-there is no obvious mesh penetration, and HOLD makes the final posture easy to
-inspect.
+Manual Viewer acceptance uses both oblique and side views. It checks that the
+four long fingers initially touch the table, the palm plane is approximately
+parallel to it, the thumb stays raised, the fingers curl and may lift gradually
+while the palm moves backward, no mesh crosses the table, and HOLD makes the
+final posture easy to inspect.
 
 ## Deferred work
 
