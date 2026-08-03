@@ -3,7 +3,11 @@ import json
 import numpy as np
 from mcap.reader import make_reader
 
-from tianji_robotics.data.mcap import write_joint_state_mcap
+from tianji_robotics.data.mcap import (
+    JointStateMcapSource,
+    detect_hand_mcap_kind,
+    write_joint_state_mcap,
+)
 from tianji_robotics.data.npz import load_trajectory_npz, save_trajectory_npz
 from tianji_robotics.wuji_hand.models import HandTrajectory
 from tianji_robotics.wuji_hand.names import HAND_JOINT_NAMES
@@ -54,6 +58,18 @@ def test_joint_state_mcap_contains_each_trajectory_sample(tmp_path):
     }
     assert payload["velocity"] == []
     assert payload["effort"] == []
+
+
+def test_joint_state_source_round_trips_canonical_trajectory(tmp_path):
+    expected = _trajectory()
+    path = write_joint_state_mcap(expected, tmp_path / "left.mcap")
+
+    assert detect_hand_mcap_kind(path) == "joint_states"
+    actual = JointStateMcapSource(path).trajectory()
+
+    np.testing.assert_allclose(actual.positions_rad, expected.positions_rad)
+    np.testing.assert_array_equal(actual.timestamps_ns, expected.timestamps_ns)
+    assert actual.joint_names == HAND_JOINT_NAMES
 
 
 def test_npz_writer_creates_destination_parent(tmp_path):

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from mcap.writer import Writer
 
-from tianji_robotics.data.mcap import StudioMcapSkeletonSource
+from tianji_robotics.data.mcap import StudioMcapSkeletonSource, detect_hand_mcap_kind
 
 
 def _write_messages(path, messages):
@@ -85,3 +85,10 @@ def test_frames_preserves_recorded_frame_id(tmp_path):
     [frame] = StudioMcapSkeletonSource(path).frames()
 
     assert frame.frame_id == "custom_wrist"
+
+
+def test_detects_right_glove_skeleton_topic(tmp_path):
+    path = tmp_path / "glove.mcap"
+    _write_messages(path, [])
+
+    assert detect_hand_mcap_kind(path) == "right_glove_skeleton"
