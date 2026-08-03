@@ -26,3 +26,17 @@ def test_backend_commands_canonical_vector_and_advances_time():
         assert backend.data.time > started
     finally:
         backend.close()
+
+
+def test_step_does_not_sync_a_viewer_that_has_closed():
+    class ClosedViewer:
+        def is_running(self): return False
+        def sync(self): raise AssertionError("closed viewer must not sync")
+        def close(self): pass
+
+    backend = MujocoWujiHand(viewer=False)
+    backend._viewer = ClosedViewer()
+    try:
+        backend.step(backend.timestep_s)
+    finally:
+        backend.close()

@@ -77,7 +77,7 @@ class MujocoWujiHand:
         if not np.isclose(float(duration_s), self.timestep_s):
             raise ValueError("hand-only backend step must equal the MuJoCo timestep")
         mujoco.mj_step(self.model, self.data)
-        if self._viewer is not None:
+        if self._viewer is not None and self._viewer.is_running():
             self._viewer.sync()
             time.sleep(self.timestep_s)
 
