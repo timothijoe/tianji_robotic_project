@@ -165,6 +165,29 @@ def _fit_palm_down_quaternion(backend, joints) -> np.ndarray:
     return quaternion
 
 
+def _calibrated_palm_down_quaternion(backend, joints) -> np.ndarray:
+    backend.set_kinematic_pose(joints, np.array([0.0, 0.0, 0.2]), np.array([1.0, 0.0, 0.0, 0.0]))
+    tips = backend.fingertip_positions_m()
+    roots = backend.long_finger_root_positions_m()
+    forward = tips.mean(axis=0) - roots.mean(axis=0)
+    forward /= np.linalg.norm(forward)
+    lateral = roots[-1] - roots[0]
+    lateral -= forward * float(np.dot(lateral, forward))
+    lateral /= np.linalg.norm(lateral)
+    normal = np.cross(forward, lateral)
+    local_basis = np.column_stack((forward, lateral, normal))
+    # The official left-hand palmar reference lies toward local -Z. Mapping
+    # anatomical +normal to world +Z therefore places the palmar side down.
+    world_basis = np.column_stack(([-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, 1.0]))
+    rotation = world_basis @ local_basis.T
+    quaternion = np.zeros(4)
+    mujoco.mju_mat2Quat(quaternion, rotation.reshape(-1))
+    backend.set_kinematic_pose(joints, np.array([0.0, 0.0, 0.2]), quaternion)
+    if backend.palmar_reference_position_m()[2] >= backend.dorsal_reference_position_m()[2]:
+        raise ValueError("official Wuji palm-side calibration is inverted")
+    return quaternion
+
+
 def _solve_place(backend, initial, quaternion, config):
     q = np.asarray(initial, dtype=float).copy()
     backend.set_kinematic_pose(q, np.zeros(3), quaternion)

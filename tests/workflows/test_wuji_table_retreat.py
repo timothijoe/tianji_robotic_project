@@ -4,6 +4,7 @@ import pytest
 from tianji_robotics.simulation.tabletop_wuji_hand import TabletopWujiHand
 from tianji_robotics.workflows.wuji_table_retreat import (
     TableRetreatConfig,
+    _calibrated_palm_down_quaternion,
     _fit_palm_down_quaternion,
     build_table_retreat,
 )
@@ -42,6 +43,19 @@ def test_fitted_palm_frame_makes_anatomical_axes_horizontal():
         tips = backend.fingertip_positions_m()
         assert abs((tips.mean(axis=0) - roots.mean(axis=0))[2]) <= 0.005
         assert abs((roots[-1] - roots[0])[2]) <= 0.005
+    finally:
+        backend.close()
+
+
+def test_calibrated_place_has_palmar_side_below_dorsal_side():
+    backend = TabletopWujiHand(viewer=False)
+    try:
+        quaternion = _calibrated_palm_down_quaternion(backend, FEASIBLE_POSE)
+        backend.set_kinematic_pose(FEASIBLE_POSE, [0, 0, .2], quaternion)
+        assert (
+            backend.palmar_reference_position_m()[2]
+            < backend.dorsal_reference_position_m()[2]
+        )
     finally:
         backend.close()
 

@@ -32,6 +32,8 @@ class TabletopWujiHand:
         self._qpos_ids = self.model.jnt_qposadr[self._joint_ids].copy()
         self._tip_site_ids = self._ids(mujoco.mjtObj.mjOBJ_SITE, tuple(f"finger{i}_contact" for i in range(2, 6)))
         self._thumb_site_id = int(self._ids(mujoco.mjtObj.mjOBJ_SITE, ("thumb_clearance",))[0])
+        self._palmar_site_id = int(self._ids(mujoco.mjtObj.mjOBJ_SITE, ("palmar_reference",))[0])
+        self._dorsal_site_id = int(self._ids(mujoco.mjtObj.mjOBJ_SITE, ("dorsal_reference",))[0])
         self._long_finger_root_body_ids = self._ids(
             mujoco.mjtObj.mjOBJ_BODY,
             tuple(f"finger{i}_link1" for i in range(2, 6)),
@@ -68,6 +70,8 @@ class TabletopWujiHand:
         if world is None or palm is None:
             raise RuntimeError("official Wuji model has no palm_link")
         palm.set("mocap", "true")
+        ET.SubElement(palm, "site", name="palmar_reference", pos="0 0 -0.015", size="0.002", rgba="0.9 0.2 0.2 1")
+        ET.SubElement(palm, "site", name="dorsal_reference", pos="0 0 0.015", size="0.002", rgba="0.2 0.2 0.9 1")
         ET.SubElement(world, "geom", name="table", type="plane", pos=f"0 0 {table_height_m:.17g}", size="0.5 0.5 0.02", rgba="0.55 0.55 0.58 1", contype="1", conaffinity="1")
         for finger in range(1, 6):
             body = palm.find(f".//body[@name='finger{finger}_link4']")
@@ -128,6 +132,12 @@ class TabletopWujiHand:
 
     def thumb_position_m(self) -> np.ndarray:
         return self.data.site_xpos[self._thumb_site_id].copy()
+
+    def palmar_reference_position_m(self) -> np.ndarray:
+        return self.data.site_xpos[self._palmar_site_id].copy()
+
+    def dorsal_reference_position_m(self) -> np.ndarray:
+        return self.data.site_xpos[self._dorsal_site_id].copy()
 
     def long_finger_root_positions_m(self) -> np.ndarray:
         return self.data.xpos[self._long_finger_root_body_ids].copy()

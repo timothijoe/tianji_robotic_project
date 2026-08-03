@@ -12,6 +12,8 @@ def test_tabletop_scene_contains_only_hand_table_and_tip_sites():
         assert mujoco.mj_name2id(hand.model, mujoco.mjtObj.mjOBJ_GEOM, "table") >= 0
         assert all(mujoco.mj_name2id(hand.model, mujoco.mjtObj.mjOBJ_SITE, f"finger{i}_contact") >= 0 for i in range(2, 6))
         assert mujoco.mj_name2id(hand.model, mujoco.mjtObj.mjOBJ_SITE, "thumb_clearance") >= 0
+        assert mujoco.mj_name2id(hand.model, mujoco.mjtObj.mjOBJ_SITE, "palmar_reference") >= 0
+        assert mujoco.mj_name2id(hand.model, mujoco.mjtObj.mjOBJ_SITE, "dorsal_reference") >= 0
         names = bytes(hand.model.names).decode(errors="ignore").lower()
         assert "left_link" not in names and "right_link" not in names
     finally:
@@ -38,6 +40,18 @@ def test_anatomical_landmarks_return_four_world_positions():
     try:
         hand.set_kinematic_pose(np.zeros(20), [0, 0, 0.2], [1, 0, 0, 0])
         assert hand.long_finger_root_positions_m().shape == (4, 3)
+    finally:
+        hand.close()
+
+
+def test_palm_reference_positions_are_distinct_world_points():
+    hand = TabletopWujiHand(viewer=False)
+    try:
+        hand.set_kinematic_pose(np.zeros(20), [0, 0, .2], [1, 0, 0, 0])
+        palmar = hand.palmar_reference_position_m()
+        dorsal = hand.dorsal_reference_position_m()
+        assert palmar.shape == (3,) and dorsal.shape == (3,)
+        assert np.linalg.norm(palmar - dorsal) > .01
     finally:
         hand.close()
 
