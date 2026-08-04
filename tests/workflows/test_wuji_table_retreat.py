@@ -298,4 +298,5 @@ def test_replay_stops_when_viewer_closes_during_playback():
 
     assert len(backend.steps) == 3
     assert len(backend.commands) < 3
+    assert summary.loop_count == 0
     assert summary.stopped_early is True

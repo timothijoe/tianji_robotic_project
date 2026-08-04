@@ -343,6 +343,14 @@ def replay_table_retreat(
     def viewer_closed() -> bool:
         return has_viewer and not backend.viewer_is_running()
 
+    def completed_loops(frame_count: int, stopped: bool) -> int:
+        prefix = corrected.phases[:frame_count]
+        reset_starts = sum(
+            phase == "RESET" and (index == 0 or prefix[index - 1] != "RESET")
+            for index, phase in enumerate(prefix)
+        )
+        return reset_starts + (0 if stopped or frame_count == 0 else 1)
+
     for frame_index, (joints, palm, quaternion) in enumerate(
         zip(
             corrected.positions_rad,
@@ -358,7 +366,7 @@ def replay_table_retreat(
         for _ in range(max(0, target_steps - executed_steps)):
             if viewer_closed():
                 return ReplayTableRetreatSummary(
-                    loop_count=len(set(corrected.loop_indices[:executed_frames])),
+                    loop_count=completed_loops(executed_frames, True),
                     frame_count=executed_frames,
                     scheduled_duration_s=executed_steps * backend.timestep_s,
                     stopped_early=True,
@@ -377,7 +385,7 @@ def replay_table_retreat(
         else float(timestamps[-1] - timestamps[0]) / 1e9
     )
     return ReplayTableRetreatSummary(
-        loop_count=len(set(corrected.loop_indices[:executed_frames])),
+        loop_count=completed_loops(executed_frames, stopped_early),
         frame_count=executed_frames,
         scheduled_duration_s=duration_s,
         stopped_early=stopped_early,
