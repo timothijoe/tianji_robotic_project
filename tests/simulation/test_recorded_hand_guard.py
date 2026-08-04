@@ -36,10 +36,10 @@ def test_adapter_rejects_non_positive_control_period(tmp_path):
 
 
 def test_real_recording_evidence_when_available():
-    path = Path(
-        "../../recordings/wuji/august_02/"
+    path = Path(__file__).resolve().parents[2] / Path(
+        "recordings/wuji/august_02/"
         "session_20260802_174440_936_right_to_left_wuji_hand.mcap"
-    ).resolve()
+    )
     if not path.exists():
         pytest.skip("local ignored Wuji recording is unavailable")
 

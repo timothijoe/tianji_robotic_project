@@ -9,10 +9,10 @@ from twin_sim.tasks.recorded_hand_guarded_chop import (
 
 
 def _real_mcap() -> Path:
-    path = Path(
-        "../../recordings/wuji/august_02/"
+    path = Path(__file__).resolve().parents[2] / Path(
+        "recordings/wuji/august_02/"
         "session_20260802_174440_936_right_to_left_wuji_hand.mcap"
-    ).resolve()
+    )
     if not path.exists():
         pytest.skip("local ignored Wuji recording is unavailable")
     return path
