@@ -4,12 +4,14 @@ import pytest
 from tianji_robotics.simulation.tabletop_wuji_hand import TabletopWujiHand
 from tianji_robotics.workflows.wuji_table_retreat import (
     TableRetreatConfig,
+    LoopedTableRetreat,
     _calibrated_palm_down_quaternion,
     _fit_palm_down_quaternion,
     _settle_to_table_contact,
     build_looped_table_retreat,
     build_recorded_table_retreat,
     build_table_retreat,
+    replay_table_retreat,
 )
 from tianji_robotics.wuji_hand.models import HandTrajectory
 from tianji_robotics.wuji_hand.names import HAND_JOINT_NAMES
@@ -223,3 +225,55 @@ def test_looped_retreat_rejects_non_positive_integer_counts(loops):
             build_looped_table_retreat(corrected, backend, loops=loops)
     finally:
         backend.close()
+
+
+class RecordingTableBackend:
+    timestep_s = .002
+    has_viewer = False
+
+    def __init__(self, *, close_after_steps=None):
+        self.commands = []
+        self.steps = []
+        self.close_after_steps = close_after_steps
+
+    def command_pose(self, joints, palm, quaternion):
+        self.commands.append(np.asarray(joints).copy())
+
+    def step(self, duration):
+        self.steps.append(duration)
+
+    def viewer_is_running(self):
+        return self.close_after_steps is None or len(self.steps) < self.close_after_steps
+
+
+def _looped_replay_fixture():
+    return LoopedTableRetreat(
+        timestamps_ns=np.array([0, 10_000_000, 20_000_000]),
+        positions_rad=np.zeros((3, 20)),
+        palm_positions_m=np.zeros((3, 3)),
+        palm_quaternions_wxyz=np.tile([1.0, 0.0, 0.0, 0.0], (3, 1)),
+        phases=("PREPARE", "RETREAT", "HOLD"),
+        loop_indices=(0, 0, 0),
+    )
+
+
+def test_replay_uses_cumulative_timestamps_not_one_step_per_frame():
+    backend = RecordingTableBackend()
+
+    summary = replay_table_retreat(_looped_replay_fixture(), backend)
+
+    assert backend.steps == [.002] * 10
+    assert len(backend.commands) == 3
+    assert summary.scheduled_duration_s == pytest.approx(.02)
+    assert summary.stopped_early is False
+
+
+def test_replay_stops_when_viewer_closes_during_playback():
+    backend = RecordingTableBackend(close_after_steps=3)
+    backend.has_viewer = True
+
+    summary = replay_table_retreat(_looped_replay_fixture(), backend)
+
+    assert len(backend.steps) == 3
+    assert len(backend.commands) < 3
+    assert summary.stopped_early is True

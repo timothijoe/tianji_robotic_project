@@ -46,6 +46,14 @@ class LoopedTableRetreat:
 
 
 @dataclass(frozen=True)
+class ReplayTableRetreatSummary:
+    loop_count: int
+    frame_count: int
+    scheduled_duration_s: float
+    stopped_early: bool
+
+
+@dataclass(frozen=True)
 class CorrectionReport:
     source_frame: int
     source_timestamp_ns: int
@@ -317,10 +325,58 @@ def build_table_retreat(trajectory: HandTrajectory, backend, config: TableRetrea
     return corrected, report
 
 
-def replay_table_retreat(corrected: CorrectedHandTrajectory, backend) -> None:
-    for joints,palm,quaternion in zip(corrected.positions_rad,corrected.palm_positions_m,corrected.palm_quaternions_wxyz,strict=True):
-        backend.command_pose(joints,palm,quaternion)
-        backend.step(backend.timestep_s)
+def replay_table_retreat(
+    corrected: LoopedTableRetreat,
+    backend,
+) -> ReplayTableRetreatSummary:
+    timestamps = np.asarray(corrected.timestamps_ns, dtype=np.int64)
+    first_timestamp_ns = int(timestamps[0])
+    executed_steps = 0
+    executed_frames = 0
+    has_viewer = bool(getattr(backend, "has_viewer", False))
+
+    def viewer_closed() -> bool:
+        return has_viewer and not backend.viewer_is_running()
+
+    for frame_index, (joints, palm, quaternion) in enumerate(
+        zip(
+            corrected.positions_rad,
+            corrected.palm_positions_m,
+            corrected.palm_quaternions_wxyz,
+            strict=True,
+        )
+    ):
+        if viewer_closed():
+            break
+        elapsed_s = float(int(timestamps[frame_index]) - first_timestamp_ns) / 1e9
+        target_steps = round(elapsed_s / backend.timestep_s)
+        for _ in range(max(0, target_steps - executed_steps)):
+            if viewer_closed():
+                return ReplayTableRetreatSummary(
+                    loop_count=len(set(corrected.loop_indices)),
+                    frame_count=executed_frames,
+                    scheduled_duration_s=executed_steps * backend.timestep_s,
+                    stopped_early=True,
+                )
+            backend.step(backend.timestep_s)
+            executed_steps += 1
+        if viewer_closed():
+            break
+        backend.command_pose(joints, palm, quaternion)
+        executed_frames += 1
+
+    stopped_early = executed_frames < len(timestamps)
+    duration_s = (
+        executed_steps * backend.timestep_s
+        if stopped_early
+        else float(timestamps[-1] - timestamps[0]) / 1e9
+    )
+    return ReplayTableRetreatSummary(
+        loop_count=len(set(corrected.loop_indices)),
+        frame_count=executed_frames,
+        scheduled_duration_s=duration_s,
+        stopped_early=stopped_early,
+    )
 
 
 def _select_frame(trajectory, backend, config):
