@@ -15,7 +15,7 @@
 - Execute exactly five right cuts and five recorded-hand cycles.
 - Keep the existing `guarded-chop` command, code path, scripts, and results unchanged.
 - Use one combined MuJoCo model/data/clock; the Wuji palm remains attached to the Tianji left wrist.
-- Search shared surface offsets from `0.00 m` through `0.12 m` in `0.01 m` increments and choose the lowest feasible candidate.
+- Search shared surface offsets from `0.04 m` through `0.12 m` in `0.01 m` increments and choose the lowest feasible candidate.
 - Knife/hand distance is at least `0.020 m` below safe knife height.
 - Hand/work-surface penetration is at most `0.0005 m`; thumb clearance is at least `0.010 m`.
 - Hand joint steps are at most `0.12 rad`; reset duration is at least `0.5 s`.

@@ -26,6 +26,7 @@ def test_adapter_preserves_recorded_endpoints_and_resamples_to_control_clock(tmp
     np.testing.assert_allclose(cycle.hand_positions_rad[-1, 4:8], .07)
     np.testing.assert_allclose(np.diff(cycle.timestamps_s), .01, atol=1e-12)
     assert cycle.relative_palm_transforms.shape == (8, 4, 4)
+    assert cycle.initial_palm_transform.shape == (4, 4)
     np.testing.assert_allclose(cycle.relative_palm_transforms[0], np.eye(4), atol=1e-9)
 
 

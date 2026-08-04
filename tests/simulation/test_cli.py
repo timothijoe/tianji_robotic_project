@@ -14,6 +14,57 @@ def test_guarded_chop_cli_defaults_to_plane_scene():
     assert args.final_hold == 3.0
 
 
+def test_recorded_hand_guarded_chop_cli_has_project_relative_default():
+    args = build_parser().parse_args(
+        ["recorded-hand-guarded-chop", "--headless"]
+    )
+
+    assert args.hand_mcap == Path(
+        "recordings/wuji/august_02/"
+        "session_20260802_174440_936_right_to_left_wuji_hand.mcap"
+    )
+    assert args.final_hold == 3.0
+
+
+def test_recorded_hand_guarded_chop_cli_dispatches_independent_task(
+    monkeypatch, capsys
+):
+    captured = {}
+
+    def fake_run(config, *, hand_mcap, viewer):
+        captured.update(config=config, hand_mcap=hand_mcap, viewer=viewer)
+        return SimpleNamespace(
+            success=True,
+            completed_cuts=5,
+            completed_hand_cycles=5,
+            surface_offset_m=.04,
+            minimum_distance_m=.044,
+            maximum_hand_penetration_m=.0004,
+            minimum_thumb_clearance_m=.031,
+            reason="",
+        )
+
+    monkeypatch.setattr(cli, "run_recorded_hand_guarded_chop", fake_run)
+    status = main(
+        [
+            "recorded-hand-guarded-chop",
+            "--hand-mcap",
+            "recordings/test.mcap",
+            "--headless",
+            "--final-hold",
+            "0",
+        ]
+    )
+
+    assert status == 0
+    assert captured["viewer"] is False
+    assert captured["hand_mcap"] == Path("recordings/test.mcap")
+    assert captured["config"].final_hold_s == 0.0
+    output = capsys.readouterr().out
+    assert "hand_cycles=5" in output
+    assert "surface_offset_m=0.040" in output
+
+
 def test_guarded_chop_cli_accepts_object_scene():
     args = build_parser().parse_args(
         ["guarded-chop", "--scene", "object", "--headless"]

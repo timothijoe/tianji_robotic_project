@@ -13,6 +13,10 @@ from twin_sim.tasks.chop import ChopConfig, run_chop
 from twin_sim.tasks.line_chop import LineChopConfig, run_line_chop
 from twin_sim.tasks.hand_demo import HandDemoConfig, run_hand_demo
 from twin_sim.tasks.guarded_chop import GuardedChopConfig, run_guarded_chop
+from twin_sim.tasks.recorded_hand_guarded_chop import (
+    RecordedHandGuardedChopConfig,
+    run_recorded_hand_guarded_chop,
+)
 from twin_sim.tasks.pick_place import PickPlaceConfig, PickPlaceTask
 from twin_sim.trajectory import cartesian_trajectory, joint_trajectory
 
@@ -151,6 +155,22 @@ def main(argv: list[str] | None = None) -> int:
             f"reason={result.reason or '-'}"
         )
         return 0 if result.success else 1
+    if args.command == "recorded-hand-guarded-chop":
+        result = run_recorded_hand_guarded_chop(
+            RecordedHandGuardedChopConfig(final_hold_s=args.final_hold),
+            hand_mcap=args.hand_mcap,
+            viewer=not args.headless,
+        )
+        print(
+            f"success={result.success} cuts={result.completed_cuts} "
+            f"hand_cycles={result.completed_hand_cycles} "
+            f"surface_offset_m={result.surface_offset_m:.3f} "
+            f"min_distance_m={result.minimum_distance_m:.3f} "
+            f"max_penetration_m={result.maximum_hand_penetration_m:.6f} "
+            f"thumb_clearance_m={result.minimum_thumb_clearance_m:.3f} "
+            f"reason={result.reason or '-'}"
+        )
+        return 0 if result.success else 1
     if args.command == "guarded-chop-replay":
         try:
             rate = validate_replay_rate(args.rate)
@@ -241,6 +261,23 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         nargs="?",
         const=Path("recordings/guarded_chop_latest.npz"),
+    )
+    recorded_guarded_chop = commands.add_parser(
+        "recorded-hand-guarded-chop"
+    )
+    recorded_guarded_chop.add_argument("--headless", action="store_true")
+    recorded_guarded_chop.add_argument(
+        "--hand-mcap",
+        type=Path,
+        default=Path(
+            "recordings/wuji/august_02/"
+            "session_20260802_174440_936_right_to_left_wuji_hand.mcap"
+        ),
+    )
+    recorded_guarded_chop.add_argument(
+        "--final-hold",
+        type=float,
+        default=RecordedHandGuardedChopConfig().final_hold_s,
     )
     guarded_replay = commands.add_parser("guarded-chop-replay")
     guarded_replay.add_argument(

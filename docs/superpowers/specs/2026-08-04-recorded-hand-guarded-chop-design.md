@@ -70,8 +70,8 @@ right-to-left order.
 
 ## Shared raised work surface
 
-The preflight evaluates deterministic work-surface height candidates from the
-current height upward. It selects the lowest candidate for which all five
+The preflight evaluates deterministic work-surface height candidates from
+`0.04 m` through `0.12 m` above the current height. It selects the lowest candidate for which all five
 right-arm cut trajectories and every left-arm recorded/reset pose are IK
 reachable and collision-safe. The chopping board, guarded object, cut contact
 targets, and hand contact plane move together by the selected offset; the two

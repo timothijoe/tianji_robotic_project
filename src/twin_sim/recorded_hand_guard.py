@@ -22,6 +22,7 @@ class RecordedGuardCycle:
     timestamps_s: np.ndarray
     hand_positions_rad: np.ndarray
     relative_palm_transforms: np.ndarray
+    initial_palm_transform: np.ndarray
     phases: tuple[str, ...]
     source_kind: str
     source_frame_count: int
@@ -98,6 +99,7 @@ def load_recorded_guard_cycle(
         timestamps_s=target_s,
         hand_positions_rad=hand,
         relative_palm_transforms=relative,
+        initial_palm_transform=transforms[0],
         phases=phases,
         source_kind=source_kind,
         source_frame_count=len(trajectory.timestamps_ns),
