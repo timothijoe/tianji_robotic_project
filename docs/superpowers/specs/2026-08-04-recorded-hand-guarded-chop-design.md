@@ -89,6 +89,36 @@ base MJCF or change `guarded-chop`, `pick-place`, or other task behavior.
 Board contact targets and the recorded hand contact plane still move together
 under the selected raised-surface offset.
 
+### Continuous anatomical hand-over-hand motion
+
+Treat the five cuts as one continuous guard trajectory rather than five
+independent recording loops. The left wrist must never execute a visible
+robot-right reset between cuts. It moves monotonically toward robot-left
+(`+Y`) by a small total distance of `0.025-0.040 m` across all five cycles.
+Per-cycle wrist displacement is therefore approximately `0.005-0.008 m`, not
+the recording's full 30 mm palm translation.
+
+For long fingers 2-5, reduce MCP flexion (`joint1`) toward extension and move
+the dominant flexion contribution into PIP (`joint3`). Preserve abduction
+(`joint2`) and use DIP (`joint4`) only as a smaller natural follower. The index
+finger may move independently; middle and ring remain synchronized within the
+recording's relative timing; little finger follows; thumb keeps its recorded
+non-contact behavior. Every adjusted value remains inside the MuJoCo actuator
+range, and the adjusted trajectory must not exceed the existing `0.12 rad`
+per-sample hand-joint step limit. During active retreat, each long-finger MCP
+target is at most `0.30 rad`; its PIP target is at least `0.25 rad` more flexed
+than that MCP target. These thresholds make "mostly straight MCP, PIP-led
+curl" testable rather than visual-only.
+
+Between cuts, fingers may extend toward the knife to recover joint travel while
+the wrist continues moving left far enough to compensate. Across recorded
+motion and transition samples, the world `Y` coordinate of every long-finger
+pad must not move toward the knife by more than `0.5 mm` between consecutive
+samples. The first-to-last long-finger pad displacement must be toward
+robot-left. There is no arm RESET phase after cuts 1-4; transitions are part of
+the continuous guard motion and retain the table, thumb, and knife-clearance
+safety checks.
+
 ## Five-cut synchronization
 
 Each of the five cycles is:
