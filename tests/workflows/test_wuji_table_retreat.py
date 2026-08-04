@@ -216,6 +216,28 @@ def test_loop_reset_is_continuous_and_table_safe():
         backend.close()
 
 
+def test_each_reset_transition_lasts_at_least_half_a_second():
+    backend = TabletopWujiHand(viewer=False)
+    try:
+        corrected, _ = build_recorded_table_retreat(_trajectory(), backend)
+        looped = build_looped_table_retreat(corrected, backend, loops=3)
+    finally:
+        backend.close()
+
+    reset_runs = []
+    start = None
+    for index, phase in enumerate(looped.phases):
+        if phase == "RESET" and start is None:
+            start = index
+        if phase != "RESET" and start is not None:
+            reset_runs.append((start, index - 1))
+            start = None
+    assert len(reset_runs) == 2
+    for start, end in reset_runs:
+        duration_s = (end - start + 1) * backend.timestep_s
+        assert duration_s >= .5
+
+
 @pytest.mark.parametrize("loops", [0, -1, True, 1.5])
 def test_looped_retreat_rejects_non_positive_integer_counts(loops):
     backend = TabletopWujiHand(viewer=False)

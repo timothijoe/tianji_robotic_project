@@ -238,6 +238,7 @@ def build_looped_table_retreat(
         initial_quaternion = np.asarray(corrected.palm_quaternions_wxyz[0], dtype=float)
         reset_steps = max(
             1,
+            int(np.ceil(0.5 / backend.timestep_s)),
             int(np.ceil(np.max(np.abs(initial_joints - final_joints)) / 0.12)),
             int(np.ceil(np.linalg.norm(initial_palm - final_palm) / 0.001)),
         )
