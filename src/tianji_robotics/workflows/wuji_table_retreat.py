@@ -36,6 +36,16 @@ class CorrectedHandTrajectory:
 
 
 @dataclass(frozen=True)
+class LoopedTableRetreat:
+    timestamps_ns: np.ndarray
+    positions_rad: np.ndarray
+    palm_positions_m: np.ndarray
+    palm_quaternions_wxyz: np.ndarray
+    phases: tuple[str, ...]
+    loop_indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class CorrectionReport:
     source_frame: int
     source_timestamp_ns: int
@@ -177,6 +187,80 @@ def build_recorded_table_retreat(
     if not palmar_below or min_thumb < config.thumb_clearance_m or max_penetration > 0.0005:
         raise ValueError("recorded table retreat failed palm or collision preflight")
     return corrected, report
+
+
+def build_looped_table_retreat(
+    corrected: CorrectedHandTrajectory,
+    backend,
+    loops: int = 3,
+) -> LoopedTableRetreat:
+    """Build repeated forward gestures with preflighted reset transitions."""
+    if isinstance(loops, bool) or not isinstance(loops, int) or loops < 1:
+        raise ValueError("loops must be a positive integer")
+
+    relative_ns = corrected.timestamps_ns - corrected.timestamps_ns[0]
+    timestep_ns = int(round(backend.timestep_s * 1e9))
+    timestamps: list[int] = []
+    joints_frames: list[np.ndarray] = []
+    palm_frames: list[np.ndarray] = []
+    quaternion_frames: list[np.ndarray] = []
+    phases: list[str] = []
+    loop_indices: list[int] = []
+
+    def append_forward(loop_index: int) -> None:
+        start_ns = 0 if not timestamps else timestamps[-1] + timestep_ns
+        timestamps.extend((start_ns + relative_ns).astype(np.int64).tolist())
+        joints_frames.extend(np.asarray(corrected.positions_rad))
+        palm_frames.extend(np.asarray(corrected.palm_positions_m))
+        quaternion_frames.extend(np.asarray(corrected.palm_quaternions_wxyz))
+        phases.extend(corrected.phases)
+        loop_indices.extend([loop_index] * len(corrected.timestamps_ns))
+
+    append_forward(0)
+    for loop_index in range(1, loops):
+        final_joints = np.asarray(joints_frames[-1], dtype=float)
+        final_palm = np.asarray(palm_frames[-1], dtype=float)
+        final_quaternion = np.asarray(quaternion_frames[-1], dtype=float)
+        initial_joints = np.asarray(corrected.positions_rad[0], dtype=float)
+        initial_palm = np.asarray(corrected.palm_positions_m[0], dtype=float)
+        initial_quaternion = np.asarray(corrected.palm_quaternions_wxyz[0], dtype=float)
+        reset_steps = max(
+            1,
+            int(np.ceil(np.max(np.abs(initial_joints - final_joints)) / 0.12)),
+            int(np.ceil(np.linalg.norm(initial_palm - final_palm) / 0.001)),
+        )
+        for fraction in np.linspace(0.0, 1.0, reset_steps + 1)[1:]:
+            smooth = fraction * fraction * (3.0 - 2.0 * fraction)
+            joints = final_joints + smooth * (initial_joints - final_joints)
+            palm = final_palm + smooth * (initial_palm - final_palm)
+            quaternion = final_quaternion + smooth * (
+                initial_quaternion - final_quaternion
+            )
+            quaternion /= np.linalg.norm(quaternion)
+            palm = _project_above_table(backend, joints, palm, quaternion)
+            backend.set_kinematic_pose(joints, palm, quaternion)
+            thumb = backend.thumb_position_m()[2] - backend.table_height_m
+            if thumb < 0.010:
+                palm[2] += 0.010 - thumb
+                backend.set_kinematic_pose(joints, palm, quaternion)
+            if backend.maximum_table_penetration_m() > 0.0005:
+                raise ValueError("reset trajectory crosses the table")
+            timestamps.append(timestamps[-1] + timestep_ns)
+            joints_frames.append(joints)
+            palm_frames.append(palm)
+            quaternion_frames.append(quaternion)
+            phases.append("RESET")
+            loop_indices.append(loop_index - 1)
+        append_forward(loop_index)
+
+    return LoopedTableRetreat(
+        timestamps_ns=np.asarray(timestamps, dtype=np.int64),
+        positions_rad=np.asarray(joints_frames),
+        palm_positions_m=np.asarray(palm_frames),
+        palm_quaternions_wxyz=np.asarray(quaternion_frames),
+        phases=tuple(phases),
+        loop_indices=tuple(loop_indices),
+    )
 
 
 def build_table_retreat(trajectory: HandTrajectory, backend, config: TableRetreatConfig = TableRetreatConfig()):

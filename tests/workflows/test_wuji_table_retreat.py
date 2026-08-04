@@ -7,6 +7,7 @@ from tianji_robotics.workflows.wuji_table_retreat import (
     _calibrated_palm_down_quaternion,
     _fit_palm_down_quaternion,
     _settle_to_table_contact,
+    build_looped_table_retreat,
     build_recorded_table_retreat,
     build_table_retreat,
 )
@@ -175,3 +176,50 @@ def test_recorded_workflow_never_zeros_or_replaces_recorded_pose():
 
     np.testing.assert_allclose(corrected.positions_rad, recording.positions_rad)
     assert report.maximum_hand_penetration_m <= .0005
+
+
+def test_looped_retreat_defaults_to_three_forward_passes_and_two_resets():
+    backend = TabletopWujiHand(viewer=False)
+    try:
+        corrected, _ = build_recorded_table_retreat(_trajectory(), backend)
+        looped = build_looped_table_retreat(corrected, backend)
+    finally:
+        backend.close()
+
+    assert set(looped.loop_indices) == {0, 1, 2}
+    assert np.count_nonzero(np.diff(looped.loop_indices) > 0) == 2
+    reset_runs = sum(
+        phase == "RESET" and (index == 0 or looped.phases[index - 1] != "RESET")
+        for index, phase in enumerate(looped.phases)
+    )
+    assert reset_runs == 2
+
+
+def test_loop_reset_is_continuous_and_table_safe():
+    backend = TabletopWujiHand(viewer=False)
+    try:
+        corrected, _ = build_recorded_table_retreat(_trajectory(), backend)
+        looped = build_looped_table_retreat(corrected, backend, loops=2)
+        assert np.max(np.abs(np.diff(looped.positions_rad, axis=0))) <= .12
+        for joints, palm, quaternion in zip(
+            looped.positions_rad,
+            looped.palm_positions_m,
+            looped.palm_quaternions_wxyz,
+            strict=True,
+        ):
+            backend.set_kinematic_pose(joints, palm, quaternion)
+            assert backend.maximum_table_penetration_m() <= .0005
+            assert backend.thumb_position_m()[2] >= .010
+    finally:
+        backend.close()
+
+
+@pytest.mark.parametrize("loops", [0, -1, True, 1.5])
+def test_looped_retreat_rejects_non_positive_integer_counts(loops):
+    backend = TabletopWujiHand(viewer=False)
+    try:
+        corrected, _ = build_recorded_table_retreat(_trajectory(), backend)
+        with pytest.raises(ValueError, match="positive integer"):
+            build_looped_table_retreat(corrected, backend, loops=loops)
+    finally:
+        backend.close()
