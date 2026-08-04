@@ -123,6 +123,30 @@ class RecordedHandGuardedChopResult:
     events: tuple[tuple[int, str], ...]
 
 
+def _chopping_aligned_palm_rotation(initial_rotation: np.ndarray) -> np.ndarray:
+    angle = -np.pi / 2.0
+    world_quarter_turn = np.asarray(
+        (
+            (np.cos(angle), -np.sin(angle), 0.0),
+            (np.sin(angle), np.cos(angle), 0.0),
+            (0.0, 0.0, 1.0),
+        )
+    )
+    return (
+        world_quarter_turn
+        @ np.diag((-1.0, -1.0, 1.0))
+        @ np.asarray(initial_rotation, dtype=float)
+    )
+
+
+def _lateral_guard_anchor_xy(
+    cut_xy: np.ndarray,
+    clearance_m: float,
+) -> np.ndarray:
+    cut = np.asarray(cut_xy, dtype=float)
+    return np.asarray((cut[0] - clearance_m, cut[1]))
+
+
 def _preflight_recorded_hand_guarded_chop(
     robot: RightArmRobot,
     cycle: RecordedGuardCycle,
@@ -171,16 +195,18 @@ def _build_candidate_plan(
             hand_limits[:, 0],
             hand_limits[:, 1],
         )
-        yaw_half_turn = np.diag((-1.0, -1.0, 1.0))
         tcp_from_palm = np.eye(4)
         tcp_from_palm[2, 3] = 0.07
 
         for cut_xy in right.cut_points_xy:
             anchor = cycle.initial_palm_transform.copy()
-            anchor[:3, :3] = yaw_half_turn @ anchor[:3, :3]
+            anchor[:3, :3] = _chopping_aligned_palm_rotation(
+                anchor[:3, :3]
+            )
             anchor[:3, 3] = (
-                float(cut_xy[0]),
-                float(cut_xy[1] + config.anchor_lateral_clearance_m),
+                *_lateral_guard_anchor_xy(
+                    cut_xy, config.anchor_lateral_clearance_m
+                ),
                 float(
                     cycle.initial_palm_transform[2, 3]
                     + surface_z

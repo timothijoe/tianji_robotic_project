@@ -30,11 +30,11 @@
 - Consumes: `RecordedGuardCycle.initial_palm_transform`, `RecordedGuardCycle.relative_palm_transforms`, and ordered `_GuardedChopPlan.cut_points_xy`.
 - Produces: `_chopping_aligned_palm_rotation(initial_rotation) -> np.ndarray` and five `RecordedLeftCycle.palm_targets` whose horizontal displacement follows `+Y`.
 
-- [ ] **Step 1: Write the failing direction and wrist-rotation tests**
+- [x] **Step 1: Write the failing direction and wrist-rotation tests**
 
 Add a unit assertion that `_chopping_aligned_palm_rotation(R)` equals `Rz(-pi/2) @ diag(-1,-1,1) @ R`. Extend the real-plan test so every cycle's horizontal start-to-end displacement has positive `Y`, absolute `X <= 0.5 mm`, and angular error to the normalized ordered cut direction no greater than one degree.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -44,7 +44,7 @@ Run:
 
 Expected: import failure for `_chopping_aligned_palm_rotation` or direction assertion failure because the current displacement is world `-X`.
 
-- [ ] **Step 3: Implement the single alignment transform**
+- [x] **Step 3: Implement the single alignment transform**
 
 Add:
 
@@ -61,7 +61,7 @@ def _chopping_aligned_palm_rotation(initial_rotation: np.ndarray) -> np.ndarray:
 
 Use it for the anchor rotation before multiplying every relative palm transform. Do not alter `relative_palm_transforms` or hand joint samples.
 
-- [ ] **Step 4: Run focused and preserved-task regression**
+- [x] **Step 4: Run focused and preserved-task regression**
 
 Run:
 
@@ -75,11 +75,11 @@ Run:
 
 Expected: all pass; the real plan still completes five cuts/five hand cycles and satisfies existing safety thresholds.
 
-- [ ] **Step 5: Update operator documentation and verify Viewer**
+- [x] **Step 5: Update operator documentation and verify Viewer**
 
 Document that lateral `+Y` alignment replaces the previous front-back `-X` mapping. Run Headless once, then Viewer with a 15-second final hold and visually confirm the wrist is rotated 90 degrees and the hand retreats laterally.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/twin_sim/tasks/recorded_hand_guarded_chop.py \
