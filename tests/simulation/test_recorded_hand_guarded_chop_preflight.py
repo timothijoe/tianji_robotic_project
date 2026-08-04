@@ -4,11 +4,14 @@ import numpy as np
 import pytest
 
 import twin_sim.tasks.recorded_hand_guarded_chop as module
+from twin_sim.raised_work_surface import work_surface_height_m
 from twin_sim.recorded_hand_guard import load_recorded_guard_cycle
 from twin_sim.robot import RightArmRobot
+from twin_sim.tasks.guarded_chop import _blade_bottom_height
 from twin_sim.tasks.recorded_hand_guarded_chop import (
     RecordedHandGuardedChopConfig,
     _chopping_aligned_palm_rotation,
+    _configure_table_only_scene,
     _lateral_guard_anchor_xy,
     _preflight_recorded_hand_guarded_chop,
 )
@@ -43,8 +46,47 @@ def test_chopping_alignment_rotates_complete_palm_frame_minus_ninety_degrees():
 def test_lateral_guard_anchor_uses_left_arm_side_of_cut_line():
     np.testing.assert_allclose(
         _lateral_guard_anchor_xy(np.array((.62, -.08)), .12),
-        (.50, -.08),
+        (.54, .04),
     )
+
+
+def test_table_only_scene_hides_props_without_changing_other_robot_instances():
+    configured = RightArmRobot(viewer=False)
+    untouched = RightArmRobot(viewer=False)
+    hidden = (
+        "guarded_chop_cube",
+        "pick_source_pedestal",
+        "pick_target_pedestal",
+        "pick_cube_geom",
+        "pick_target_region",
+    )
+    try:
+        original = {
+            name: (
+                untouched.sim.model.geom_rgba[untouched.sim.require_geom(name)].copy(),
+                int(untouched.sim.model.geom_contype[untouched.sim.require_geom(name)]),
+                int(untouched.sim.model.geom_conaffinity[untouched.sim.require_geom(name)]),
+            )
+            for name in hidden
+        }
+        _configure_table_only_scene(configured)
+        for name in hidden:
+            geom = configured.sim.require_geom(name)
+            assert configured.sim.model.geom_rgba[geom, 3] == 0.0
+            assert configured.sim.model.geom_contype[geom] == 0
+            assert configured.sim.model.geom_conaffinity[geom] == 0
+            untouched_geom = untouched.sim.require_geom(name)
+            np.testing.assert_array_equal(
+                untouched.sim.model.geom_rgba[untouched_geom], original[name][0]
+            )
+            assert untouched.sim.model.geom_contype[untouched_geom] == original[name][1]
+            assert untouched.sim.model.geom_conaffinity[untouched_geom] == original[name][2]
+        board = configured.sim.require_geom("chopping_board")
+        assert configured.sim.model.geom_rgba[board, 3] > 0.0
+        assert configured.sim.model.geom_contype[board] != 0
+    finally:
+        configured.close()
+        untouched.close()
 
 
 def test_preflight_selects_lowest_feasible_shared_surface(monkeypatch):
@@ -79,6 +121,19 @@ def test_real_plan_contains_five_safe_recorded_cycles_and_five_right_cuts():
         assert plan.minimum_planned_distance_m >= .020
         assert plan.maximum_hand_penetration_m <= .0005
         assert plan.minimum_thumb_clearance_m >= .010
+        board_top = work_surface_height_m(robot.sim)
+        for cut, left_cycle in zip(
+            plan.right_cuts, plan.left_cycles, strict=True
+        ):
+            knife_contact = cut.descent[-1].target_pose[:2, 3]
+            hand_start = left_cycle.palm_targets[0, :2, 3]
+            hand_end = left_cycle.palm_targets[-1, :2, 3]
+            assert hand_start[1] - knife_contact[1] >= .159
+            assert hand_end[1] > hand_start[1]
+            blade_bottom = _blade_bottom_height(
+                robot, cut.descent[-1].joints_rad
+            )
+            assert abs(blade_bottom - board_top) <= .01
         cut_direction = (
             plan.right_cuts[-1].descent[-1].target_pose[:2, 3]
             - plan.right_cuts[0].descent[-1].target_pose[:2, 3]

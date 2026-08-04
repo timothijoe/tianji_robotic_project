@@ -74,10 +74,12 @@ than retaining safety measurements from the unrotated plan.
 Robot-relative left is world `+Y`, as established by the left-arm base at
 `Y=+0.04 m` and the right-arm base at `Y=-0.04 m`. The ordered knife cuts
 continue from robot-right toward robot-left along `+Y`. For every cut, place
-the recorded hand anchor `0.080 m` farther along `+Y` than that cut point; the
+the recorded hand anchor `0.160 m` farther along `+Y` than that cut point; the
 recorded 30 mm retreat then moves still farther left. The palm reference must
 remain on the robot-left side of the active blade throughout each cycle, while
 the existing full-geometry knife/hand clearance remains at least `0.020 m`.
+The palm anchor is also `0.080 m` closer to the robot along world `-X` because
+the rotated wrist pose is not stably reachable at the knife's full depth.
 
 This task cuts the shared chopping-board surface directly. It must not raise
 the knife contact target to the guarded cube top. In this task's private

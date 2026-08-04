@@ -15,14 +15,24 @@ from twin_sim.raised_work_surface import (
 )
 from twin_sim.recorded_hand_guard import RecordedGuardCycle
 from twin_sim.robot import RightArmRobot
+from twin_sim.tasks.chop import ChopConfig
 from twin_sim.tasks.guarded_chop import (
+    _KNIFE_SAFE_TRACKING_HEADROOM_M,
     GuardedChopConfig,
     _blade_hand_distance,
+    _blade_bottom_height,
+    _diagonal_lift_shifts,
     _geom_belongs_to_body_tree,
     _minimum_jerk_joint_trajectory,
-    _preflight_guarded_chop,
+    _right_to_left_indices,
+    _translate_right_cuts,
 )
-from twin_sim.tasks.line_chop import _CutTrajectories
+from twin_sim.tasks.line_chop import (
+    LineChopConfig,
+    _CutTrajectories,
+    _preflight_line_chop,
+)
+from twin_sim.tasks.pick_place import LEFT_GRASP_READY_RAD
 
 
 @dataclass(frozen=True)
@@ -37,7 +47,7 @@ class RecordedHandGuardedChopConfig:
     minimum_distance_m: float = 0.02
     maximum_hand_penetration_m: float = 0.0005
     minimum_thumb_clearance_m: float = 0.01
-    anchor_lateral_clearance_m: float = 0.12
+    anchor_lateral_clearance_m: float = 0.16
     combined_pad_contact_lift_m: float = 0.0098
     ik_tolerance: float = 0.003
     maximum_arm_joint_step_rad: float = 0.12
@@ -97,6 +107,16 @@ class RecordedHandGuardedChopPlan:
     minimum_thumb_clearance_m: float
 
 
+@dataclass(frozen=True)
+class _TableCutPlan:
+    right_ready_rad: np.ndarray
+    left_ready_rad: np.ndarray
+    cuts: tuple[_CutTrajectories, ...]
+    knife_lift_shifts: tuple
+    cut_points_xy: np.ndarray
+    safe_knife_height_m: float
+
+
 class RecordedHandGuardedChopPhase(str, Enum):
     INITIALIZE = "initialize"
     HAND_MOTION = "hand_motion"
@@ -123,6 +143,25 @@ class RecordedHandGuardedChopResult:
     events: tuple[tuple[int, str], ...]
 
 
+_TABLE_ONLY_HIDDEN_GEOMS = (
+    "guarded_chop_cube",
+    "pick_source_pedestal",
+    "pick_target_pedestal",
+    "pick_cube_geom",
+    "pick_target_region",
+)
+
+
+def _configure_table_only_scene(robot: RightArmRobot) -> None:
+    model = robot.sim.model
+    for name in _TABLE_ONLY_HIDDEN_GEOMS:
+        geom = robot.sim.require_geom(name)
+        model.geom_rgba[geom, 3] = 0.0
+        model.geom_contype[geom] = 0
+        model.geom_conaffinity[geom] = 0
+    mujoco.mj_forward(model, robot.sim.data)
+
+
 def _chopping_aligned_palm_rotation(initial_rotation: np.ndarray) -> np.ndarray:
     angle = -np.pi / 2.0
     world_quarter_turn = np.asarray(
@@ -144,7 +183,55 @@ def _lateral_guard_anchor_xy(
     clearance_m: float,
 ) -> np.ndarray:
     cut = np.asarray(cut_xy, dtype=float)
-    return np.asarray((cut[0] - clearance_m, cut[1]))
+    return np.asarray((cut[0] - 0.08, cut[1] + clearance_m))
+
+
+def _preflight_table_cuts(
+    robot: RightArmRobot,
+    config: RecordedHandGuardedChopConfig,
+) -> _TableCutPlan:
+    guarded_config = GuardedChopConfig(
+        scene_mode="plane",
+        cuts=config.cuts,
+        control_dt_s=config.control_dt_s,
+        minimum_distance_m=config.minimum_distance_m,
+    )
+    line = _preflight_line_chop(
+        robot,
+        robot.right_kinematics,
+        LineChopConfig(
+            chop=ChopConfig(
+                control_dt_s=config.control_dt_s,
+                descent_duration_s=guarded_config.cut_duration_s,
+                retract_duration_s=guarded_config.knife_up_duration_s,
+            ),
+            cuts=config.cuts,
+            spacing_m=guarded_config.hand_shift_m,
+            shift_duration_s=guarded_config.hand_shift_duration_s,
+        ),
+    )
+    ordered_indices = _right_to_left_indices(line.cut_points_xy)
+    cut_points = line.cut_points_xy[ordered_indices].copy()
+    ordered_cuts = tuple(line.cuts[index] for index in ordered_indices)
+    cuts = _translate_right_cuts(
+        robot,
+        ordered_cuts,
+        0.0,
+        guarded_config,
+    )
+    lift_shifts = _diagonal_lift_shifts(robot, cuts, guarded_config)
+    right_ready = cuts[0].descent[0].joints_rad.copy()
+    return _TableCutPlan(
+        right_ready_rad=right_ready,
+        left_ready_rad=LEFT_GRASP_READY_RAD.copy(),
+        cuts=cuts,
+        knife_lift_shifts=lift_shifts,
+        cut_points_xy=cut_points,
+        safe_knife_height_m=(
+            _blade_bottom_height(robot, right_ready)
+            - _KNIFE_SAFE_TRACKING_HEADROOM_M
+        ),
+    )
 
 
 def _preflight_recorded_hand_guarded_chop(
@@ -175,15 +262,8 @@ def _build_candidate_plan(
     saved = mujoco.MjData(robot.sim.model)
     mujoco.mj_copyData(saved, robot.sim.model, robot.sim.data)
     try:
-        right = _preflight_guarded_chop(
-            robot,
-            GuardedChopConfig(
-                scene_mode="plane",
-                cuts=config.cuts,
-                control_dt_s=config.control_dt_s,
-                minimum_distance_m=config.minimum_distance_m,
-            ),
-        )
+        _configure_table_only_scene(robot)
+        right = _preflight_table_cuts(robot, config)
         surface_z = work_surface_height_m(robot.sim)
         cycles = []
         seed = right.left_ready_rad.copy()
@@ -336,6 +416,7 @@ def _measure_plan_safety(
 ) -> tuple[float, float, float]:
     model, data = robot.sim.model, robot.sim.data
     board = robot.sim.require_geom("chopping_board")
+    palm = robot.sim.require_body("left_palm_link")
     thumb = robot.sim.require_geom("left_finger1_pad")
     thumb_radius = float(model.geom_size[thumb, 0])
     minimum_distance = np.inf
@@ -355,7 +436,15 @@ def _measure_plan_safety(
         )
         for contact_index in range(data.ncon):
             contact = data.contact[contact_index]
-            if board in (int(contact.geom1), int(contact.geom2)):
+            geom1, geom2 = int(contact.geom1), int(contact.geom2)
+            hand_geom = (
+                geom2
+                if geom1 == board
+                else geom1 if geom2 == board else None
+            )
+            if hand_geom is not None and _geom_belongs_to_body_tree(
+                robot, hand_geom, palm
+            ):
                 maximum_penetration = max(
                     maximum_penetration, max(0.0, -float(contact.dist))
                 )

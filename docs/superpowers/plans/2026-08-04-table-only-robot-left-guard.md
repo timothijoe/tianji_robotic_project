@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the recorded-hand task cut the chopping-board surface directly while keeping the Wuji hand 80 mm to robot-left (`+Y`) of each active cut.
+**Goal:** Make the recorded-hand task cut the chopping-board surface directly while keeping the Wuji palm reference 160 mm to robot-left (`+Y`) of each active cut.
 
 **Architecture:** Configure only the new task's in-memory MuJoCo model to hide and disable unrelated props. Build its right-arm cuts from the board-contact line-chop plan instead of the cube-raised guarded plan, while preserving the existing recorded-hand IK, five-cycle executor, and safety measurements.
 
@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Robot-left is world `+Y`; right-to-left knife progression remains `+Y`.
-- Initial hand anchor is active cut `Y + 0.080 m`; recorded retreat continues approximately 30 mm along `+Y`.
+- Initial hand anchor is active cut `Y + 0.160 m` and `X - 0.080 m`; recorded retreat continues approximately 30 mm along `+Y`.
 - Knife contact is the raised chopping-board top, not a cube top.
 - Hide/disable props only in the new task's model instance.
 - Preserve knife/hand distance `>= 0.020 m`, hand penetration `<= 0.0005 m`, and thumb clearance `>= 0.010 m`.
@@ -28,7 +28,7 @@
 **Interfaces:**
 - Produces: `_configure_table_only_scene(robot: RightArmRobot) -> None`.
 
-- [ ] **Step 1: Write a failing scene-isolation test**
+- [x] **Step 1: Write a failing scene-isolation test**
 
 Create two robots. Configure one and assert `guarded_chop_cube`,
 `pick_source_pedestal`, `pick_target_pedestal`, `pick_cube_geom`, and
@@ -36,7 +36,7 @@ Create two robots. Configure one and assert `guarded_chop_cube`,
 assert the untouched robot retains its original values and the chopping board
 remains visible/collidable.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -46,13 +46,13 @@ Run:
 
 Expected: import failure for `_configure_table_only_scene`.
 
-- [ ] **Step 3: Implement explicit named-geom configuration**
+- [x] **Step 3: Implement explicit named-geom configuration**
 
 Resolve exactly the five named geoms, set `model.geom_rgba[id, 3] = 0`,
 `geom_contype[id] = 0`, and `geom_conaffinity[id] = 0`, then call
 `mujoco.mj_forward`. Do not modify MJCF files or any unnamed geom.
 
-- [ ] **Step 4: Run GREEN and commit with Task 2**
+- [x] **Step 4: Run GREEN and commit with Task 2**
 
 Run the focused test and proceed only when it passes.
 
@@ -70,29 +70,29 @@ Run the focused test and proceed only when it passes.
 - Produces: `_preflight_table_cuts(robot, config)` returning ordered board-contact cuts, cut points, lift shifts, ready joints, and safe height.
 - Updates: `_lateral_guard_anchor_xy(cut_xy, clearance_m)` to return `(cut_x, cut_y + clearance_m)`.
 
-- [ ] **Step 1: Write failing board-contact and robot-left tests**
+- [x] **Step 1: Write failing board-contact and robot-left tests**
 
-Assert the hand anchor for cut `(0.62, -0.08)` and `0.08 m` clearance is
-`(0.62, 0.0)`. On a real five-cycle plan assert every initial palm `Y` is at
-least `0.079 m` beyond its matching knife contact `Y`, every retreat ends at a
+Assert the hand anchor for cut `(0.62, -0.08)` and `0.16 m` clearance is
+`(0.54, 0.08)`. On a real five-cycle plan assert every initial palm `Y` is at
+least `0.159 m` beyond its matching knife contact `Y`, every retreat ends at a
 larger `Y`, and every knife blade bottom at contact equals the raised board top
 within the existing chopping penetration tolerance. Assert five cuts and all
 existing safety limits.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Expected: old anchor is in `-X` and knife contact remains near cube-top height.
 
-- [ ] **Step 3: Implement table-contact right planning**
+- [x] **Step 3: Implement table-contact right planning**
 
 Call `_preflight_line_chop` with the existing five-cut timing and spacing,
 order its cuts with `_right_to_left_indices`, and pass them through
 `_translate_right_cuts(..., dz_m=0.0, ...)` so only safe tracking headroom is
 added while contact stays on the board. Build diagonal lift shifts with the
 existing helper. Configure the table-only scene before safety measurement and
-use `cut_xy + (0, 0.080)` for each hand anchor.
+use `cut_xy + (-0.080, 0.160)` for each hand anchor.
 
-- [ ] **Step 4: Run focused and preserved-task regression**
+- [x] **Step 4: Run focused and preserved-task regression**
 
 ```bash
 .venv-wuji-teleop/bin/pytest -q \
@@ -100,16 +100,19 @@ use `cut_xy + (0, 0.080)` for each hand anchor.
   tests/simulation/test_recorded_hand_guarded_chop.py \
   tests/simulation/test_guarded_chop_preflight.py \
   tests/simulation/test_guarded_chop_state_machine.py \
-  tests/simulation/test_pick_place.py
+  tests/simulation/test_pick_place_scene.py \
+  tests/simulation/test_pick_place_state_machine.py \
+  tests/simulation/test_pick_place_integration.py \
+  tests/simulation/test_pick_place_visualization.py
 ```
 
-- [ ] **Step 5: Update docs and verify Headless/Viewer**
+- [x] **Step 5: Update docs and verify Headless/Viewer**
 
 Record selected surface height and safety metrics. Viewer acceptance must show
 no cube/pedestal props, the blade reaching the board, and the hand consistently
 on robot-left of the blade.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/twin_sim/tasks/recorded_hand_guarded_chop.py \
