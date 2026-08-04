@@ -7,8 +7,17 @@
 
 ```bash
 .venv-wuji-teleop/bin/tianji-robot sim wuji-table-retreat \
-  recordings/wuji/august_02/session_20260802_174440_936_right_to_left_wuji_hand.mcap
+  recordings/wuji/august_02/session_20260802_174440_936_right_to_left_wuji_hand.mcap \
+  --loops 3
 ```
+
+`--loops` 接受正整数，省略时默认循环 3 次。每次正向动作严格使用 MCAP 的
+相对时间戳（该录制约 4.15 秒）；相邻两次之间生成平滑 RESET，使关节和手掌
+连续回到起点。三次动作只有两段 RESET，最后一次停在最终姿势。
+
+Viewer 完成全部循环后继续显示最终姿势，不会自动关闭；手动关闭窗口后命令会
+正常退出。如果播放过程中提前手动关闭窗口，回放也会立即停止。Headless 使用
+相同的默认循环 3 次，但完成后直接退出，不等待窗口。
 
 推荐输入已经是标准 `/joint_states` MCAP，程序会直接读取，不再经过手套重定向。
 原始右手套文件也可作为回退输入：
@@ -46,4 +55,5 @@
 - 原始 MCAP 不会被修改；输出 NPZ/JSON 默认放在被 Git 忽略的 `recordings/`。
 
 可用 `--retreat-distance` 和 `--table-height` 调整后退距离与桌高。人工参数不会
-绕过掌心方向、拇指间隙、关节步长或整手碰撞预检。
+绕过掌心方向、拇指间隙、关节步长或整手碰撞预检。用 `--loops N` 修改循环
+次数；`N` 必须大于零。

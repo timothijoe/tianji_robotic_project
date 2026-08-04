@@ -13,6 +13,17 @@ def test_corrected_trajectory_round_trips_without_pickle(tmp_path):
 
 
 def test_report_writes_plain_json(tmp_path):
-    report=CorrectionReport(7,123,.5,(.03,0,0),.03,.011,.001,.002,.0004,.006)
+    report=CorrectionReport(
+        7,123,.5,(.03,0,0),.03,.011,.001,.002,.0004,.006,
+        requested_loop_count=3,
+        executed_loop_count=3,
+        scheduled_playback_duration_s=12.8,
+        stopped_early=False,
+    )
     path=write_correction_report_json(report,tmp_path/"report.json")
-    assert '"source_frame":7' in path.read_text()
+    text = path.read_text()
+    assert '"source_frame":7' in text
+    assert '"requested_loop_count":3' in text
+    assert '"executed_loop_count":3' in text
+    assert '"scheduled_playback_duration_s":12.8' in text
+    assert '"stopped_early":false' in text

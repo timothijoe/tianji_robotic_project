@@ -35,3 +35,35 @@ def test_table_retreat_routes_as_an_independent_simulation(monkeypatch, tmp_path
     monkeypatch.setattr(cli,"_run_wuji_table_retreat",lambda args: calls.append(args) or 0)
     assert cli.main(["sim","wuji-table-retreat",str(tmp_path/"in.mcap"),"--headless","--retreat-distance", "0.04"])==0
     assert calls[0].headless is True and calls[0].retreat_distance==0.04
+
+
+def test_table_retreat_defaults_to_three_loops(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        cli, "_run_wuji_table_retreat", lambda args: calls.append(args) or 0
+    )
+
+    cli.main(["sim", "wuji-table-retreat", str(tmp_path / "in.mcap"), "--headless"])
+
+    assert calls[0].loops == 3
+
+
+def test_table_retreat_accepts_custom_positive_loop_count(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        cli, "_run_wuji_table_retreat", lambda args: calls.append(args) or 0
+    )
+
+    cli.main(
+        ["sim", "wuji-table-retreat", str(tmp_path / "in.mcap"), "--loops", "5"]
+    )
+
+    assert calls[0].loops == 5
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1.5"])
+def test_table_retreat_rejects_invalid_loop_count(value, tmp_path):
+    with pytest.raises(SystemExit):
+        cli.main(
+            ["sim", "wuji-table-retreat", str(tmp_path / "in.mcap"), "--loops", value]
+        )

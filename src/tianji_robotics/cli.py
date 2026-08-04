@@ -1,8 +1,16 @@
 """Top-level command line boundary for simulation and real hardware."""
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 import sys
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -27,6 +35,7 @@ def _parser() -> argparse.ArgumentParser:
     retreat.add_argument("--hold-duration", type=float, default=2.0)
     retreat.add_argument("--table-height", type=float, default=0.0)
     retreat.add_argument("--source-frame", type=int)
+    retreat.add_argument("--loops", type=_positive_int, default=3)
     retreat.add_argument("--npz", type=Path)
     retreat.add_argument("--report", type=Path)
     retreat.set_defaults(handler=_run_wuji_table_retreat)
@@ -95,7 +104,7 @@ def _run_wuji_table_retreat(args: argparse.Namespace) -> int:
         from tianji_robotics.data.table_retreat import save_corrected_trajectory_npz, write_correction_report_json
         from tianji_robotics.simulation.tabletop_wuji_hand import TabletopWujiHand
         from tianji_robotics.workflows.wuji_glove_replay import retarget_recording
-        from tianji_robotics.workflows.wuji_table_retreat import TableRetreatConfig, build_recorded_table_retreat, replay_table_retreat
+        from tianji_robotics.workflows.wuji_table_retreat import TableRetreatConfig, build_looped_table_retreat, build_recorded_table_retreat, replay_table_retreat
 
         source_kind = detect_hand_mcap_kind(args.source)
         if source_kind == "joint_states":
@@ -109,13 +118,18 @@ def _run_wuji_table_retreat(args: argparse.Namespace) -> int:
         planner=TabletopWujiHand(viewer=False,table_height_m=args.table_height)
         try:
             corrected,report=build_recorded_table_retreat(trajectory,planner,TableRetreatConfig(retreat_distance_m=args.retreat_distance,place_duration_s=args.place_duration,retreat_duration_s=args.retreat_duration,hold_duration_s=args.hold_duration,source_frame=args.source_frame),source_kind=source_kind)
+            looped=build_looped_table_retreat(corrected,planner,loops=args.loops)
         finally: planner.close()
         if args.npz: save_corrected_trajectory_npz(corrected,args.npz)
-        if args.report: write_correction_report_json(report,args.report)
         backend=TabletopWujiHand(viewer=not args.headless,table_height_m=args.table_height)
-        try: replay_table_retreat(corrected,backend)
+        try:
+            summary=replay_table_retreat(looped,backend)
+            if not args.headless and not summary.stopped_early:
+                backend.wait_until_viewer_closes()
         finally: backend.close()
-        print(f"table retreat: source_kind={report.source_kind} frames={len(corrected.timestamps_ns)} motion={report.motion_start_frame}:{report.motion_end_frame} retreat_m={report.actual_retreat_m:.3f} palm_down={report.palm_down_verified} thumb_clearance_m={report.minimum_thumb_clearance_m:.4f} penetration_m={report.maximum_hand_penetration_m:.6f} max_joint_correction_rad={report.maximum_joint_correction_rad:.4f}")
+        report=replace(report,requested_loop_count=args.loops,executed_loop_count=summary.loop_count,scheduled_playback_duration_s=summary.scheduled_duration_s,stopped_early=summary.stopped_early)
+        if args.report: write_correction_report_json(report,args.report)
+        print(f"table retreat: source_kind={report.source_kind} frames={len(corrected.timestamps_ns)} loops={report.executed_loop_count}/{report.requested_loop_count} scheduled_s={report.scheduled_playback_duration_s:.3f} motion={report.motion_start_frame}:{report.motion_end_frame} retreat_m={report.actual_retreat_m:.3f} palm_down={report.palm_down_verified} thumb_clearance_m={report.minimum_thumb_clearance_m:.4f} penetration_m={report.maximum_hand_penetration_m:.6f} max_joint_correction_rad={report.maximum_joint_correction_rad:.4f}")
         return 0
     except ModuleNotFoundError as exc:
         if exc.name in {"mcap","wuji_sdk"}:

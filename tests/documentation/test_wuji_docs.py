@@ -37,4 +37,6 @@ def test_table_retreat_docs_publish_command_thresholds_and_safety_boundary():
     assert "499" in documentation and "311:464" in documentation
     assert "30 mm" in documentation and "10 mm" in documentation and "0.5 mm" in documentation
     assert "掌心向下" in documentation and "关节修正为 0" in documentation
+    assert "--loops" in documentation and "默认循环 3 次" in documentation
+    assert "最终姿势" in documentation and "手动关闭" in documentation
     assert "不会连接" in documentation

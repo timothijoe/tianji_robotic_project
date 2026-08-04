@@ -76,6 +76,10 @@ class CorrectionReport:
     source_ring_little_correlation: float = 0.0
     corrected_middle_ring_correlation: float = 0.0
     corrected_ring_little_correlation: float = 0.0
+    requested_loop_count: int = 1
+    executed_loop_count: int = 0
+    scheduled_playback_duration_s: float = 0.0
+    stopped_early: bool = False
 
 
 def build_recorded_table_retreat(
@@ -353,7 +357,7 @@ def replay_table_retreat(
         for _ in range(max(0, target_steps - executed_steps)):
             if viewer_closed():
                 return ReplayTableRetreatSummary(
-                    loop_count=len(set(corrected.loop_indices)),
+                    loop_count=len(set(corrected.loop_indices[:executed_frames])),
                     frame_count=executed_frames,
                     scheduled_duration_s=executed_steps * backend.timestep_s,
                     stopped_early=True,
@@ -372,7 +376,7 @@ def replay_table_retreat(
         else float(timestamps[-1] - timestamps[0]) / 1e9
     )
     return ReplayTableRetreatSummary(
-        loop_count=len(set(corrected.loop_indices)),
+        loop_count=len(set(corrected.loop_indices[:executed_frames])),
         frame_count=executed_frames,
         scheduled_duration_s=duration_s,
         stopped_early=stopped_early,

@@ -2,6 +2,13 @@
 
 更新时间：2026-08-04
 
+循环回放开发进展：`wuji-table-retreat` 已增加正整数 `--loops`，默认循环 3 次；
+正向动作改为按 MCAP 累计时间戳调度，相邻动作间使用通过桌面安全预检的平滑
+RESET。Viewer 完成循环后保持最终姿势，用户关闭窗口后退出；Headless 完成后
+立即退出。Viewer 的关闭路径已改为状态感知，避免窗口已关闭后再次调用 MuJoCo
+`close()` 导致 Python 进程停在 futex。真实 Viewer 三次循环验收将在本轮最终
+验证后补充。
+
 最新录制驱动手势：`wuji-table-retreat` 现在优先直接读取
 `session_20260802_174440_936_right_to_left_wuji_hand.mcap` 的 `/joint_states`，并对
 原始 `session_20260802_174440_936.mcap` 保留官方重定向回退路径。两条路径均验证
