@@ -33,6 +33,39 @@ class RecordedGuardCycle:
     maximum_joint_correction_rad: float
 
 
+def shape_pip_led_guard_hand(
+    positions_rad: np.ndarray,
+    phases: tuple[str, ...],
+    control_ranges: np.ndarray,
+) -> np.ndarray:
+    positions = np.asarray(positions_rad, dtype=float)
+    limits = np.asarray(control_ranges, dtype=float)
+    if positions.ndim != 2 or positions.shape[1] != 20:
+        raise ValueError("positions_rad must have shape (N, 20)")
+    if len(phases) != len(positions):
+        raise ValueError("phases must align with positions_rad")
+    if limits.shape != (20, 2) or not np.isfinite(limits).all():
+        raise ValueError("control_ranges must have shape (20, 2)")
+    shaped = positions.copy()
+    for mcp, pip in zip((4, 8, 12, 16), (6, 10, 14, 18), strict=True):
+        original_mcp = positions[:, mcp]
+        shaped[:, mcp] = np.minimum(original_mcp, 0.30)
+        transferred = np.maximum(0.0, original_mcp - shaped[:, mcp])
+        shaped[:, pip] = np.maximum(
+            positions[:, pip] + transferred,
+            shaped[:, mcp] + 0.25,
+        )
+        shaped[:, mcp] = np.clip(
+            shaped[:, mcp], limits[mcp, 0], limits[mcp, 1]
+        )
+        shaped[:, pip] = np.clip(
+            shaped[:, pip], limits[pip, 0], limits[pip, 1]
+        )
+    if np.max(np.abs(np.diff(shaped, axis=0)), initial=0.0) > 0.12:
+        raise ValueError("PIP-led shaping exceeds 0.12 rad joint-step limit")
+    return shaped
+
+
 def _load_trajectory(path: Path) -> tuple[HandTrajectory, str]:
     kind = detect_hand_mcap_kind(path)
     if kind == "joint_states":

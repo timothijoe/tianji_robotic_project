@@ -74,8 +74,10 @@ than retaining safety measurements from the unrotated plan.
 Robot-relative left is world `+Y`, as established by the left-arm base at
 `Y=+0.04 m` and the right-arm base at `Y=-0.04 m`. The ordered knife cuts
 continue from robot-right toward robot-left along `+Y`. For every cut, place
-the recorded hand anchor `0.160 m` farther along `+Y` than that cut point; the
-recorded 30 mm retreat then moves still farther left. The palm reference must
+the recorded hand anchor `0.240 m` farther along `+Y` than the first cut point;
+the knife advances 80 mm left across five cuts while the wrist retreats 32 mm,
+so the palm remains at least about 188 mm robot-left of the active cut. The
+recorded palm translation is replaced by this compensated 32 mm carrier. The palm reference must
 remain on the robot-left side of the active blade throughout each cycle, while
 the existing full-geometry knife/hand clearance remains at least `0.020 m`.
 The palm anchor is also `0.080 m` closer to the robot along world `-X` because
@@ -110,14 +112,13 @@ target is at most `0.30 rad`; its PIP target is at least `0.25 rad` more flexed
 than that MCP target. These thresholds make "mostly straight MCP, PIP-led
 curl" testable rather than visual-only.
 
-Between cuts, fingers may extend toward the knife to recover joint travel while
-the wrist continues moving left far enough to compensate. Across recorded
-motion and transition samples, the world `Y` coordinate of every long-finger
+The reshaped recording plays once and is partitioned into five contiguous time
+segments, so there is no finger or wrist reset at a cut boundary. Across all
+recorded samples, the world `Y` coordinate of every long-finger
 pad must not move toward the knife by more than `0.5 mm` between consecutive
 samples. The first-to-last long-finger pad displacement must be toward
-robot-left. There is no arm RESET phase after cuts 1-4; transitions are part of
-the continuous guard motion and retain the table, thumb, and knife-clearance
-safety checks.
+robot-left. There is no arm RESET phase after cuts 1-4; the continuous guard
+motion retains the table, thumb, and knife-clearance safety checks.
 
 ## Five-cut synchronization
 

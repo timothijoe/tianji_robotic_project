@@ -30,7 +30,7 @@
 **Interfaces:**
 - Produces: `shape_pip_led_guard_hand(positions_rad: np.ndarray, phases: tuple[str, ...], control_ranges: np.ndarray) -> np.ndarray`.
 
-- [ ] **Step 1: Write failing anatomical redistribution tests**
+- [x] **Step 1: Write failing anatomical redistribution tests**
 
 Load the real corrected cycle and model actuator ranges. Assert output shape and
 timestamps are unchanged; all thumb columns `0:4`, abduction columns
@@ -40,7 +40,7 @@ samples assert long-finger MCP columns `4,8,12,16 <= 0.30`, PIP columns
 joint step is `<= 0.12 rad`. Assert middle/ring PIP timing correlation remains
 positive and index is not forced equal to them.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 ```bash
 .venv-wuji-teleop/bin/pytest -q tests/simulation/test_recorded_hand_guard.py
@@ -48,7 +48,7 @@ positive and index is not forced equal to them.
 
 Expected: import failure for `shape_pip_led_guard_hand`.
 
-- [ ] **Step 3: Implement pure redistribution**
+- [x] **Step 3: Implement pure redistribution**
 
 For fingers 2-5, clamp MCP to `0.30 rad`; transfer the positive removed MCP
 flexion into PIP, enforcing `PIP >= MCP + 0.25`, then clip to the PIP actuator
@@ -57,7 +57,7 @@ forward/backward smoothing pass only if required to enforce `0.12 rad` steps.
 Raise `ValueError` if the contract cannot be met without changing protected
 columns.
 
-- [ ] **Step 4: Run GREEN**
+- [x] **Step 4: Run GREEN**
 
 Run the adapter tests and verify real MCAP invariants.
 
@@ -77,26 +77,26 @@ Run the adapter tests and verify real MCAP invariants.
 - Produces: `RecordedHandGuardedChopPlan.left_transitions` instead of `left_resets`.
 - Adds metrics: `minimum_pad_step_y_m` and `pad_net_retreats_m` to the plan/result.
 
-- [ ] **Step 1: Write failing monotonic-carrier tests**
+- [x] **Step 1: Write failing monotonic-carrier tests**
 
 On the real plan assert five cycle-start palm `Y` values are nondecreasing,
 the first-to-final palm `Y` displacement is `0.025-0.040 m`, four transitions
 exist, and every transition's final palm target equals the next cycle's first
 target without a robot-right jump. Assert there is no `RESET` event or phase.
 
-- [ ] **Step 2: Write failing physical pad-motion tests**
+- [x] **Step 2: Write failing physical pad-motion tests**
 
 Evaluate `left_finger2_pad` through `left_finger5_pad` for every cycle and
 transition sample. Assert minimum consecutive `delta Y >= -0.0005 m`, all four
 net displacements are positive, and the existing knife/table/thumb metrics
 still pass.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 Expected: old five independent anchors and RESET paths move robot-right between
 cycles and expose `left_resets` instead of `left_transitions`.
 
-- [ ] **Step 4: Implement monotonic wrist carrier and compensated transitions**
+- [x] **Step 4: Implement monotonic wrist carrier and compensated transitions**
 
 Scale the recorded relative palm translation so each cycle contributes one
 fifth of `total_wrist_retreat_m`. The first cycle starts at the existing safe
@@ -108,13 +108,13 @@ minimum long-finger-pad `delta Y >= -0.0005 m`; solve sequential left-arm IK.
 Reject plans outside the configured total retreat range or existing safety
 limits.
 
-- [ ] **Step 5: Update runtime phases**
+- [x] **Step 5: Update runtime phases**
 
 Execute `HAND_MOTION -> HAND_SAFE -> CUT_DOWN -> KNIFE_RETRACT/SHIFT ->
 CONTINUOUS_TRANSITION`. Remove runtime `RESET`; keep completed cycle/cut counts
 and the knife interlock unchanged.
 
-- [ ] **Step 6: Run focused and old-task regression**
+- [x] **Step 6: Run focused and old-task regression**
 
 ```bash
 .venv-wuji-teleop/bin/pytest -q \
@@ -125,13 +125,13 @@ and the knife interlock unchanged.
   tests/simulation/test_guarded_chop_state_machine.py
 ```
 
-- [ ] **Step 7: Document and verify Headless/Viewer**
+- [x] **Step 7: Document and verify Headless/Viewer**
 
 Record MCP/PIP limits, total wrist retreat, finger-pad monotonicity, and safety
 metrics. Viewer acceptance must show no visible arm return between rounds and
 PIP-led rather than MCP-led finger bending.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/twin_sim/recorded_hand_guard.py \

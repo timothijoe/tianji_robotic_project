@@ -13,7 +13,10 @@ from twin_sim.raised_work_surface import (
     restore_work_surface,
     work_surface_height_m,
 )
-from twin_sim.recorded_hand_guard import RecordedGuardCycle
+from twin_sim.recorded_hand_guard import (
+    RecordedGuardCycle,
+    shape_pip_led_guard_hand,
+)
 from twin_sim.robot import RightArmRobot
 from twin_sim.tasks.chop import ChopConfig
 from twin_sim.tasks.guarded_chop import (
@@ -23,7 +26,6 @@ from twin_sim.tasks.guarded_chop import (
     _blade_bottom_height,
     _diagonal_lift_shifts,
     _geom_belongs_to_body_tree,
-    _minimum_jerk_joint_trajectory,
     _right_to_left_indices,
     _translate_right_cuts,
 )
@@ -47,12 +49,13 @@ class RecordedHandGuardedChopConfig:
     minimum_distance_m: float = 0.02
     maximum_hand_penetration_m: float = 0.0005
     minimum_thumb_clearance_m: float = 0.01
-    anchor_lateral_clearance_m: float = 0.16
+    anchor_lateral_clearance_m: float = 0.24
     combined_pad_contact_lift_m: float = 0.0098
     ik_tolerance: float = 0.003
     maximum_arm_joint_step_rad: float = 0.12
     reset_duration_s: float = 0.5
     final_hold_s: float = 3.0
+    total_wrist_retreat_m: float = 0.032
 
     def validated(self) -> "RecordedHandGuardedChopConfig":
         if self.cuts != 5:
@@ -66,6 +69,7 @@ class RecordedHandGuardedChopConfig:
             self.ik_tolerance,
             self.maximum_arm_joint_step_rad,
             self.reset_duration_s,
+            self.total_wrist_retreat_m,
         )
         if not all(np.isfinite(value) and value > 0.0 for value in positive):
             raise ValueError("recorded guarded-chop limits must be positive and finite")
@@ -76,6 +80,8 @@ class RecordedHandGuardedChopConfig:
             raise ValueError("combined_pad_contact_lift_m must be non-negative")
         if not np.isfinite(self.final_hold_s) or self.final_hold_s < 0.0:
             raise ValueError("final_hold_s must be non-negative and finite")
+        if not 0.025 <= self.total_wrist_retreat_m <= 0.040:
+            raise ValueError("total_wrist_retreat_m must be between 0.025 and 0.040")
         if not self.surface_offsets_m or not all(
             np.isfinite(value) and value >= 0.0
             for value in self.surface_offsets_m
@@ -100,11 +106,13 @@ class RecordedHandGuardedChopPlan:
     right_cuts: tuple[_CutTrajectories, ...]
     knife_lift_shifts: tuple
     left_cycles: tuple[RecordedLeftCycle, ...]
-    left_resets: tuple[RecordedLeftCycle, ...]
+    left_transitions: tuple[RecordedLeftCycle, ...]
     safe_knife_height_m: float
     minimum_planned_distance_m: float
     maximum_hand_penetration_m: float
     minimum_thumb_clearance_m: float
+    minimum_pad_step_y_m: float
+    pad_net_retreats_m: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -124,7 +132,7 @@ class RecordedHandGuardedChopPhase(str, Enum):
     CUT_DOWN = "cut_down"
     KNIFE_RETRACT = "knife_retract"
     KNIFE_SHIFT = "knife_shift"
-    RESET = "reset"
+    CONTINUOUS_TRANSITION = "continuous_transition"
     COMPLETE = "complete"
     ABORTED = "aborted"
 
@@ -251,6 +259,43 @@ def _preflight_recorded_hand_guarded_chop(
     )
 
 
+def _long_finger_pad_offsets(
+    robot: RightArmRobot,
+    left_rad: np.ndarray,
+    hand_positions: np.ndarray,
+) -> np.ndarray:
+    data = robot.sim.data
+    pad_ids = np.asarray(
+        [robot.sim.require_geom(f"left_finger{finger}_pad") for finger in range(2, 6)]
+    )
+    offsets = []
+    for hand_rad in hand_positions:
+        data.qpos[robot.sim.left.qpos_ids] = left_rad
+        data.qpos[robot.sim.hand.qpos_ids] = hand_rad
+        mujoco.mj_forward(robot.sim.model, data)
+        palm = robot.left_palm_pose()
+        offsets.append(
+            (data.geom_xpos[pad_ids] - palm[:3, 3]) @ palm[:3, :3]
+        )
+    return np.asarray(offsets)
+
+
+def _compensated_wrist_retreat(
+    local_pad_y: np.ndarray,
+    total_retreat_m: float,
+) -> np.ndarray:
+    delta = np.diff(np.asarray(local_pad_y, dtype=float), axis=0)
+    required = np.maximum(0.0, np.max(-0.0005 - delta, axis=1))
+    required_total = float(np.sum(required))
+    if required_total > total_retreat_m:
+        raise ValueError(
+            f"finger-pad compensation requires {required_total:.6f} m, "
+            f"exceeding wrist retreat {total_retreat_m:.6f} m"
+        )
+    increments = required + (total_retreat_m - required_total) / len(required)
+    return np.concatenate(([0.0], np.cumsum(increments)))
+
+
 def _build_candidate_plan(
     robot: RightArmRobot,
     cycle: RecordedGuardCycle,
@@ -265,76 +310,55 @@ def _build_candidate_plan(
         _configure_table_only_scene(robot)
         right = _preflight_table_cuts(robot, config)
         surface_z = work_surface_height_m(robot.sim)
-        cycles = []
         seed = right.left_ready_rad.copy()
         hand_limits = robot.sim.model.actuator_ctrlrange[
             robot.sim.hand.actuator_ids
         ]
         hand_positions = np.clip(
-            cycle.hand_positions_rad,
+            shape_pip_led_guard_hand(
+                cycle.hand_positions_rad, cycle.phases, hand_limits
+            ),
             hand_limits[:, 0],
             hand_limits[:, 1],
         )
         tcp_from_palm = np.eye(4)
         tcp_from_palm[2, 3] = 0.07
-
-        for cut_xy in right.cut_points_xy:
-            anchor = cycle.initial_palm_transform.copy()
-            anchor[:3, :3] = _chopping_aligned_palm_rotation(
-                anchor[:3, :3]
-            )
-            anchor[:3, 3] = (
-                *_lateral_guard_anchor_xy(
-                    cut_xy, config.anchor_lateral_clearance_m
-                ),
-                float(
-                    cycle.initial_palm_transform[2, 3]
-                    + surface_z
-                    + config.combined_pad_contact_lift_m
-                ),
-            )
-            palm_targets = np.asarray(
-                [anchor @ relative for relative in cycle.relative_palm_transforms]
-            )
-            tcp_targets = np.asarray(
-                [target @ tcp_from_palm for target in palm_targets]
-            )
-            left = _solve_left_path(robot, tcp_targets, seed, config)
-            seed = left[-1].copy()
+        anchor = cycle.initial_palm_transform.copy()
+        anchor[:3, :3] = _chopping_aligned_palm_rotation(anchor[:3, :3])
+        anchor[:3, 3] = (
+            *_lateral_guard_anchor_xy(
+                right.cut_points_xy[0], config.anchor_lateral_clearance_m
+            ),
+            float(
+                cycle.initial_palm_transform[2, 3]
+                + surface_z
+                + config.combined_pad_contact_lift_m
+            ),
+        )
+        local_pads = _long_finger_pad_offsets(robot, seed, hand_positions)
+        target_pad_offsets = local_pads @ anchor[:3, :3].T
+        carrier = _compensated_wrist_retreat(
+            target_pad_offsets[:, :, 1], config.total_wrist_retreat_m
+        )
+        palm_targets = np.repeat(anchor[None, :, :], len(hand_positions), axis=0)
+        palm_targets[:, 1, 3] += carrier
+        tcp_targets = np.asarray(
+            [target @ tcp_from_palm for target in palm_targets]
+        )
+        left = _solve_left_path(robot, tcp_targets, seed, config)
+        world_pad_y = (
+            palm_targets[:, None, 1, 3] + target_pad_offsets[:, :, 1]
+        )
+        minimum_pad_step_y = float(np.min(np.diff(world_pad_y, axis=0)))
+        pad_net_retreats = world_pad_y[-1] - world_pad_y[0]
+        cycles = []
+        for indices in np.array_split(np.arange(len(hand_positions)), config.cuts):
             cycles.append(
                 RecordedLeftCycle(
-                    left=left,
-                    hand=hand_positions.copy(),
-                    phases=cycle.phases,
-                    palm_targets=palm_targets,
-                )
-            )
-
-        resets = []
-        reset_count = int(round(config.reset_duration_s / config.control_dt_s)) + 1
-        for current, following in zip(cycles[:-1], cycles[1:], strict=True):
-            left = np.asarray(
-                _minimum_jerk_joint_trajectory(
-                    current.left[-1],
-                    following.left[0],
-                    config.reset_duration_s,
-                    config.control_dt_s,
-                )
-            )
-            hand = np.asarray(
-                _minimum_jerk_joint_trajectory(
-                    current.hand[-1],
-                    following.hand[0],
-                    config.reset_duration_s,
-                    config.control_dt_s,
-                )
-            )
-            resets.append(
-                RecordedLeftCycle(
-                    left=left,
-                    hand=hand,
-                    phases=("RESET",) * reset_count,
-                    palm_targets=np.empty((reset_count, 4, 4)),
+                    left=left[indices].copy(),
+                    hand=hand_positions[indices].copy(),
+                    phases=tuple(cycle.phases[index] for index in indices),
+                    palm_targets=palm_targets[indices].copy(),
                 )
             )
 
@@ -364,11 +388,13 @@ def _build_candidate_plan(
             right_cuts=right.cuts,
             knife_lift_shifts=right.knife_lift_shifts,
             left_cycles=tuple(cycles),
-            left_resets=tuple(resets),
+            left_transitions=(),
             safe_knife_height_m=right.safe_knife_height_m,
             minimum_planned_distance_m=minimum_distance,
             maximum_hand_penetration_m=maximum_penetration,
             minimum_thumb_clearance_m=minimum_thumb_clearance,
+            minimum_pad_step_y_m=minimum_pad_step_y,
+            pad_net_retreats_m=pad_net_retreats.copy(),
         )
     finally:
         mujoco.mj_copyData(robot.sim.data, robot.sim.model, saved)
@@ -554,18 +580,6 @@ def run_recorded_hand_guarded_chop(
                     left_cycle.hand[-1],
                     index,
                 )
-            if index <= len(plan.left_resets):
-                reset = plan.left_resets[index - 1]
-                next_right = plan.right_cuts[index].descent[0].joints_rad
-                for left_rad, hand_rad in zip(reset.left[1:], reset.hand[1:], strict=True):
-                    execute(
-                        RecordedHandGuardedChopPhase.RESET,
-                        next_right,
-                        left_rad,
-                        hand_rad,
-                        index,
-                    )
-
         phase = RecordedHandGuardedChopPhase.COMPLETE
         for _ in range(int(round(config.final_hold_s / config.control_dt_s))):
             robot.step(config.control_dt_s)

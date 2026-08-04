@@ -115,25 +115,41 @@ def test_real_plan_contains_five_safe_recorded_cycles_and_five_right_cuts():
         assert plan.surface_offset_m == pytest.approx(.04)
         assert len(plan.left_cycles) == 5
         assert len(plan.right_cuts) == 5
-        assert len(plan.left_resets) == 4
-        assert all(len(value.hand) >= 51 for value in plan.left_resets)
+        assert len(plan.left_transitions) == 0
+        assert sum(len(value.hand) for value in plan.left_cycles) == len(
+            _real_cycle().hand_positions_rad
+        )
         assert all(len(value.hand) == len(value.left) for value in plan.left_cycles)
         assert plan.minimum_planned_distance_m >= .020
         assert plan.maximum_hand_penetration_m <= .0005
         assert plan.minimum_thumb_clearance_m >= .010
+        cycle_starts_y = np.asarray(
+            [value.palm_targets[0, 1, 3] for value in plan.left_cycles]
+        )
+        assert np.all(np.diff(cycle_starts_y) >= 0.0)
+        total_wrist_retreat = (
+            plan.left_cycles[-1].palm_targets[-1, 1, 3]
+            - plan.left_cycles[0].palm_targets[0, 1, 3]
+        )
+        assert .025 <= total_wrist_retreat <= .040
+        assert plan.minimum_pad_step_y_m >= -.0005 - 1e-9
+        assert np.all(plan.pad_net_retreats_m > 0.0)
         board_top = work_surface_height_m(robot.sim)
+        robot_left_offsets = []
         for cut, left_cycle in zip(
             plan.right_cuts, plan.left_cycles, strict=True
         ):
             knife_contact = cut.descent[-1].target_pose[:2, 3]
             hand_start = left_cycle.palm_targets[0, :2, 3]
             hand_end = left_cycle.palm_targets[-1, :2, 3]
-            assert hand_start[1] - knife_contact[1] >= .159
+            robot_left_offsets.append(hand_start[1] - knife_contact[1])
+            assert hand_start[1] - knife_contact[1] >= .180
             assert hand_end[1] > hand_start[1]
             blade_bottom = _blade_bottom_height(
                 robot, cut.descent[-1].joints_rad
             )
             assert abs(blade_bottom - board_top) <= .01
+        assert robot_left_offsets[0] >= .239
         cut_direction = (
             plan.right_cuts[-1].descent[-1].target_pose[:2, 3]
             - plan.right_cuts[0].descent[-1].target_pose[:2, 3]
