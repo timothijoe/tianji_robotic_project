@@ -52,6 +52,23 @@ control rate) with the preceding solution as its seed. The reset between cuts
 lasts at least 0.5 seconds and respects the existing 0.12 rad hand-joint step
 limit and arm velocity limits.
 
+### Chopping-frame alignment correction
+
+The recorded retreat must be expressed in the chopping task's lateral frame,
+not the camera front-back frame. In the combined scene, the ordered cut points
+progress along world `+Y`, while the first implementation maps the recorded
+30 mm retreat onto world `-X`. Apply one world-frame `-90 degree` rotation
+about the work-surface normal to the complete recorded palm anchor. This
+rotates the wrist orientation, finger direction, and every relative palm
+sample together; do not rewrite translation components independently.
+
+After correction, the horizontal start-to-end palm displacement must be
+parallel to the ordered cut-point direction and point along world `+Y`, within
+one degree of angular tolerance. Its magnitude remains 30 mm within the
+existing recording tolerance. The five anchor positions still follow their
+corresponding cut locations, and the shared-surface search must be rerun rather
+than retaining safety measurements from the unrotated plan.
+
 ## Five-cut synchronization
 
 Each of the five cycles is:
