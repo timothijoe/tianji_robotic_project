@@ -195,7 +195,18 @@ class TabletopWujiHand:
         if self._viewer is not None and self._viewer.is_running():
             self._viewer.sync(); time.sleep(self.timestep_s)
 
+    @property
+    def has_viewer(self) -> bool:
+        return self._viewer is not None
+
+    def viewer_is_running(self) -> bool:
+        return self._viewer is not None and self._viewer.is_running()
+
+    def wait_until_viewer_closes(self) -> None:
+        while self.viewer_is_running():
+            time.sleep(0.05)
+
     def close(self) -> None:
         if self._closed: return
-        if self._viewer is not None: self._viewer.close()
+        if self.viewer_is_running(): self._viewer.close()
         self._closed = True

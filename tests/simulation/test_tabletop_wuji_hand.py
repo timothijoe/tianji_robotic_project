@@ -2,6 +2,7 @@ import mujoco
 import numpy as np
 import pytest
 
+import tianji_robotics.simulation.tabletop_wuji_hand as tabletop_module
 from tianji_robotics.simulation.tabletop_wuji_hand import TabletopWujiHand
 
 
@@ -72,5 +73,51 @@ def test_command_pose_rejects_invalid_palm_pose(position, quaternion):
     try:
         with pytest.raises(ValueError, match="palm pose"):
             hand.command_pose(np.zeros(20), position, quaternion)
+    finally:
+        hand.close()
+
+
+class FakeViewer:
+    def __init__(self, running_sequence):
+        self._running = iter(running_sequence)
+        self.is_running_calls = 0
+        self.close_calls = 0
+
+    def is_running(self):
+        self.is_running_calls += 1
+        return next(self._running, False)
+
+    def close(self):
+        self.close_calls += 1
+
+
+def test_close_does_not_close_viewer_twice_after_user_closed_window():
+    hand = TabletopWujiHand(viewer=False)
+    fake = FakeViewer([False])
+    hand._viewer = fake
+
+    hand.close()
+    hand.close()
+
+    assert fake.close_calls == 0
+
+
+def test_wait_returns_when_viewer_window_closes(monkeypatch):
+    hand = TabletopWujiHand(viewer=False)
+    fake = FakeViewer([True, True, False])
+    hand._viewer = fake
+    monkeypatch.setattr(tabletop_module.time, "sleep", lambda _: None)
+    try:
+        hand.wait_until_viewer_closes()
+        assert fake.is_running_calls == 3
+    finally:
+        hand.close()
+
+
+def test_headless_wait_is_a_noop():
+    hand = TabletopWujiHand(viewer=False)
+    try:
+        assert hand.has_viewer is False
+        hand.wait_until_viewer_closes()
     finally:
         hand.close()
