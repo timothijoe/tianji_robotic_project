@@ -116,6 +116,21 @@ def test_real_plan_contains_five_safe_recorded_cycles_and_five_right_cuts():
         assert plan.surface_offset_m == pytest.approx(.04)
         assert len(plan.left_cycles) == 5
         assert len(plan.right_cuts) == 5
+        assert len(plan.synchronized_cycles) == 5
+        for synchronized in plan.synchronized_cycles:
+            assert len(synchronized.right) == len(synchronized.left)
+            assert len(synchronized.left) == len(synchronized.hand)
+            assert len(synchronized.hand) == len(synchronized.knife_targets)
+            assert "CUT_DOWN" in synchronized.knife_phases
+            assert "KNIFE_RETRACT" in synchronized.knife_phases
+        knife_y = np.concatenate(
+            [
+                synchronized.knife_targets[:, 1, 3]
+                for synchronized in plan.synchronized_cycles
+            ]
+        )
+        assert np.all(np.diff(knife_y) >= -1e-9)
+        assert knife_y[-1] - knife_y[0] == pytest.approx(.032, abs=.001)
         assert len(plan.left_transitions) == 0
         assert sum(len(value.hand) for value in plan.left_cycles) == len(
             _real_cycle().hand_positions_rad

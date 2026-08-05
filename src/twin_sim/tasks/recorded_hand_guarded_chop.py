@@ -99,6 +99,18 @@ class RecordedLeftCycle:
 
 
 @dataclass(frozen=True)
+class SynchronizedGuardCycle:
+    """Equal-length right-arm, left-arm, and hand commands for one cut."""
+
+    right: np.ndarray
+    left: np.ndarray
+    hand: np.ndarray
+    knife_phases: tuple[str, ...]
+    palm_targets: np.ndarray
+    knife_targets: np.ndarray
+
+
+@dataclass(frozen=True)
 class RecordedHandGuardedChopPlan:
     surface_offset_m: float
     right_ready_rad: np.ndarray
@@ -106,6 +118,7 @@ class RecordedHandGuardedChopPlan:
     right_cuts: tuple[_CutTrajectories, ...]
     knife_lift_shifts: tuple
     left_cycles: tuple[RecordedLeftCycle, ...]
+    synchronized_cycles: tuple[SynchronizedGuardCycle, ...]
     left_transitions: tuple[RecordedLeftCycle, ...]
     safe_knife_height_m: float
     minimum_planned_distance_m: float
@@ -432,6 +445,13 @@ def _build_candidate_plan(
                     palm_targets=palm_targets[indices].copy(),
                 )
             )
+        synchronized_cycles = _build_synchronized_cycles(
+            robot,
+            right.cuts,
+            tuple(cycles),
+            config.total_wrist_retreat_m,
+            config,
+        )
 
         minimum_distance, maximum_penetration, minimum_thumb_clearance = (
             _measure_plan_safety(robot, right.cuts, tuple(cycles), surface_z)
@@ -459,6 +479,7 @@ def _build_candidate_plan(
             right_cuts=right.cuts,
             knife_lift_shifts=right.knife_lift_shifts,
             left_cycles=tuple(cycles),
+            synchronized_cycles=synchronized_cycles,
             left_transitions=(),
             safe_knife_height_m=right.safe_knife_height_m,
             minimum_planned_distance_m=minimum_distance,
@@ -503,6 +524,60 @@ def _solve_left_path(
         solutions.append(result.joints_rad.copy())
         previous = result.joints_rad
     return np.asarray(solutions)
+
+
+def _build_synchronized_cycles(
+    robot: RightArmRobot,
+    cuts: tuple[_CutTrajectories, ...],
+    left_cycles: tuple[RecordedLeftCycle, ...],
+    total_carrier_m: float,
+    config: RecordedHandGuardedChopConfig,
+) -> tuple[SynchronizedGuardCycle, ...]:
+    """Retimes five knife down/up waves onto the continuous guard clock."""
+    sample_counts = np.asarray([len(cycle.hand) for cycle in left_cycles], dtype=int)
+    total_samples = int(np.sum(sample_counts))
+    if total_samples < 2 or np.any(sample_counts < 2):
+        raise ValueError("synchronized guard cycles require at least two samples")
+
+    safe = cuts[0].descent[0].target_pose.copy()
+    contact_z = float(cuts[0].descent[-1].target_pose[2, 3])
+    carrier = np.linspace(0.0, total_carrier_m, total_samples)
+    targets = []
+    phases = []
+    cursor = 0
+    for count in sample_counts:
+        local = np.linspace(0.0, 1.0, int(count))
+        down = local <= 0.5
+        vertical = np.where(down, local * 2.0, (1.0 - local) * 2.0)
+        for sample, depth in enumerate(vertical):
+            target = safe.copy()
+            target[1, 3] += carrier[cursor + sample]
+            target[2, 3] += depth * (contact_z - safe[2, 3])
+            targets.append(target)
+            phases.append("CUT_DOWN" if down[sample] else "KNIFE_RETRACT")
+        cursor += int(count)
+
+    right = robot.right_kinematics.solve_path(
+        targets,
+        cuts[0].descent[0].joints_rad,
+        max_joint_step_rad=config.maximum_arm_joint_step_rad,
+    )
+    synchronized = []
+    cursor = 0
+    for left_cycle, count in zip(left_cycles, sample_counts, strict=True):
+        section = slice(cursor, cursor + int(count))
+        synchronized.append(
+            SynchronizedGuardCycle(
+                right=right[section].copy(),
+                left=left_cycle.left.copy(),
+                hand=left_cycle.hand.copy(),
+                knife_phases=tuple(phases[section]),
+                palm_targets=left_cycle.palm_targets.copy(),
+                knife_targets=np.asarray(targets[section]).copy(),
+            )
+        )
+        cursor += int(count)
+    return tuple(synchronized)
 
 
 def _measure_plan_safety(
