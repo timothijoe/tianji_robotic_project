@@ -320,13 +320,27 @@ def _compensated_wrist_retreat(
     return np.concatenate(([0.0], np.cumsum(increments)))
 
 
-def _shape_vertical_distal_guard(
+def _scale_long_finger_pip_amplitude(
+    hand_positions: np.ndarray,
+    limits: np.ndarray,
+    factor: float = 0.80,
+) -> np.ndarray:
+    shaped = np.asarray(hand_positions, dtype=float).copy()
+    for pip in (6, 10, 14, 18):
+        center = 0.5 * (float(np.max(shaped[:, pip])) + float(np.min(shaped[:, pip])))
+        shaped[:, pip] = center + factor * (shaped[:, pip] - center)
+        shaped[:, pip] = np.clip(shaped[:, pip], limits[pip, 0], limits[pip, 1])
+    return shaped
+
+
+def _shape_palmar_pad_guard(
     robot: RightArmRobot,
     hand_positions: np.ndarray,
     phases: tuple[str, ...],
     palm_rotation: np.ndarray,
     *,
-    maximum_angle_deg: float = 15.0,
+    target_angle_deg: float = 37.5,
+    target_dip_range_rad: float = 0.35,
 ) -> np.ndarray:
     shaped = np.asarray(hand_positions, dtype=float).copy()
     active = np.asarray(phases) != "PREPARE"
@@ -362,14 +376,11 @@ def _shape_vertical_distal_guard(
                             )
                         )
                     )
-                    score = angle + 1e-4 * abs(candidate - original)
+                    score = abs(angle - target_angle_deg) + 1e-4 * abs(
+                        candidate - original
+                    )
                     if score < best[0]:
                         best = (score, float(candidate), angle)
-                if active[index] and best[2] > maximum_angle_deg:
-                    raise ValueError(
-                        f"finger {finger} distal angle {best[2]:.3f} degrees "
-                        f"exceeds {maximum_angle_deg:.3f} at sample {index}"
-                    )
                 if active[index]:
                     weight = 1.0
                 else:
@@ -380,8 +391,21 @@ def _shape_vertical_distal_guard(
                 shaped[index, dip] = original + weight * (best[1] - original)
     finally:
         mujoco.mj_copyData(robot.sim.data, robot.sim.model, saved)
+    for dip in (7, 11, 15, 19):
+        low = float(np.min(shaped[:, dip]))
+        high = float(np.max(shaped[:, dip]))
+        amplitude = high - low
+        if amplitude <= 1e-9:
+            raise ValueError(f"DIP joint {dip} has no temporal variation")
+        center = 0.5 * (low + high)
+        shaped[:, dip] = center + (shaped[:, dip] - center) * (
+            target_dip_range_rad / amplitude
+        )
+        shaped[:, dip] = np.clip(
+            shaped[:, dip], limits[dip, 0], limits[dip, 1]
+        )
     if np.max(np.abs(np.diff(shaped, axis=0)), initial=0.0) > 0.12:
-        raise ValueError("vertical distal shaping exceeds 0.12 rad joint-step limit")
+        raise ValueError("palmar-pad shaping exceeds 0.12 rad joint-step limit")
     return shaped
 
 
@@ -410,6 +434,9 @@ def _build_candidate_plan(
             hand_limits[:, 0],
             hand_limits[:, 1],
         )
+        hand_positions = _scale_long_finger_pip_amplitude(
+            hand_positions, hand_limits
+        )
         tcp_from_palm = np.eye(4)
         tcp_from_palm[2, 3] = 0.07
         anchor = cycle.initial_palm_transform.copy()
@@ -427,7 +454,7 @@ def _build_candidate_plan(
         anchor[0, 3] = (
             float(right.cut_points_xy[0, 0]) + config.anchor_longitudinal_offset_m
         )
-        hand_positions = _shape_vertical_distal_guard(
+        hand_positions = _shape_palmar_pad_guard(
             robot,
             hand_positions,
             cycle.phases,

@@ -175,12 +175,16 @@ def test_real_plan_contains_five_safe_recorded_cycles_and_five_right_cuts():
                     np.arccos(np.clip(axes @ np.array((0.0, 0.0, -1.0)), -1.0, 1.0))
                 )
             )
-        assert np.max(np.asarray(distal_angles)[active]) <= 15.0
+        active_distal_angles = np.asarray(distal_angles)[active]
+        assert np.min(active_distal_angles) >= 25.0
+        assert np.max(active_distal_angles) <= 50.0
         pip_ranges = np.ptp(planned_hand[:, (6, 10, 14, 18)], axis=0)
         dip_ranges = np.ptp(planned_hand[:, (7, 11, 15, 19)], axis=0)
-        assert np.all(pip_ranges[:3] >= .20)
-        assert pip_ranges[3] >= .12
-        assert np.all(dip_ranges >= .10)
+        previous_pip_ranges = np.asarray((.384813, .260536, .310028, .358330))
+        assert np.all(pip_ranges >= .75 * previous_pip_ranges)
+        assert np.all(pip_ranges <= .85 * previous_pip_ranges)
+        assert np.all(dip_ranges >= .25)
+        assert np.all(dip_ranges <= .50)
         assert np.corrcoef(planned_hand[:, 10], planned_hand[:, 14])[0, 1] > 0.0
         assert not np.array_equal(planned_hand[:, 6], planned_hand[:, 10])
         assert np.max(np.abs(np.diff(planned_hand, axis=0))) <= .12
