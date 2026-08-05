@@ -4,6 +4,7 @@ import pytest
 from tianji_robotics.hardware.wuji_hand.index_mcp_test import (
     IndexMcpTestPlan,
     build_index_mcp_test_plan,
+    run_index_mcp_test,
 )
 
 
@@ -17,6 +18,7 @@ class FakeHand:
         position=0.4,
         lower=None,
         upper=None,
+        fail_on_target=None,
     ):
         self.side = side
         self.errors = np.zeros((5, 4), dtype=np.uint32) if errors is None else errors
@@ -25,6 +27,9 @@ class FakeHand:
         self.positions[1, 0] = position
         self.lower = np.full((5, 4), -1.0) if lower is None else lower
         self.upper = np.full((5, 4), 1.0) if upper is None else upper
+        self.calls = []
+        self.fail_on_target = fail_on_target
+        self._target_writes = 0
 
     def read_handedness(self):
         return self.side
@@ -43,6 +48,23 @@ class FakeHand:
 
     def read_joint_upper_limit(self):
         return self.upper
+
+    def write_joint_enabled(self, enabled):
+        self.calls.append(("enabled", enabled))
+
+    def finger(self, finger_index):
+        assert finger_index == 1
+        return self
+
+    def joint(self, joint_index):
+        assert joint_index == 0
+        return self
+
+    def write_joint_target_position(self, target):
+        self._target_writes += 1
+        if self._target_writes == self.fail_on_target:
+            raise RuntimeError("write failed")
+        self.calls.append(("target", target))
 
 
 def test_builds_one_small_index_mcp_return_motion():
@@ -84,3 +106,47 @@ def test_rejects_targets_without_hardware_limit_margin():
 
     with pytest.raises(ValueError, match="hardware-limit margin"):
         build_index_mcp_test_plan(FakeHand(lower=lower))
+
+
+def test_dry_run_never_enables_or_writes():
+    hand, plan = FakeHand(), build_index_mcp_test_plan(FakeHand())
+
+    assert run_index_mcp_test(hand, plan, execute=False, dwell_s=0) is False
+
+    assert hand.calls == []
+
+
+def test_execution_writes_three_targets_then_disables():
+    hand = FakeHand()
+    plan = build_index_mcp_test_plan(hand)
+
+    assert run_index_mcp_test(hand, plan, execute=True, dwell_s=0)
+
+    assert hand.calls == [
+        ("enabled", True),
+        *[("target", target) for target in plan.targets_rad],
+        ("enabled", False),
+    ]
+
+
+def test_write_error_still_disables():
+    hand = FakeHand(fail_on_target=2)
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        run_index_mcp_test(
+            hand, build_index_mcp_test_plan(hand), execute=True, dwell_s=0
+        )
+
+    assert hand.calls[-1] == ("enabled", False)
+
+
+@pytest.mark.parametrize("dwell_s", [-0.1, np.inf, np.nan])
+def test_execution_rejects_non_finite_or_negative_dwell_before_enabling(dwell_s):
+    hand = FakeHand()
+
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        run_index_mcp_test(
+            hand, build_index_mcp_test_plan(hand), execute=True, dwell_s=dwell_s
+        )
+
+    assert hand.calls == []

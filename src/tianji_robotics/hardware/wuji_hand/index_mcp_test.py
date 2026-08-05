@@ -1,10 +1,11 @@
-"""Pure safety preflight and target planning for the right index MCP test.
+"""Safety preflight, planning, and explicit opt-in execution for index MCP tests.
 
-This module only reads an injected hand interface.  It never connects to a
-device, arms it, or sends a command.
+The module only operates on an injected hand interface; it never connects to a
+device itself. Planning is read-only, while execution requires explicit opt-in.
 """
 
 from dataclasses import dataclass
+import time
 
 import numpy as np
 
@@ -61,3 +62,24 @@ def build_index_mcp_test_plan(hand) -> IndexMcpTestPlan:
         raise ValueError("index MCP target lacks hardware-limit margin")
 
     return IndexMcpTestPlan(current, targets, maximum)
+
+
+def run_index_mcp_test(hand, plan, *, execute: bool, dwell_s: float, sleep=time.sleep) -> bool:
+    """Execute an explicitly approved index-MCP plan on the injected hand."""
+    if not execute:
+        return False
+    if not np.isfinite(dwell_s) or dwell_s < 0:
+        raise ValueError("dwell_s must be finite and non-negative")
+
+    enabled = False
+    try:
+        hand.write_joint_enabled(True)
+        enabled = True
+        joint = hand.finger(INDEX_FINGER).joint(MCP_JOINT)
+        for target in plan.targets_rad:
+            joint.write_joint_target_position(target)
+            sleep(dwell_s)
+        return True
+    finally:
+        if enabled:
+            hand.write_joint_enabled(False)
