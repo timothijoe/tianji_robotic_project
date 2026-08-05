@@ -3,9 +3,10 @@
 ## Goal
 
 Add a new hardware-free MuJoCo task in which the Wuji left hand remains mounted
-on the Tianji left arm, performs the recorded palm-down tabletop retreat once
-per cut, and the Tianji right arm completes the existing five guarded cuts.
-The stable `guarded-chop` task and its launch scripts remain unchanged.
+on the Tianji left arm, performs one continuous recorded palm-down tabletop
+retreat across five cuts, and the Tianji right arm cuts in parallel while
+maintaining a fixed robot-lateral offset. The stable `guarded-chop` task and
+its launch scripts remain unchanged.
 
 ## Public interface
 
@@ -29,8 +30,9 @@ accesses physical Tianji or Wuji runtimes.
 
 Use one combined MuJoCo model, one `MjData`, and one simulation clock. The
 existing Tianji left-arm wrist body owns the Wuji palm body; there is no second
-free or mocap-driven hand. The right arm retains its knife and the existing
-five-cut trajectory. Both sides interact with the same raised work surface.
+free or mocap-driven hand. The right arm retains its knife and a compact
+five-cut trajectory synchronized with the recorded guard motion. Both sides
+interact with the same raised work surface.
 
 Create the new task beside `twin_sim.tasks.guarded_chop`. Reuse its right-arm
 cut planning, knife/hand distance calculation, state-machine vocabulary,
@@ -48,9 +50,9 @@ on the already-mounted Wuji hand.
 The palm-down calibration from the standalone tabletop workflow becomes a
 world-frame placement target for the left wrist. The left-arm IK solves every
 sample (or a deterministic timestamp-preserving resampling at the combined
-control rate) with the preceding solution as its seed. The reset between cuts
-lasts at least 0.5 seconds and respects the existing 0.12 rad hand-joint step
-limit and arm velocity limits.
+control rate) with the preceding solution as its seed. The continuous motion
+between cuts respects the existing 0.12 rad hand-joint step limit and arm
+velocity limits; there is no inter-cut reset.
 
 ### Chopping-frame alignment correction
 
@@ -73,15 +75,14 @@ than retaining safety measurements from the unrotated plan.
 
 Robot-relative left is world `+Y`, as established by the left-arm base at
 `Y=+0.04 m` and the right-arm base at `Y=-0.04 m`. The ordered knife cuts
-continue from robot-right toward robot-left along `+Y`. For every cut, place
-the recorded hand anchor `0.240 m` farther along `+Y` than the first cut point;
-the knife advances 80 mm left across five cuts while the wrist retreats 32 mm,
-so the palm remains at least about 188 mm robot-left of the active cut. The
-recorded palm translation is replaced by this compensated 32 mm carrier. The palm reference must
-remain on the robot-left side of the active blade throughout each cycle, while
-the existing full-geometry knife/hand clearance remains at least `0.020 m`.
-The palm anchor is also `0.080 m` closer to the robot along world `-X` because
-the rotated wrist pose is not stably reachable at the knife's full depth.
+continue from robot-right toward robot-left along `+Y`. Replace the recording's
+full 30 mm per-cycle palm translation with one compensated 32 mm carrier over
+all five cuts. The knife uses the same 32 mm carrier so the knife-side nearest
+long-finger pad remains `0.030 m +/- 0.003 m` robot-left of the blade reference
+throughout synchronized cutting. The full geometry clearance remains at least
+`0.020 m`. Retain the palm anchor's `0.080 m` world `-X` offset toward the robot
+because the rotated wrist pose is not stably reachable at the knife's full
+depth.
 
 This task cuts the shared chopping-board surface directly. It must not raise
 the knife contact target to the guarded cube top. In this task's private
@@ -146,21 +147,44 @@ geometry changes pad motion and knife clearance. Reject the plan if vertical
 orientation, amplitude, actuator range, joint-step, table, thumb, or knife
 safety constraints cannot all be met.
 
+### Parallel knife/guard carrier and fixed lateral spacing
+
+Replace the serial `HAND_MOTION -> CUT_DOWN` execution with one synchronized
+control timeline. Every control sample commands right-arm knife joints,
+left-arm wrist joints, and Wuji hand joints together. Knife descent/retract is
+the vertical component; knife and wrist share the same robot-left (`+Y`)
+horizontal carrier. Neither side waits for the other to complete a phase.
+
+Reduce five-cut spacing from 20 mm to approximately 8 mm so the knife's total
+horizontal travel matches the existing 32 mm wrist retreat. Partition the
+continuous hand recording into five segments as before, but time-stretch each
+segment onto its corresponding knife down/up interval. The knife may descend
+diagonally by the shared 8 mm carrier amount while the hand performs the
+matching guard motion.
+
+Define fixed relative spacing in robot coordinates, not as full 3-D Euclidean
+distance: the `+Y` separation between the knife-side nearest long-finger pad
+and the blade reference is `0.030 m +/- 0.003 m` throughout synchronized
+cutting. Vertical knife travel necessarily changes Euclidean distance, but the
+full-geometry knife/hand distance must remain at least `0.020 m` at every
+sample. Preflight must measure both invariants on the complete synchronized
+trajectory.
+
+The former event-order interlock (hand segment completely safe before knife
+descent) is replaced by a per-sample joint safety gate: a synchronized sample
+may execute only when lateral spacing, 3-D clearance, table penetration,
+thumb clearance, joint limits, and finite-state checks all pass. Any violation
+aborts before advancing to the next sample or cut.
+
 ## Five-cut synchronization
 
-Each of the five cycles is:
-
-1. `GUARD_READY`: left arm places the palm-down hand at initial table contact;
-2. recorded `PREPARE/RETREAT/HOLD`: hand joints follow MCAP and the left wrist
-   follows the corrected palm path;
-3. the right knife may descend only after the left guard has reached the
-   cycle's planned safe retreat state;
-4. right knife retracts and shifts to the next cut point;
-5. `RESET`: left arm and hand return smoothly to the next initial pose.
-
-The final cycle omits RESET and holds both arms at their final safe poses.
-Right-arm cutting continues to use the existing five cut locations and
-right-to-left order.
+After `GUARD_READY` places the palm-down hand at initial table contact, each of
+the five cycles runs one synchronized down/up interval. The hand joints follow
+the corresponding contiguous MCAP segment while the left wrist and knife share
+the same approximately 8 mm `+Y` carrier increment. The right arm superimposes
+its vertical cut/retract waveform on that carrier. Both arms therefore advance
+continuously from robot-right to robot-left without an inter-cut RESET, shift,
+or wait state. The final sample holds both arms at their final safe poses.
 
 ## Shared raised work surface
 
@@ -181,8 +205,8 @@ right IK, hand/table contact, or knife/hand clearance).
   below its safe height.
 - Whole-hand work-surface penetration remains at most `0.0005 m`.
 - Thumb clearance remains at least `0.010 m`.
-- The right knife cannot enter `CUT_DOWN` until the recorded hand has reached
-  the planned retreat guard state.
+- Every synchronized control sample satisfies the lateral-spacing and complete
+  geometry-clearance invariants before either arm advances.
 - IK, joint range, velocity, collision, and timing checks cover the complete
   five-cycle plan before the first actuator command.
 - Any runtime divergence changes the task to `ABORTED`, retracts the right
@@ -200,8 +224,9 @@ are untouched.
 ## Verification
 
 Automated tests cover MCAP loading, five-cycle mapping, lowest-feasible-height
-selection, left/right IK preflight, timestamp alignment, reset continuity,
-knife interlock, hand/table safety, CLI routing, script syntax, and repository
+selection, left/right IK preflight, timestamp alignment, no-reset continuity,
+synchronized per-sample commands, lateral-spacing invariance, complete-geometry
+clearance, hand/table safety, CLI routing, script syntax, and repository
 boundaries. Real acceptance uses the preferred 499-frame recording in Headless
 and Viewer modes, verifies five completed cuts and five hand cycles, and then
 runs the complete regression suite with no new warning category.
