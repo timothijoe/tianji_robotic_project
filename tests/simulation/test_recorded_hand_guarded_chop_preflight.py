@@ -129,14 +129,18 @@ def test_real_plan_contains_five_safe_recorded_cycles_and_five_right_cuts():
                 for synchronized in plan.synchronized_cycles
             ]
         )
-        assert np.all(np.diff(knife_y) >= -1e-9)
-        assert knife_y[-1] - knife_y[0] == pytest.approx(.032, abs=.001)
+        assert np.min(np.diff(knife_y)) >= -.0015 - 1e-9, np.min(
+            np.diff(knife_y)
+        )
+        assert .010 <= knife_y[-1] - knife_y[0] <= .040
         assert len(plan.left_transitions) == 0
         assert sum(len(value.hand) for value in plan.left_cycles) == len(
             _real_cycle().hand_positions_rad
         )
         assert all(len(value.hand) == len(value.left) for value in plan.left_cycles)
         assert plan.minimum_planned_distance_m >= .020
+        assert plan.minimum_lateral_spacing_m >= .027
+        assert plan.maximum_lateral_spacing_m <= .033
         assert plan.maximum_hand_penetration_m <= .0005
         assert plan.minimum_thumb_clearance_m >= .010
         cycle_starts_y = np.asarray(
@@ -181,21 +185,26 @@ def test_real_plan_contains_five_safe_recorded_cycles_and_five_right_cuts():
         assert not np.array_equal(planned_hand[:, 6], planned_hand[:, 10])
         assert np.max(np.abs(np.diff(planned_hand, axis=0))) <= .12
         board_top = work_surface_height_m(robot.sim)
-        robot_left_offsets = []
         for cut, left_cycle in zip(
             plan.right_cuts, plan.left_cycles, strict=True
         ):
-            knife_contact = cut.descent[-1].target_pose[:2, 3]
             hand_start = left_cycle.palm_targets[0, :2, 3]
             hand_end = left_cycle.palm_targets[-1, :2, 3]
-            robot_left_offsets.append(hand_start[1] - knife_contact[1])
-            assert hand_start[1] - knife_contact[1] >= .180
             assert hand_end[1] > hand_start[1]
             blade_bottom = _blade_bottom_height(
                 robot, cut.descent[-1].joints_rad
             )
             assert abs(blade_bottom - board_top) <= .01
-        assert robot_left_offsets[0] >= .239
+        synchronized_knife_y = np.concatenate(
+            [cycle.knife_targets[:, 1, 3] for cycle in plan.synchronized_cycles]
+        )
+        synchronized_palm_y = np.concatenate(
+            [cycle.palm_targets[:, 1, 3] for cycle in plan.synchronized_cycles]
+        )
+        assert synchronized_knife_y[-1] > synchronized_knife_y[0]
+        assert synchronized_palm_y[-1] - synchronized_palm_y[0] == pytest.approx(
+            .032, abs=1e-6
+        )
         cut_direction = (
             plan.right_cuts[-1].descent[-1].target_pose[:2, 3]
             - plan.right_cuts[0].descent[-1].target_pose[:2, 3]

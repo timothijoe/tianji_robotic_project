@@ -50,6 +50,9 @@ class RecordedHandGuardedChopConfig:
     maximum_hand_penetration_m: float = 0.0005
     minimum_thumb_clearance_m: float = 0.01
     anchor_lateral_clearance_m: float = 0.24
+    target_lateral_spacing_m: float = 0.030
+    lateral_spacing_tolerance_m: float = 0.003
+    anchor_longitudinal_offset_m: float = -0.18
     combined_pad_contact_lift_m: float = 0.0098
     ik_tolerance: float = 0.003
     maximum_arm_joint_step_rad: float = 0.12
@@ -66,6 +69,8 @@ class RecordedHandGuardedChopConfig:
             self.maximum_hand_penetration_m,
             self.minimum_thumb_clearance_m,
             self.anchor_lateral_clearance_m,
+            self.target_lateral_spacing_m,
+            self.lateral_spacing_tolerance_m,
             self.ik_tolerance,
             self.maximum_arm_joint_step_rad,
             self.reset_duration_s,
@@ -78,6 +83,8 @@ class RecordedHandGuardedChopConfig:
             or self.combined_pad_contact_lift_m < 0.0
         ):
             raise ValueError("combined_pad_contact_lift_m must be non-negative")
+        if not np.isfinite(self.anchor_longitudinal_offset_m):
+            raise ValueError("anchor_longitudinal_offset_m must be finite")
         if not np.isfinite(self.final_hold_s) or self.final_hold_s < 0.0:
             raise ValueError("final_hold_s must be non-negative and finite")
         if not 0.025 <= self.total_wrist_retreat_m <= 0.040:
@@ -122,6 +129,8 @@ class RecordedHandGuardedChopPlan:
     left_transitions: tuple[RecordedLeftCycle, ...]
     safe_knife_height_m: float
     minimum_planned_distance_m: float
+    minimum_lateral_spacing_m: float
+    maximum_lateral_spacing_m: float
     maximum_hand_penetration_m: float
     minimum_thumb_clearance_m: float
     minimum_pad_step_y_m: float
@@ -413,6 +422,9 @@ def _build_candidate_plan(
                 + config.combined_pad_contact_lift_m
             ),
         )
+        anchor[0, 3] = (
+            float(right.cut_points_xy[0, 0]) + config.anchor_longitudinal_offset_m
+        )
         hand_positions = _shape_vertical_distal_guard(
             robot,
             hand_positions,
@@ -421,11 +433,54 @@ def _build_candidate_plan(
         )
         local_pads = _long_finger_pad_offsets(robot, seed, hand_positions)
         target_pad_offsets = local_pads @ anchor[:3, :3].T
+        robot.sim.data.qpos[robot.sim.right.qpos_ids] = right.right_ready_rad
+        mujoco.mj_forward(robot.sim.model, robot.sim.data)
+        blade_reference_y = float(
+            robot.sim.data.site_xpos[
+                robot.sim.require_site("right_blade_edge_bot"), 1
+            ]
+        )
+        anchor[1, 3] = (
+            blade_reference_y
+            + config.target_lateral_spacing_m
+            - float(np.min(target_pad_offsets[0, :, 1]))
+        )
         carrier = _compensated_wrist_retreat(
             target_pad_offsets[:, :, 1], config.total_wrist_retreat_m
         )
         palm_targets = np.repeat(anchor[None, :, :], len(hand_positions), axis=0)
         palm_targets[:, 1, 3] += carrier
+        tcp_targets = np.asarray(
+            [target @ tcp_from_palm for target in palm_targets]
+        )
+        left = _solve_left_path(robot, tcp_targets, seed, config)
+        robot.sim.data.qpos[robot.sim.right.qpos_ids] = right.right_ready_rad
+        robot.sim.data.qpos[robot.sim.left.qpos_ids] = left[0]
+        robot.sim.data.qpos[robot.sim.hand.qpos_ids] = hand_positions[0]
+        mujoco.mj_forward(robot.sim.model, robot.sim.data)
+        first_pad_y = float(
+            np.min(
+                robot.sim.data.geom_xpos[
+                    np.asarray(
+                        [
+                            robot.sim.require_geom(f"left_finger{finger}_pad")
+                            for finger in range(2, 6)
+                        ]
+                    ),
+                    1,
+                ]
+            )
+        )
+        actual_blade_y = float(
+            robot.sim.data.site_xpos[
+                robot.sim.require_site("right_blade_edge_bot"), 1
+            ]
+        )
+        anchor_correction_y = (
+            actual_blade_y + config.target_lateral_spacing_m - first_pad_y
+        )
+        anchor[1, 3] += anchor_correction_y
+        palm_targets[:, 1, 3] += anchor_correction_y
         tcp_targets = np.asarray(
             [target @ tcp_from_palm for target in palm_targets]
         )
@@ -453,8 +508,14 @@ def _build_candidate_plan(
             config,
         )
 
-        minimum_distance, maximum_penetration, minimum_thumb_clearance = (
-            _measure_plan_safety(robot, right.cuts, tuple(cycles), surface_z)
+        (
+            minimum_distance,
+            maximum_penetration,
+            minimum_thumb_clearance,
+            minimum_lateral_spacing,
+            maximum_lateral_spacing,
+        ) = (
+            _measure_plan_safety(robot, synchronized_cycles, surface_z)
         )
         if minimum_distance < config.minimum_distance_m:
             raise ValueError(
@@ -471,6 +532,22 @@ def _build_candidate_plan(
                 f"thumb clearance {minimum_thumb_clearance:.6f} m is below "
                 f"{config.minimum_thumb_clearance_m:.6f} m"
             )
+        lower_spacing = (
+            config.target_lateral_spacing_m - config.lateral_spacing_tolerance_m
+        )
+        upper_spacing = (
+            config.target_lateral_spacing_m + config.lateral_spacing_tolerance_m
+        )
+        if minimum_lateral_spacing < lower_spacing:
+            raise ValueError(
+                f"knife-pad lateral spacing {minimum_lateral_spacing:.6f} m is "
+                f"below {lower_spacing:.6f} m"
+            )
+        if maximum_lateral_spacing > upper_spacing:
+            raise ValueError(
+                f"knife-pad lateral spacing {maximum_lateral_spacing:.6f} m is "
+                f"above {upper_spacing:.6f} m"
+            )
         keep_surface = True
         return RecordedHandGuardedChopPlan(
             surface_offset_m=offset_m,
@@ -483,6 +560,8 @@ def _build_candidate_plan(
             left_transitions=(),
             safe_knife_height_m=right.safe_knife_height_m,
             minimum_planned_distance_m=minimum_distance,
+            minimum_lateral_spacing_m=minimum_lateral_spacing,
+            maximum_lateral_spacing_m=maximum_lateral_spacing,
             maximum_hand_penetration_m=maximum_penetration,
             minimum_thumb_clearance_m=minimum_thumb_clearance,
             minimum_pad_step_y_m=minimum_pad_step_y,
@@ -541,7 +620,30 @@ def _build_synchronized_cycles(
 
     safe = cuts[0].descent[0].target_pose.copy()
     contact_z = float(cuts[0].descent[-1].target_pose[2, 3])
-    carrier = np.linspace(0.0, total_carrier_m, total_samples)
+    if not np.isclose(
+        left_cycles[-1].palm_targets[-1, 1, 3]
+        - left_cycles[0].palm_targets[0, 1, 3],
+        total_carrier_m,
+        atol=1e-6,
+    ):
+        raise ValueError("left palm carrier does not match configured retreat")
+    long_pads = np.asarray(
+        [robot.sim.require_geom(f"left_finger{finger}_pad") for finger in range(2, 6)]
+    )
+    pad_y = []
+    for cycle in left_cycles:
+        for left_rad, hand_rad in zip(cycle.left, cycle.hand, strict=True):
+            robot.sim.data.qpos[robot.sim.left.qpos_ids] = left_rad
+            robot.sim.data.qpos[robot.sim.hand.qpos_ids] = hand_rad
+            mujoco.mj_forward(robot.sim.model, robot.sim.data)
+            pad_y.append(float(np.min(robot.sim.data.geom_xpos[long_pads, 1])))
+    robot.sim.data.qpos[robot.sim.right.qpos_ids] = cuts[0].descent[0].joints_rad
+    mujoco.mj_forward(robot.sim.model, robot.sim.data)
+    blade_reference = robot.sim.require_site("right_blade_edge_bot")
+    blade_to_tcp_y = float(
+        robot.sim.data.site_xpos[blade_reference, 1]
+        - cuts[0].descent[0].target_pose[1, 3]
+    )
     targets = []
     phases = []
     cursor = 0
@@ -551,7 +653,11 @@ def _build_synchronized_cycles(
         vertical = np.where(down, local * 2.0, (1.0 - local) * 2.0)
         for sample, depth in enumerate(vertical):
             target = safe.copy()
-            target[1, 3] += carrier[cursor + sample]
+            target[1, 3] = (
+                pad_y[cursor + sample]
+                - config.target_lateral_spacing_m
+                - blade_to_tcp_y
+            )
             target[2, 3] += depth * (contact_z - safe[2, 3])
             targets.append(target)
             phases.append("CUT_DOWN" if down[sample] else "KNIFE_RETRACT")
@@ -582,26 +688,38 @@ def _build_synchronized_cycles(
 
 def _measure_plan_safety(
     robot: RightArmRobot,
-    cuts: tuple[_CutTrajectories, ...],
-    cycles: tuple[RecordedLeftCycle, ...],
+    cycles: tuple[SynchronizedGuardCycle, ...],
     surface_z: float,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, float, float]:
     model, data = robot.sim.model, robot.sim.data
     board = robot.sim.require_geom("chopping_board")
     palm = robot.sim.require_body("left_palm_link")
     thumb = robot.sim.require_geom("left_finger1_pad")
+    long_pads = np.asarray(
+        [robot.sim.require_geom(f"left_finger{finger}_pad") for finger in range(2, 6)]
+    )
+    blade_reference = robot.sim.require_site("right_blade_edge_bot")
     thumb_radius = float(model.geom_size[thumb, 0])
     minimum_distance = np.inf
     maximum_penetration = 0.0
     minimum_thumb_clearance = np.inf
+    minimum_lateral_spacing = np.inf
+    maximum_lateral_spacing = -np.inf
 
     def measure(right_rad: np.ndarray, left_rad: np.ndarray, hand_rad: np.ndarray) -> None:
         nonlocal minimum_distance, maximum_penetration, minimum_thumb_clearance
+        nonlocal minimum_lateral_spacing, maximum_lateral_spacing
         data.qpos[robot.sim.right.qpos_ids] = right_rad
         data.qpos[robot.sim.left.qpos_ids] = left_rad
         data.qpos[robot.sim.hand.qpos_ids] = hand_rad
         mujoco.mj_forward(model, data)
         minimum_distance = min(minimum_distance, _blade_hand_distance(robot))
+        lateral_spacing = float(
+            np.min(data.geom_xpos[long_pads, 1])
+            - data.site_xpos[blade_reference, 1]
+        )
+        minimum_lateral_spacing = min(minimum_lateral_spacing, lateral_spacing)
+        maximum_lateral_spacing = max(maximum_lateral_spacing, lateral_spacing)
         minimum_thumb_clearance = min(
             minimum_thumb_clearance,
             float(data.geom_xpos[thumb, 2] - thumb_radius - surface_z),
@@ -621,15 +739,17 @@ def _measure_plan_safety(
                     maximum_penetration, max(0.0, -float(contact.dist))
                 )
 
-    for cut, cycle in zip(cuts, cycles, strict=True):
-        for right_point in cut.descent:
-            measure(right_point.joints_rad, cycle.left[-1], cycle.hand[-1])
-        for left_rad, hand_rad in zip(cycle.left, cycle.hand, strict=True):
-            measure(cut.descent[-1].joints_rad, left_rad, hand_rad)
+    for cycle in cycles:
+        for right_rad, left_rad, hand_rad in zip(
+            cycle.right, cycle.left, cycle.hand, strict=True
+        ):
+            measure(right_rad, left_rad, hand_rad)
     return (
         float(minimum_distance),
         float(maximum_penetration),
         float(minimum_thumb_clearance),
+        float(minimum_lateral_spacing),
+        float(maximum_lateral_spacing),
     )
 
 
