@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import mujoco
 import numpy as np
 import pytest
 
@@ -134,6 +135,36 @@ def test_real_plan_contains_five_safe_recorded_cycles_and_five_right_cuts():
         assert .025 <= total_wrist_retreat <= .040
         assert plan.minimum_pad_step_y_m >= -.0005 - 1e-9
         assert np.all(plan.pad_net_retreats_m > 0.0)
+        planned_left = np.concatenate([value.left for value in plan.left_cycles])
+        planned_hand = np.concatenate([value.hand for value in plan.left_cycles])
+        planned_phases = np.asarray(
+            sum((value.phases for value in plan.left_cycles), ())
+        )
+        active = planned_phases != "PREPARE"
+        distal_angles = []
+        distal_bodies = [
+            robot.sim.require_body(f"left_finger{finger}_link4")
+            for finger in range(2, 6)
+        ]
+        for left_rad, hand_rad in zip(planned_left, planned_hand, strict=True):
+            robot.sim.data.qpos[robot.sim.left.qpos_ids] = left_rad
+            robot.sim.data.qpos[robot.sim.hand.qpos_ids] = hand_rad
+            mujoco.mj_forward(robot.sim.model, robot.sim.data)
+            axes = robot.sim.data.xmat[distal_bodies].reshape(-1, 3, 3)[:, :, 2]
+            distal_angles.append(
+                np.degrees(
+                    np.arccos(np.clip(axes @ np.array((0.0, 0.0, -1.0)), -1.0, 1.0))
+                )
+            )
+        assert np.max(np.asarray(distal_angles)[active]) <= 15.0
+        pip_ranges = np.ptp(planned_hand[:, (6, 10, 14, 18)], axis=0)
+        dip_ranges = np.ptp(planned_hand[:, (7, 11, 15, 19)], axis=0)
+        assert np.all(pip_ranges[:3] >= .20)
+        assert pip_ranges[3] >= .12
+        assert np.all(dip_ranges >= .10)
+        assert np.corrcoef(planned_hand[:, 10], planned_hand[:, 14])[0, 1] > 0.0
+        assert not np.array_equal(planned_hand[:, 6], planned_hand[:, 10])
+        assert np.max(np.abs(np.diff(planned_hand, axis=0))) <= .12
         board_top = work_surface_height_m(robot.sim)
         robot_left_offsets = []
         for cut, left_cycle in zip(

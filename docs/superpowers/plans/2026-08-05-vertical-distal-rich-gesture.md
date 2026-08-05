@@ -29,7 +29,7 @@
 **Interfaces:**
 - Produces: `_shape_vertical_distal_guard(robot, hand_positions, phases, palm_rotation, maximum_angle_deg=15.0) -> np.ndarray`.
 
-- [ ] **Step 1: Write failing orientation/amplitude tests**
+- [x] **Step 1: Write failing orientation/amplitude tests**
 
 On the real plan, set every planned left/hand sample in MuJoCo. For RETREAT and
 HOLD, measure each link4 local `+Z` against world `-Z` and assert maximum angle
@@ -37,11 +37,11 @@ HOLD, measure each link4 local `+Z` against world `-Z` and assert maximum angle
 amplitudes, positive middle/ring correlation without equality, and hand step
 `<= 0.12 rad`.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Expected: current maximum distal angles are approximately 28-58 degrees.
 
-- [ ] **Step 3: Implement bounded DIP search**
+- [x] **Step 3: Implement bounded DIP search**
 
 For each sample and long finger, evaluate 61 uniformly spaced DIP candidates
 inside its actuator range. Convert the candidate link4 axis from current palm
@@ -52,7 +52,7 @@ PREPARE; blend the PREPARE solutions with minimum-jerk weight. Reject any
 active sample whose best angle exceeds 15 degrees or any trajectory exceeding
 joint-step/amplitude constraints.
 
-- [ ] **Step 4: Integrate before wrist compensation**
+- [x] **Step 4: Integrate before wrist compensation**
 
 Call the distal shaper after `shape_pip_led_guard_hand` and before computing
 pad offsets. Clip numerical boundary noise, then let the existing pad-based
@@ -67,7 +67,7 @@ carrier recompute its monotonic 32 mm retreat.
 - Modify: `docs/wuji/development_status.md`
 - Modify: `tests/simulation/test_recorded_hand_guarded_chop.py` only if result evidence needs expansion.
 
-- [ ] **Step 1: Run focused and preserved-task regression**
+- [x] **Step 1: Run focused and preserved-task regression**
 
 ```bash
 .venv-wuji-teleop/bin/pytest -q \
@@ -78,18 +78,18 @@ carrier recompute its monotonic 32 mm retreat.
   tests/simulation/test_guarded_chop_state_machine.py
 ```
 
-- [ ] **Step 2: Verify Headless and Viewer**
+- [x] **Step 2: Verify Headless and Viewer**
 
 Headless must complete five cuts/five continuous segments. Viewer acceptance
 must visibly show downward distal phalanges, a mostly straight MCP row, richer
 index/middle-ring/little motion, and no wrist reset.
 
-- [ ] **Step 3: Document measured evidence**
+- [x] **Step 3: Document measured evidence**
 
 Record maximum distal angle, per-finger PIP/DIP peak-to-peak motion, wrist
 retreat, knife clearance, table penetration, and thumb clearance.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/twin_sim/tasks/recorded_hand_guarded_chop.py \

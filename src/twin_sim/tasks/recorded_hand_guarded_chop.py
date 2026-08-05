@@ -296,6 +296,71 @@ def _compensated_wrist_retreat(
     return np.concatenate(([0.0], np.cumsum(increments)))
 
 
+def _shape_vertical_distal_guard(
+    robot: RightArmRobot,
+    hand_positions: np.ndarray,
+    phases: tuple[str, ...],
+    palm_rotation: np.ndarray,
+    *,
+    maximum_angle_deg: float = 15.0,
+) -> np.ndarray:
+    shaped = np.asarray(hand_positions, dtype=float).copy()
+    active = np.asarray(phases) != "PREPARE"
+    active_indices = np.flatnonzero(active)
+    if active_indices.size == 0:
+        raise ValueError("recorded guard has no RETREAT/HOLD samples")
+    transition_start = max(0, int(active_indices[0]) - 30)
+    solved_indices = range(transition_start, len(shaped))
+    limits = robot.sim.model.actuator_ctrlrange[robot.sim.hand.actuator_ids]
+    left_reference = robot.left_joint_positions
+    saved = mujoco.MjData(robot.sim.model)
+    mujoco.mj_copyData(saved, robot.sim.model, robot.sim.data)
+    try:
+        for index in solved_indices:
+            for finger, dip in zip(range(2, 6), (7, 11, 15, 19), strict=True):
+                body = robot.sim.require_body(f"left_finger{finger}_link4")
+                original = shaped[index, dip]
+                best = (np.inf, original, np.inf)
+                for candidate in np.linspace(limits[dip, 0], limits[dip, 1], 61):
+                    hand = shaped[index].copy()
+                    hand[dip] = candidate
+                    robot.sim.data.qpos[robot.sim.left.qpos_ids] = left_reference
+                    robot.sim.data.qpos[robot.sim.hand.qpos_ids] = hand
+                    mujoco.mj_forward(robot.sim.model, robot.sim.data)
+                    palm = robot.left_palm_pose()
+                    axis_world = robot.sim.data.xmat[body].reshape(3, 3)[:, 2]
+                    axis_local = palm[:3, :3].T @ axis_world
+                    target_axis = palm_rotation @ axis_local
+                    angle = float(
+                        np.degrees(
+                            np.arccos(
+                                np.clip(target_axis @ (0.0, 0.0, -1.0), -1.0, 1.0)
+                            )
+                        )
+                    )
+                    score = angle + 1e-4 * abs(candidate - original)
+                    if score < best[0]:
+                        best = (score, float(candidate), angle)
+                if active[index] and best[2] > maximum_angle_deg:
+                    raise ValueError(
+                        f"finger {finger} distal angle {best[2]:.3f} degrees "
+                        f"exceeds {maximum_angle_deg:.3f} at sample {index}"
+                    )
+                if active[index]:
+                    weight = 1.0
+                else:
+                    progress = (index - transition_start + 1) / (
+                        active_indices[0] - transition_start + 1
+                    )
+                    weight = progress * progress * (3.0 - 2.0 * progress)
+                shaped[index, dip] = original + weight * (best[1] - original)
+    finally:
+        mujoco.mj_copyData(robot.sim.data, robot.sim.model, saved)
+    if np.max(np.abs(np.diff(shaped, axis=0)), initial=0.0) > 0.12:
+        raise ValueError("vertical distal shaping exceeds 0.12 rad joint-step limit")
+    return shaped
+
+
 def _build_candidate_plan(
     robot: RightArmRobot,
     cycle: RecordedGuardCycle,
@@ -334,6 +399,12 @@ def _build_candidate_plan(
                 + surface_z
                 + config.combined_pad_contact_lift_m
             ),
+        )
+        hand_positions = _shape_vertical_distal_guard(
+            robot,
+            hand_positions,
+            cycle.phases,
+            anchor[:3, :3],
         )
         local_pads = _long_finger_pad_offsets(robot, seed, hand_positions)
         target_pad_offsets = local_pads @ anchor[:3, :3].T
