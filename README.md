@@ -12,6 +12,7 @@
 - 左臂与 Wuji Hand 通过真实 MuJoCo 接触完成方块抓取、搬运和放置；
 - 一次“接近—下压—停留—抬刀”切菜任务；
 - 双臂耦合完成 5 刀、4 次猫爪倒手的平面切菜演示；
+- 真实 Wuji MCAP 驱动的五周期同步切菜：刀手深度对齐、指腹贴桌和分级安全搜索；
 - 正常速度状态录制，以及不重新运行控制器的独立二倍速回放；
 - 接触力观测、阈值 warning 和 CSV 日志。
 
@@ -34,6 +35,7 @@ Isaac Lab/强化学习依赖，也没有连接实体灵巧手。
 
 详细说明：
 
+- [跨机器完整迁移与外部 GitHub 依赖](docs/deployment/cross_machine_migration.md)
 - [Wuji 手套录制离线回放](docs/wuji/offline_replay.md)
 - [Wuji 四指落桌后退手势](docs/wuji/table_retreat.md)
 - [Wuji SDK 与 ROS 2 真机接口边界](docs/wuji/hardware_interfaces.md)

@@ -3,6 +3,9 @@
 本文是当前 MuJoCo 仿真版本的首要交接入口。所有命令均从克隆后的仓库根目录运行，不依赖
 原开发机目录。历史设计和排障过程见
 [guarded chopping development log](guarded_chopping_development_log.md)。
+换到另一台电脑时，先按
+[跨机器迁移与外部 GitHub 依赖](../deployment/cross_machine_migration.md)
+恢复标准相邻目录、Python 环境和被 Git 忽略的 MCAP，再执行本文的功能验收。
 
 ## 0. 2026-08-05 当前首要交接：录制手势联动切菜
 
