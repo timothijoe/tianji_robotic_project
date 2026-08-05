@@ -120,6 +120,32 @@ samples. The first-to-last long-finger pad displacement must be toward
 robot-left. There is no arm RESET phase after cuts 1-4; the continuous guard
 motion retains the table, thumb, and knife-clearance safety checks.
 
+### Distal-phalanx pressing posture and visible gesture amplitude
+
+For long fingers 2-5, define the distal-phalanx direction as each
+`left_fingerN_link4` body's local `+Z` axis, which points from the DIP body
+toward its finger pad in the Wuji MJCF. During `RETREAT` and `HOLD`, this axis
+must point toward the table within `15 degrees` of world `-Z`. The corresponding
+pad bottom remains at the work surface within the existing `0.5 mm` maximum
+penetration limit. Thumb behavior remains non-contacting.
+
+Do not satisfy the orientation constraint with a single static pose. Preserve
+the corrected recording's temporal shape and redistribute its visible motion
+into PIP/DIP while retaining the `0.30 rad` MCP limit. Across the complete
+gesture, index, middle, and ring PIP peak-to-peak motion must each be at least
+`0.20 rad`; little-finger PIP peak-to-peak motion must be at least `0.12 rad`;
+every long-finger DIP peak-to-peak motion must be at least `0.10 rad`. Index
+remains independently timed, middle/ring remain positively correlated without
+becoming identical, and little finger follows at reduced amplitude. PREPARE may
+open the fingers; RETREAT progressively establishes the downward distal pose;
+HOLD maintains pressure with small recorded variations rather than freezing.
+
+Solve PIP/DIP targets against MuJoCo link orientation and pad height for every
+sample, then rerun the continuous wrist compensation because altered finger
+geometry changes pad motion and knife clearance. Reject the plan if vertical
+orientation, amplitude, actuator range, joint-step, table, thumb, or knife
+safety constraints cannot all be met.
+
 ## Five-cut synchronization
 
 Each of the five cycles is:
