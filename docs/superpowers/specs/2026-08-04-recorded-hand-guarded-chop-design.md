@@ -77,12 +77,10 @@ Robot-relative left is world `+Y`, as established by the left-arm base at
 `Y=+0.04 m` and the right-arm base at `Y=-0.04 m`. The ordered knife cuts
 continue from robot-right toward robot-left along `+Y`. Replace the recording's
 full 30 mm per-cycle palm translation with one compensated 32 mm carrier over
-all five cuts. The knife uses the same 32 mm carrier so the knife-side nearest
-long-finger pad remains `0.030 m +/- 0.003 m` robot-left of the blade reference
-throughout synchronized cutting. The full geometry clearance remains at least
-`0.020 m`. Retain the palm anchor's `0.080 m` world `-X` offset toward the robot
-because the rotated wrist pose is not stably reachable at the knife's full
-depth.
+all five cuts. The knife follows the knife-side nearest long-finger pad in
+world `+Y`; preflight selects their fixed lateral spacing through the tiered
+clearance search below. In world `X`, move the knife path to the recorded hand
+depth so blade and pad contact positions differ by at most `0.010 m`.
 
 This task cuts the shared chopping-board surface directly. It must not raise
 the knife contact target to the guarded cube top. In this task's private
@@ -121,33 +119,33 @@ samples. The first-to-last long-finger pad displacement must be toward
 robot-left. There is no arm RESET phase after cuts 1-4; the continuous guard
 motion retains the table, thumb, and knife-clearance safety checks.
 
-### Distal-phalanx pressing posture and visible gesture amplitude
+### Distal palmar-pad contact and visible gesture amplitude
 
 For long fingers 2-5, define the distal-phalanx direction as each
 `left_fingerN_link4` body's local `+Z` axis, which points from the DIP body
-toward its finger pad in the Wuji MJCF. During `RETREAT` and `HOLD`, this axis
-must point toward the table within `15 degrees` of world `-Z`. The corresponding
-pad bottom remains at the work surface within the existing `0.5 mm` maximum
-penetration limit. Thumb behavior remains non-contacting.
+toward its finger pad in the Wuji MJCF. During `RETREAT` and `HOLD`, retain a
+`25-50 degree` angle from world `-Z` so the fingertip surface biased toward the
+palmar pad, rather than the distal tip alone, meets the table. The corresponding
+pad remains at the work surface with zero planned penetration. Thumb behavior
+remains non-contacting.
 
 Do not satisfy the orientation constraint with a single static pose. Preserve
 the corrected recording's temporal shape and redistribute its visible motion
-into PIP/DIP while retaining the `0.30 rad` MCP limit. Across the complete
-gesture, index, middle, and ring PIP peak-to-peak motion must each be at least
-`0.20 rad`; little-finger PIP peak-to-peak motion must be at least `0.12 rad`;
-every long-finger DIP peak-to-peak motion must be at least `0.10 rad`. Index
-remains independently timed, middle/ring remain positively correlated without
-becoming identical, and little finger follows at reduced amplitude. PREPARE may
-open the fingers; RETREAT progressively establishes the downward distal pose;
-HOLD maintains pressure with small recorded variations rather than freezing.
+into PIP/DIP while retaining the `0.30 rad` MCP limit. Scale current PIP
+peak-to-peak motion to approximately 80 percent and bound every long-finger DIP
+peak-to-peak motion to `0.25-0.50 rad`. Index remains independently timed,
+middle/ring remain positively correlated without becoming identical, and
+little finger follows at reduced amplitude. PREPARE may open the fingers;
+RETREAT progressively establishes palmar-pad contact; HOLD maintains pressure
+with small recorded variations rather than freezing.
 
 Solve PIP/DIP targets against MuJoCo link orientation and pad height for every
 sample, then rerun the continuous wrist compensation because altered finger
-geometry changes pad motion and knife clearance. Reject the plan if vertical
-orientation, amplitude, actuator range, joint-step, table, thumb, or knife
-safety constraints cannot all be met.
+geometry changes pad motion and knife clearance. Reject the plan if contact
+orientation, amplitude, actuator range, joint-step, table, thumb, or selected
+clearance-tier constraints cannot all be met.
 
-### Parallel knife/guard carrier and fixed lateral spacing
+### Parallel knife/guard carrier and searched lateral spacing
 
 Replace the serial `HAND_MOTION -> CUT_DOWN` execution with one synchronized
 control timeline. Every control sample commands right-arm knife joints,
@@ -163,19 +161,54 @@ changes pad position relative to the palm. Partition the continuous hand
 recording into five segments as before, but time-stretch each segment onto its
 corresponding knife down/up interval.
 
-Define fixed relative spacing in robot coordinates, not as full 3-D Euclidean
-distance: the `+Y` separation between the knife-side nearest long-finger pad
-and the blade reference is `0.030 m +/- 0.003 m` throughout synchronized
-cutting. Vertical knife travel necessarily changes Euclidean distance, but the
-full-geometry knife/hand distance must remain at least `0.020 m` at every
-sample. Preflight must measure both invariants on the complete synchronized
-trajectory.
+Define relative spacing in robot coordinates, not as full 3-D Euclidean
+distance: preflight searches the `+Y` separation between the knife-side nearest
+long-finger pad and blade reference, then holds the selected separation within
+`+/- 0.003 m` throughout synchronized cutting. Vertical knife travel
+necessarily changes Euclidean distance. Preflight first requires `0.020 m`
+full-geometry clearance and may use the explicit `0.010 m` fallback tier only
+when no 20 mm candidate exists.
 
 The former event-order interlock (hand segment completely safe before knife
 descent) is replaced by a per-sample joint safety gate: a synchronized sample
 may execute only when lateral spacing, 3-D clearance, table penetration,
 thumb clearance, joint limits, and finite-state checks all pass. Any violation
 aborts before advancing to the next sample or cut.
+
+### Robot-depth alignment and recording-scale contact posture
+
+The knife and guarding fingertips must operate at the same robot depth. Define
+depth as world `X`; during synchronized cutting, the blade reference and the
+mean long-finger pad contact position differ by at most `0.010 m` in `X`.
+Achieve this by moving the right-arm knife path toward the robot, not by moving
+the left hand away from its reachable recorded placement. Remove the previous
+`-0.180 m` hand-only longitudinal separation.
+
+Do not deform the hand gesture to manufacture knife clearance. Preserve the
+recording-derived finger timing and reduce the current exaggerated shaping:
+PIP peak-to-peak amplitude is approximately 80 percent of the current shaped
+trajectory, while every long-finger DIP remains visibly active with
+peak-to-peak amplitude between `0.25 rad` and `0.50 rad`. Use an offset plus
+bounded temporal variation, rather than forcing the distal phalanx almost
+vertical. The contact target is the fingertip surface biased toward the palmar
+pad, with no hand/table penetration; the thumb remains non-contacting.
+
+Clearance search follows a strict priority order:
+
+1. preserve the recording-scale gesture and palmar-pad contact posture;
+2. preserve blade/pad world-`X` alignment within `0.010 m`;
+3. search for the smallest fixed robot-lateral spacing that provides at least
+   `0.020 m` complete-geometry clearance;
+4. if and only if no candidate satisfies `0.020 m`, repeat the search with a
+   `0.010 m` clearance floor;
+5. reject every candidate with knife/hand intersection or table penetration,
+   even when using the fallback floor.
+
+The selected clearance tier, fixed lateral spacing, maximum depth mismatch,
+PIP/DIP amplitudes, and pad-contact measurements are reported by preflight and
+covered by regression tests. Clearance fallback may change knife/hand spacing;
+it must never trigger additional finger shaping, wrist rotation, or depth
+misalignment.
 
 ## Five-cut synchronization
 
@@ -202,8 +235,8 @@ right IK, hand/table contact, or knife/hand clearance).
 
 ## Safety invariants
 
-- Knife-to-Wuji-hand distance remains at least `0.020 m` whenever the knife is
-  below its safe height.
+- Knife-to-Wuji-hand distance remains at least the selected `0.020 m` preferred
+  or `0.010 m` fallback tier whenever the knife is below its safe height.
 - Whole-hand work-surface penetration remains at most `0.0005 m`.
 - Thumb clearance remains at least `0.010 m`.
 - Every synchronized control sample satisfies the lateral-spacing and complete
