@@ -39,6 +39,8 @@ def test_recorded_hand_guarded_chop_cli_dispatches_independent_task(
             completed_hand_cycles=5,
             surface_offset_m=.04,
             minimum_distance_m=.044,
+            minimum_lateral_spacing_m=.029,
+            maximum_lateral_spacing_m=.031,
             maximum_hand_penetration_m=.0004,
             minimum_thumb_clearance_m=.031,
             reason="",
@@ -63,6 +65,7 @@ def test_recorded_hand_guarded_chop_cli_dispatches_independent_task(
     output = capsys.readouterr().out
     assert "hand_cycles=5" in output
     assert "surface_offset_m=0.040" in output
+    assert "lateral_spacing_m=0.029..0.031" in output
 
 
 def test_guarded_chop_cli_accepts_object_scene():

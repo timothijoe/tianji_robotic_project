@@ -166,6 +166,8 @@ def main(argv: list[str] | None = None) -> int:
             f"hand_cycles={result.completed_hand_cycles} "
             f"surface_offset_m={result.surface_offset_m:.3f} "
             f"min_distance_m={result.minimum_distance_m:.3f} "
+            f"lateral_spacing_m={result.minimum_lateral_spacing_m:.3f}.."
+            f"{result.maximum_lateral_spacing_m:.3f} "
             f"max_penetration_m={result.maximum_hand_penetration_m:.6f} "
             f"thumb_clearance_m={result.minimum_thumb_clearance_m:.3f} "
             f"reason={result.reason or '-'}"

@@ -18,7 +18,7 @@ def _real_mcap() -> Path:
     return path
 
 
-def test_default_run_completes_five_cuts_after_five_safe_recorded_cycles():
+def test_default_run_completes_five_synchronized_cut_and_guard_cycles():
     result = run_recorded_hand_guarded_chop(
         RecordedHandGuardedChopConfig(surface_offsets_m=(.04,)),
         hand_mcap=_real_mcap(),
@@ -28,9 +28,11 @@ def test_default_run_completes_five_cuts_after_five_safe_recorded_cycles():
     assert result.completed_cuts == 5
     assert result.completed_hand_cycles == 5
     for cycle in range(1, 6):
-        assert result.events.index((cycle, "HAND_SAFE")) < result.events.index(
-            (cycle, "CUT_DOWN")
-        )
+        assert (cycle, "SYNC_CYCLE_START") in result.events
+        assert (cycle, "SYNC_CYCLE_COMPLETE") in result.events
+        assert (cycle, "HAND_SAFE") not in result.events
     assert result.minimum_distance_m >= .020
+    assert result.minimum_lateral_spacing_m >= .027
+    assert result.maximum_lateral_spacing_m <= .033
     assert result.maximum_hand_penetration_m <= .0005
     assert result.minimum_thumb_clearance_m >= .010

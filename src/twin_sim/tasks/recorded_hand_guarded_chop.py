@@ -168,6 +168,8 @@ class RecordedHandGuardedChopResult:
     completed_hand_cycles: int
     surface_offset_m: float
     minimum_distance_m: float
+    minimum_lateral_spacing_m: float
+    maximum_lateral_spacing_m: float
     maximum_hand_penetration_m: float
     minimum_thumb_clearance_m: float
     events: tuple[tuple[int, str], ...]
@@ -803,49 +805,27 @@ def run_recorded_hand_guarded_chop(
             if trace is not None:
                 trace.update(robot, current_phase.value, cycle_index)
 
-        for index, (cut, left_cycle) in enumerate(
-            zip(plan.right_cuts, plan.left_cycles, strict=True), start=1
+        for index, synchronized in enumerate(
+            plan.synchronized_cycles, start=1
         ):
-            right_safe = cut.descent[0].joints_rad
-            for left_rad, hand_rad in zip(
-                left_cycle.left, left_cycle.hand, strict=True
+            events.append((index, "SYNC_CYCLE_START"))
+            for right_rad, left_rad, hand_rad, knife_phase in zip(
+                synchronized.right,
+                synchronized.left,
+                synchronized.hand,
+                synchronized.knife_phases,
+                strict=True,
             ):
                 execute(
-                    RecordedHandGuardedChopPhase.HAND_MOTION,
-                    right_safe,
+                    RecordedHandGuardedChopPhase[knife_phase],
+                    right_rad,
                     left_rad,
                     hand_rad,
                     index,
                 )
             completed_cycles += 1
-            events.append((index, "HAND_SAFE"))
-            phase = RecordedHandGuardedChopPhase.HAND_SAFE
-            events.append((index, "CUT_DOWN"))
-            for point in cut.descent[1:]:
-                execute(
-                    RecordedHandGuardedChopPhase.CUT_DOWN,
-                    point.joints_rad,
-                    left_cycle.left[-1],
-                    left_cycle.hand[-1],
-                    index,
-                )
             completed_cuts += 1
-            for point in cut.retract[1:]:
-                execute(
-                    RecordedHandGuardedChopPhase.KNIFE_RETRACT,
-                    point.joints_rad,
-                    left_cycle.left[-1],
-                    left_cycle.hand[-1],
-                    index,
-                )
-            for point in cut.shift[1:]:
-                execute(
-                    RecordedHandGuardedChopPhase.KNIFE_SHIFT,
-                    point.joints_rad,
-                    left_cycle.left[-1],
-                    left_cycle.hand[-1],
-                    index,
-                )
+            events.append((index, "SYNC_CYCLE_COMPLETE"))
         phase = RecordedHandGuardedChopPhase.COMPLETE
         for _ in range(int(round(config.final_hold_s / config.control_dt_s))):
             robot.step(config.control_dt_s)
@@ -857,6 +837,8 @@ def run_recorded_hand_guarded_chop(
             completed_hand_cycles=completed_cycles,
             surface_offset_m=plan.surface_offset_m,
             minimum_distance_m=plan.minimum_planned_distance_m,
+            minimum_lateral_spacing_m=plan.minimum_lateral_spacing_m,
+            maximum_lateral_spacing_m=plan.maximum_lateral_spacing_m,
             maximum_hand_penetration_m=plan.maximum_hand_penetration_m,
             minimum_thumb_clearance_m=plan.minimum_thumb_clearance_m,
             events=tuple(events),
@@ -872,6 +854,12 @@ def run_recorded_hand_guarded_chop(
             completed_hand_cycles=completed_cycles,
             surface_offset_m=float("nan") if plan is None else plan.surface_offset_m,
             minimum_distance_m=float("nan") if plan is None else plan.minimum_planned_distance_m,
+            minimum_lateral_spacing_m=(
+                float("nan") if plan is None else plan.minimum_lateral_spacing_m
+            ),
+            maximum_lateral_spacing_m=(
+                float("nan") if plan is None else plan.maximum_lateral_spacing_m
+            ),
             maximum_hand_penetration_m=float("nan") if plan is None else plan.maximum_hand_penetration_m,
             minimum_thumb_clearance_m=float("nan") if plan is None else plan.minimum_thumb_clearance_m,
             events=tuple(events),

@@ -152,15 +152,16 @@ safety constraints cannot all be met.
 Replace the serial `HAND_MOTION -> CUT_DOWN` execution with one synchronized
 control timeline. Every control sample commands right-arm knife joints,
 left-arm wrist joints, and Wuji hand joints together. Knife descent/retract is
-the vertical component; knife and wrist share the same robot-left (`+Y`)
-horizontal carrier. Neither side waits for the other to complete a phase.
+the vertical component; the knife's robot-left (`+Y`) target follows the
+knife-side nearest long-finger pad so their lateral offset remains fixed.
+Neither side waits for the other to complete a phase.
 
-Reduce five-cut spacing from 20 mm to approximately 8 mm so the knife's total
-horizontal travel matches the existing 32 mm wrist retreat. Partition the
-continuous hand recording into five segments as before, but time-stretch each
-segment onto its corresponding knife down/up interval. The knife may descend
-diagonally by the shared 8 mm carrier amount while the hand performs the
-matching guard motion.
+Replace the old independent 20 mm cut spacing with pad-following compact cut
+locations. The wrist retains its existing 32 mm total retreat, while knife
+travel follows the nearest pad's smaller net retreat because finger flexion
+changes pad position relative to the palm. Partition the continuous hand
+recording into five segments as before, but time-stretch each segment onto its
+corresponding knife down/up interval.
 
 Define fixed relative spacing in robot coordinates, not as full 3-D Euclidean
 distance: the `+Y` separation between the knife-side nearest long-finger pad
@@ -180,9 +181,9 @@ aborts before advancing to the next sample or cut.
 
 After `GUARD_READY` places the palm-down hand at initial table contact, each of
 the five cycles runs one synchronized down/up interval. The hand joints follow
-the corresponding contiguous MCAP segment while the left wrist and knife share
-the same approximately 8 mm `+Y` carrier increment. The right arm superimposes
-its vertical cut/retract waveform on that carrier. Both arms therefore advance
+the corresponding contiguous MCAP segment while the knife follows the nearest
+long-finger pad in `+Y`. The right arm superimposes its vertical cut/retract
+waveform on that pad-following target. Both arms therefore advance
 continuously from robot-right to robot-left without an inter-cut RESET, shift,
 or wait state. The final sample holds both arms at their final safe poses.
 
