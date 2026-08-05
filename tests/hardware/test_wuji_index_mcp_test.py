@@ -1,3 +1,6 @@
+import importlib.util
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -6,6 +9,15 @@ from tianji_robotics.hardware.wuji_hand.index_mcp_test import (
     build_index_mcp_test_plan,
     run_index_mcp_test,
 )
+
+
+_CLI_SPEC = importlib.util.spec_from_file_location(
+    "test_wuji_right_index_mcp_cli",
+    Path(__file__).parents[2] / "scripts" / "test_wuji_right_index_mcp.py",
+)
+cli = importlib.util.module_from_spec(_CLI_SPEC)
+assert _CLI_SPEC.loader is not None
+_CLI_SPEC.loader.exec_module(cli)
 
 
 class FakeHand:
@@ -65,6 +77,42 @@ class FakeHand:
         if self._target_writes == self.fail_on_target:
             raise RuntimeError("write failed")
         self.calls.append(("target", target))
+
+
+def test_cli_defaults_to_dry_run(monkeypatch, capsys):
+    captured = {}
+    monkeypatch.setattr(cli, "_create_hand", lambda serial: FakeHand())
+    monkeypatch.setattr(
+        cli,
+        "run_index_mcp_test",
+        lambda hand, plan, **kw: captured.update(kw) or False,
+    )
+
+    assert cli.main(["--serial-number", "365939643134"]) == 0
+
+    assert captured == {"execute": False, "dwell_s": 0.5}
+    assert "dry-run" in capsys.readouterr().out
+
+
+def test_cli_prints_plan_before_execution(monkeypatch, capsys):
+    hand = FakeHand(position=0.4)
+    monkeypatch.setattr(cli, "_create_hand", lambda serial: hand)
+    monkeypatch.setattr(cli, "run_index_mcp_test", lambda *args, **kwargs: True)
+
+    assert cli.main(["--serial-number", "365939643134", "--execute"]) == 0
+
+    output = capsys.readouterr().out
+    assert "current angle: 0.400000 rad" in output
+    assert "targets: 0.350000, 0.450000, 0.400000 rad" in output
+    assert "max temperature: 25.0°C" in output
+
+
+def test_cli_reports_preflight_or_sdk_errors(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_create_hand", lambda serial: (_ for _ in ()).throw(RuntimeError("offline")))
+
+    assert cli.main(["--serial-number", "365939643134"]) == 1
+
+    assert capsys.readouterr().out.strip() == "preflight failed: offline"
 
 
 def test_builds_one_small_index_mcp_return_motion():
