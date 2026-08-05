@@ -126,8 +126,11 @@ For long fingers 2-5, define the distal-phalanx direction as each
 toward its finger pad in the Wuji MJCF. During `RETREAT` and `HOLD`, retain a
 `25-50 degree` angle from world `-Z` so the fingertip surface biased toward the
 palmar pad, rather than the distal tip alone, meets the table. The corresponding
-pad remains at the work surface with zero planned penetration. Thumb behavior
-remains non-contacting.
+pad remains at the work surface with zero planned penetration. During active
+motion, every long-finger pad must enter a `0-0.002 m` clearance band for at
+least one sample. Thumb behavior remains non-contacting with at least
+`0.002 m` clearance; this replaces the former 10 mm visual margin so genuine
+long-finger contact is possible.
 
 Do not satisfy the orientation constraint with a single static pose. Preserve
 the corrected recording's temporal shape and redistribute its visible motion
@@ -238,7 +241,7 @@ right IK, hand/table contact, or knife/hand clearance).
 - Knife-to-Wuji-hand distance remains at least the selected `0.020 m` preferred
   or `0.010 m` fallback tier whenever the knife is below its safe height.
 - Whole-hand work-surface penetration remains at most `0.0005 m`.
-- Thumb clearance remains at least `0.010 m`.
+- Thumb clearance remains at least `0.002 m`.
 - Every synchronized control sample satisfies the lateral-spacing and complete
   geometry-clearance invariants before either arm advances.
 - IK, joint range, velocity, collision, and timing checks cover the complete
