@@ -46,13 +46,22 @@ class FakeHand:
 
 
 def test_builds_one_small_index_mcp_return_motion():
-    plan = build_index_mcp_test_plan(FakeHand(position=0.4))
+    current = 0.4
+    plan = build_index_mcp_test_plan(FakeHand(position=current))
 
     assert plan == IndexMcpTestPlan(
-        current_rad=0.4,
-        targets_rad=(0.35, 0.45, 0.4),
+        current_rad=current,
+        targets_rad=(current - 0.05, current + 0.05, current),
         max_temperature_c=25.0,
     )
+
+
+def test_preserves_exact_non_round_number_targets():
+    current = 0.123456789012345
+
+    plan = build_index_mcp_test_plan(FakeHand(position=current))
+
+    assert plan.targets_rad == (current - 0.05, current + 0.05, current)
 
 
 @pytest.mark.parametrize(

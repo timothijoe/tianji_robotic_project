@@ -50,8 +50,8 @@ def build_index_mcp_test_plan(hand) -> IndexMcpTestPlan:
     low = float(lower[INDEX_FINGER, MCP_JOINT])
     high = float(upper[INDEX_FINGER, MCP_JOINT])
     targets = (
-        round(current - AMPLITUDE_RAD, 12),
-        round(current + AMPLITUDE_RAD, 12),
+        current - AMPLITUDE_RAD,
+        current + AMPLITUDE_RAD,
         current,
     )
     if low >= high or any(
