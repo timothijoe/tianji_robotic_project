@@ -41,6 +41,10 @@ def test_recorded_hand_guarded_chop_cli_dispatches_independent_task(
             minimum_distance_m=.044,
             minimum_lateral_spacing_m=.029,
             maximum_lateral_spacing_m=.031,
+            selected_clearance_tier_m=.020,
+            selected_lateral_spacing_m=.030,
+            maximum_depth_mismatch_m=.006,
+            minimum_long_pad_clearances_m=(.000, .003, .004, .002),
             maximum_hand_penetration_m=.0004,
             minimum_thumb_clearance_m=.031,
             reason="",
@@ -66,6 +70,9 @@ def test_recorded_hand_guarded_chop_cli_dispatches_independent_task(
     assert "hand_cycles=5" in output
     assert "surface_offset_m=0.040" in output
     assert "lateral_spacing_m=0.029..0.031" in output
+    assert "clearance_tier_m=0.020" in output
+    assert "depth_mismatch_m=0.006" in output
+    assert "pad_clearance_m=0.000..0.004" in output
 
 
 def test_guarded_chop_cli_accepts_object_scene():

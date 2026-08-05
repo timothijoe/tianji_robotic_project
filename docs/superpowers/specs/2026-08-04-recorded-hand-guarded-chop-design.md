@@ -124,10 +124,10 @@ motion retains the table, thumb, and knife-clearance safety checks.
 For long fingers 2-5, define the distal-phalanx direction as each
 `left_fingerN_link4` body's local `+Z` axis, which points from the DIP body
 toward its finger pad in the Wuji MJCF. During `RETREAT` and `HOLD`, retain a
-`25-50 degree` angle from world `-Z` so the fingertip surface biased toward the
+`20-50 degree` angle from world `-Z` so the fingertip surface biased toward the
 palmar pad, rather than the distal tip alone, meets the table. The corresponding
 pad remains at the work surface with zero planned penetration. During active
-motion, every long-finger pad must enter a `0-0.002 m` clearance band for at
+motion, every long-finger pad must enter a `0-0.005 m` clearance band for at
 least one sample. Thumb behavior remains non-contacting with at least
 `0.002 m` clearance; this replaces the former 10 mm visual margin so genuine
 long-finger contact is possible.

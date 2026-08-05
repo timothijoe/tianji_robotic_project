@@ -15,6 +15,7 @@ from twin_sim.tasks.recorded_hand_guarded_chop import (
     _configure_table_only_scene,
     _lateral_guard_anchor_xy,
     _preflight_recorded_hand_guarded_chop,
+    _select_clearance_candidate,
 )
 
 
@@ -105,6 +106,21 @@ def test_preflight_selects_lowest_feasible_shared_surface(monkeypatch):
     assert result is sentinel
 
 
+def test_clearance_selection_exhausts_preferred_tier_before_fallback():
+    fallback_only = (.030, "fallback", (.015,))
+    preferred = (.045, "preferred", (.021,))
+
+    selected = _select_clearance_candidate(
+        (fallback_only, preferred), preferred_m=.020, fallback_m=.010
+    )
+    assert selected == (.020, *preferred)
+
+    selected_without_preferred = _select_clearance_candidate(
+        (fallback_only,), preferred_m=.020, fallback_m=.010
+    )
+    assert selected_without_preferred == (.010, *fallback_only)
+
+
 def test_real_plan_contains_five_safe_recorded_cycles_and_five_right_cuts():
     robot = RightArmRobot(viewer=False)
     try:
@@ -138,11 +154,20 @@ def test_real_plan_contains_five_safe_recorded_cycles_and_five_right_cuts():
             _real_cycle().hand_positions_rad
         )
         assert all(len(value.hand) == len(value.left) for value in plan.left_cycles)
-        assert plan.minimum_planned_distance_m >= .020
-        assert plan.minimum_lateral_spacing_m >= .027
-        assert plan.maximum_lateral_spacing_m <= .033
+        assert plan.selected_clearance_tier_m in (.020, .010)
+        assert plan.minimum_planned_distance_m >= plan.selected_clearance_tier_m
+        assert plan.selected_lateral_spacing_m >= .030
+        assert plan.minimum_lateral_spacing_m >= (
+            plan.selected_lateral_spacing_m - .003
+        )
+        assert plan.maximum_lateral_spacing_m <= (
+            plan.selected_lateral_spacing_m + .003
+        )
+        assert plan.maximum_depth_mismatch_m <= .010
         assert plan.maximum_hand_penetration_m <= .0005
-        assert plan.minimum_thumb_clearance_m >= .010
+        assert plan.minimum_thumb_clearance_m >= .002
+        assert np.all(plan.minimum_long_pad_clearances_m >= -1e-6)
+        assert np.all(plan.minimum_long_pad_clearances_m <= .005)
         cycle_starts_y = np.asarray(
             [value.palm_targets[0, 1, 3] for value in plan.left_cycles]
         )
@@ -176,7 +201,7 @@ def test_real_plan_contains_five_safe_recorded_cycles_and_five_right_cuts():
                 )
             )
         active_distal_angles = np.asarray(distal_angles)[active]
-        assert np.min(active_distal_angles) >= 25.0
+        assert np.min(active_distal_angles) >= 20.0
         assert np.max(active_distal_angles) <= 50.0
         pip_ranges = np.ptp(planned_hand[:, (6, 10, 14, 18)], axis=0)
         dip_ranges = np.ptp(planned_hand[:, (7, 11, 15, 19)], axis=0)

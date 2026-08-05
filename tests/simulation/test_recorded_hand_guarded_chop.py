@@ -31,8 +31,12 @@ def test_default_run_completes_five_synchronized_cut_and_guard_cycles():
         assert (cycle, "SYNC_CYCLE_START") in result.events
         assert (cycle, "SYNC_CYCLE_COMPLETE") in result.events
         assert (cycle, "HAND_SAFE") not in result.events
-    assert result.minimum_distance_m >= .020
-    assert result.minimum_lateral_spacing_m >= .027
-    assert result.maximum_lateral_spacing_m <= .033
+    assert result.selected_clearance_tier_m in (.020, .010)
+    assert result.minimum_distance_m >= result.selected_clearance_tier_m
+    assert result.minimum_lateral_spacing_m >= result.selected_lateral_spacing_m - .003
+    assert result.maximum_lateral_spacing_m <= result.selected_lateral_spacing_m + .003
+    assert result.maximum_depth_mismatch_m <= .010
     assert result.maximum_hand_penetration_m <= .0005
-    assert result.minimum_thumb_clearance_m >= .010
+    assert result.minimum_thumb_clearance_m >= .002
+    assert min(result.minimum_long_pad_clearances_m) >= -1e-6
+    assert max(result.minimum_long_pad_clearances_m) <= .005

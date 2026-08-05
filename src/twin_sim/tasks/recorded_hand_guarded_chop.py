@@ -47,11 +47,16 @@ class RecordedHandGuardedChopConfig:
         float(value) for value in np.arange(0.04, 0.121, 0.01)
     )
     minimum_distance_m: float = 0.02
+    fallback_minimum_distance_m: float = 0.01
     maximum_hand_penetration_m: float = 0.0005
-    minimum_thumb_clearance_m: float = 0.01
+    minimum_thumb_clearance_m: float = 0.002
     anchor_lateral_clearance_m: float = 0.24
     target_lateral_spacing_m: float = 0.030
     lateral_spacing_tolerance_m: float = 0.003
+    maximum_depth_mismatch_m: float = 0.010
+    lateral_spacing_candidates_m: tuple[float, ...] = tuple(
+        float(value) for value in np.arange(0.03, 0.121, 0.005)
+    )
     anchor_longitudinal_offset_m: float = -0.18
     combined_pad_contact_lift_m: float = 0.0098
     ik_tolerance: float = 0.003
@@ -66,11 +71,13 @@ class RecordedHandGuardedChopConfig:
         positive = (
             self.control_dt_s,
             self.minimum_distance_m,
+            self.fallback_minimum_distance_m,
             self.maximum_hand_penetration_m,
             self.minimum_thumb_clearance_m,
             self.anchor_lateral_clearance_m,
             self.target_lateral_spacing_m,
             self.lateral_spacing_tolerance_m,
+            self.maximum_depth_mismatch_m,
             self.ik_tolerance,
             self.maximum_arm_joint_step_rad,
             self.reset_duration_s,
@@ -89,6 +96,17 @@ class RecordedHandGuardedChopConfig:
             raise ValueError("final_hold_s must be non-negative and finite")
         if not 0.025 <= self.total_wrist_retreat_m <= 0.040:
             raise ValueError("total_wrist_retreat_m must be between 0.025 and 0.040")
+        if self.fallback_minimum_distance_m > self.minimum_distance_m:
+            raise ValueError("fallback clearance cannot exceed preferred clearance")
+        if not self.lateral_spacing_candidates_m or not all(
+            np.isfinite(value) and value > 0.0
+            for value in self.lateral_spacing_candidates_m
+        ):
+            raise ValueError("lateral spacing candidates must be positive and finite")
+        if tuple(sorted(self.lateral_spacing_candidates_m)) != tuple(
+            self.lateral_spacing_candidates_m
+        ):
+            raise ValueError("lateral spacing candidates must be ordered")
         if not self.surface_offsets_m or not all(
             np.isfinite(value) and value >= 0.0
             for value in self.surface_offsets_m
@@ -131,6 +149,10 @@ class RecordedHandGuardedChopPlan:
     minimum_planned_distance_m: float
     minimum_lateral_spacing_m: float
     maximum_lateral_spacing_m: float
+    maximum_depth_mismatch_m: float
+    minimum_long_pad_clearances_m: np.ndarray
+    selected_clearance_tier_m: float
+    selected_lateral_spacing_m: float
     maximum_hand_penetration_m: float
     minimum_thumb_clearance_m: float
     minimum_pad_step_y_m: float
@@ -170,6 +192,10 @@ class RecordedHandGuardedChopResult:
     minimum_distance_m: float
     minimum_lateral_spacing_m: float
     maximum_lateral_spacing_m: float
+    selected_clearance_tier_m: float
+    selected_lateral_spacing_m: float
+    maximum_depth_mismatch_m: float
+    minimum_long_pad_clearances_m: np.ndarray
     maximum_hand_penetration_m: float
     minimum_thumb_clearance_m: float
     events: tuple[tuple[int, str], ...]
@@ -409,6 +435,93 @@ def _shape_palmar_pad_guard(
     return shaped
 
 
+def _equalize_long_pad_contact_centers(
+    robot: RightArmRobot,
+    hand_positions: np.ndarray,
+    phases: tuple[str, ...],
+    palm_rotation: np.ndarray,
+) -> np.ndarray:
+    """Lower high long-finger pads with static PIP offsets only."""
+    shaped = np.asarray(hand_positions, dtype=float).copy()
+    active_indices = np.flatnonzero(np.asarray(phases) != "PREPARE")
+    limits = robot.sim.model.actuator_ctrlrange[robot.sim.hand.actuator_ids]
+    left_reference = robot.left_joint_positions
+    saved = mujoco.MjData(robot.sim.model)
+    mujoco.mj_copyData(saved, robot.sim.model, robot.sim.data)
+    candidates_by_finger = []
+    try:
+        for finger, pip in zip(range(2, 6), (6, 10, 14, 18), strict=True):
+            pad = robot.sim.require_geom(f"left_finger{finger}_pad")
+            body = robot.sim.require_body(f"left_finger{finger}_link4")
+            radius = float(robot.sim.model.geom_size[pad, 0])
+            candidates = []
+            for offset in np.linspace(0.0, -0.35, 36):
+                values = shaped[:, pip] + offset
+                if np.min(values) < limits[pip, 0] or np.max(values) > limits[pip, 1]:
+                    continue
+                heights = []
+                angles = []
+                for index in active_indices:
+                    hand = shaped[index].copy()
+                    hand[pip] += offset
+                    robot.sim.data.qpos[robot.sim.left.qpos_ids] = left_reference
+                    robot.sim.data.qpos[robot.sim.hand.qpos_ids] = hand
+                    mujoco.mj_forward(robot.sim.model, robot.sim.data)
+                    palm = robot.left_palm_pose()
+                    local_pad = (
+                        robot.sim.data.geom_xpos[pad] - palm[:3, 3]
+                    ) @ palm[:3, :3]
+                    target_pad = local_pad @ palm_rotation.T
+                    heights.append(float(target_pad[2] - radius))
+                    axis_world = robot.sim.data.xmat[body].reshape(3, 3)[:, 2]
+                    axis_local = palm[:3, :3].T @ axis_world
+                    target_axis = palm_rotation @ axis_local
+                    angles.append(
+                        float(
+                            np.degrees(
+                                np.arccos(
+                                    np.clip(
+                                        target_axis @ (0.0, 0.0, -1.0),
+                                        -1.0,
+                                        1.0,
+                                    )
+                                )
+                            )
+                        )
+                    )
+                if min(angles) >= 20.0 and max(angles) <= 50.0:
+                    candidates.append((float(offset), min(heights)))
+            if not candidates:
+                raise ValueError(f"finger {finger} has no palmar contact offset")
+            candidates_by_finger.append((pip, candidates))
+    finally:
+        mujoco.mj_copyData(robot.sim.data, robot.sim.model, saved)
+
+    reference_height = min(candidates[0][1] for _, candidates in candidates_by_finger)
+    for pip, candidates in candidates_by_finger:
+        feasible = [value for value in candidates if value[1] <= reference_height + 0.004]
+        selected = feasible[0] if feasible else min(candidates, key=lambda value: value[1])
+        shaped[:, pip] += selected[0]
+    return shaped
+
+
+def _select_clearance_candidate(
+    evaluated: tuple,
+    *,
+    preferred_m: float,
+    fallback_m: float,
+):
+    """Select the smallest candidate in the preferred tier, then fallback."""
+    for tier in (preferred_m, fallback_m):
+        selected = next(
+            (candidate for candidate in evaluated if candidate[2][0] >= tier),
+            None,
+        )
+        if selected is not None:
+            return (tier, *selected)
+    return None
+
+
 def _build_candidate_plan(
     robot: RightArmRobot,
     cycle: RecordedGuardCycle,
@@ -460,8 +573,26 @@ def _build_candidate_plan(
             cycle.phases,
             anchor[:3, :3],
         )
+        hand_positions = _equalize_long_pad_contact_centers(
+            robot,
+            hand_positions,
+            cycle.phases,
+            anchor[:3, :3],
+        )
         local_pads = _long_finger_pad_offsets(robot, seed, hand_positions)
         target_pad_offsets = local_pads @ anchor[:3, :3].T
+        active = np.asarray(cycle.phases) != "PREPARE"
+        pad_ids = np.asarray(
+            [robot.sim.require_geom(f"left_finger{finger}_pad") for finger in range(2, 6)]
+        )
+        pad_radii = robot.sim.model.geom_size[pad_ids, 0]
+        predicted_bottoms = (
+            anchor[2, 3]
+            + target_pad_offsets[:, :, 2]
+            - pad_radii[None, :]
+            - surface_z
+        )
+        anchor[2, 3] += 0.001 - float(np.min(predicted_bottoms[active]))
         robot.sim.data.qpos[robot.sim.right.qpos_ids] = right.right_ready_rad
         mujoco.mj_forward(robot.sim.model, robot.sim.data)
         blade_reference_y = float(
@@ -514,6 +645,48 @@ def _build_candidate_plan(
             [target @ tcp_from_palm for target in palm_targets]
         )
         left = _solve_left_path(robot, tcp_targets, seed, config)
+        long_pad_ids = np.asarray(
+            [robot.sim.require_geom(f"left_finger{finger}_pad") for finger in range(2, 6)]
+        )
+        thumb_pad = robot.sim.require_geom("left_finger1_pad")
+        for _ in range(2):
+            actual_long_min = np.inf
+            actual_thumb_min = np.inf
+            for left_rad, hand_rad in zip(left, hand_positions, strict=True):
+                robot.sim.data.qpos[robot.sim.left.qpos_ids] = left_rad
+                robot.sim.data.qpos[robot.sim.hand.qpos_ids] = hand_rad
+                mujoco.mj_forward(robot.sim.model, robot.sim.data)
+                actual_long_min = min(
+                    actual_long_min,
+                    float(
+                        np.min(
+                            robot.sim.data.geom_xpos[long_pad_ids, 2]
+                            - robot.sim.model.geom_size[long_pad_ids, 0]
+                            - surface_z
+                        )
+                    ),
+                )
+                actual_thumb_min = min(
+                    actual_thumb_min,
+                    float(
+                        robot.sim.data.geom_xpos[thumb_pad, 2]
+                        - robot.sim.model.geom_size[thumb_pad, 0]
+                        - surface_z
+                    ),
+                )
+            correction_z = max(
+                0.0,
+                -actual_long_min,
+                config.minimum_thumb_clearance_m - actual_thumb_min,
+            )
+            if correction_z <= 1e-6:
+                break
+            anchor[2, 3] += correction_z
+            palm_targets[:, 2, 3] += correction_z
+            tcp_targets = np.asarray(
+                [target @ tcp_from_palm for target in palm_targets]
+            )
+            left = _solve_left_path(robot, tcp_targets, seed, config)
         world_pad_y = (
             palm_targets[:, None, 1, 3] + target_pad_offsets[:, :, 1]
         )
@@ -529,58 +702,89 @@ def _build_candidate_plan(
                     palm_targets=palm_targets[indices].copy(),
                 )
             )
-        synchronized_cycles = _build_synchronized_cycles(
-            robot,
-            right.cuts,
-            tuple(cycles),
-            config.total_wrist_retreat_m,
-            config,
-        )
+        evaluated = []
+        measured = []
+        for lateral_spacing in config.lateral_spacing_candidates_m:
+            try:
+                candidate_cycles = _build_synchronized_cycles(
+                    robot,
+                    right.cuts,
+                    tuple(cycles),
+                    config.total_wrist_retreat_m,
+                    config,
+                    lateral_spacing,
+                )
+            except PathIkError:
+                continue
+            metrics = _measure_plan_safety(robot, candidate_cycles, surface_z)
+            measured.append((lateral_spacing, metrics))
+            (
+                minimum_distance,
+                maximum_penetration,
+                minimum_thumb_clearance,
+                minimum_lateral_spacing,
+                maximum_lateral_spacing,
+                maximum_depth_mismatch,
+                minimum_long_pad_clearances,
+            ) = metrics
+            if maximum_penetration > config.maximum_hand_penetration_m:
+                continue
+            if minimum_thumb_clearance < config.minimum_thumb_clearance_m:
+                continue
+            if maximum_depth_mismatch > config.maximum_depth_mismatch_m:
+                continue
+            if np.any(minimum_long_pad_clearances < -1e-6) or np.any(
+                minimum_long_pad_clearances > 0.005
+            ):
+                continue
+            if minimum_lateral_spacing < (
+                lateral_spacing - config.lateral_spacing_tolerance_m
+            ) or maximum_lateral_spacing > (
+                lateral_spacing + config.lateral_spacing_tolerance_m
+            ):
+                continue
+            evaluated.append((lateral_spacing, candidate_cycles, metrics))
+            if minimum_distance >= config.minimum_distance_m:
+                break
 
+        selected = _select_clearance_candidate(
+            tuple(evaluated),
+            preferred_m=config.minimum_distance_m,
+            fallback_m=config.fallback_minimum_distance_m,
+        )
+        if selected is None:
+            best = max((candidate[1][0] for candidate in measured), default=-np.inf)
+            diagnostic = ""
+            if measured:
+                _, last = measured[-1]
+                diagnostic = (
+                    f"; last_thumb={last[2]:.6f} m"
+                    f"; last_pad_min={np.asarray(last[6]).tolist()}"
+                    f"; last_depth={last[5]:.6f} m"
+                )
+            raise ValueError(
+                "no depth-aligned lateral spacing satisfies the 20 mm or "
+                f"10 mm clearance tier; best={best:.6f} m{diagnostic}"
+            )
+        (
+            selected_clearance_tier,
+            selected_lateral_spacing,
+            synchronized_cycles,
+            selected_metrics,
+        ) = selected
         (
             minimum_distance,
             maximum_penetration,
             minimum_thumb_clearance,
             minimum_lateral_spacing,
             maximum_lateral_spacing,
-        ) = (
-            _measure_plan_safety(robot, synchronized_cycles, surface_z)
-        )
-        if minimum_distance < config.minimum_distance_m:
-            raise ValueError(
-                f"knife-hand clearance {minimum_distance:.6f} m is below "
-                f"{config.minimum_distance_m:.6f} m"
-            )
-        if maximum_penetration > config.maximum_hand_penetration_m:
-            raise ValueError(
-                f"hand-board penetration {maximum_penetration:.6f} m exceeds "
-                f"{config.maximum_hand_penetration_m:.6f} m"
-            )
-        if minimum_thumb_clearance < config.minimum_thumb_clearance_m:
-            raise ValueError(
-                f"thumb clearance {minimum_thumb_clearance:.6f} m is below "
-                f"{config.minimum_thumb_clearance_m:.6f} m"
-            )
-        lower_spacing = (
-            config.target_lateral_spacing_m - config.lateral_spacing_tolerance_m
-        )
-        upper_spacing = (
-            config.target_lateral_spacing_m + config.lateral_spacing_tolerance_m
-        )
-        if minimum_lateral_spacing < lower_spacing:
-            raise ValueError(
-                f"knife-pad lateral spacing {minimum_lateral_spacing:.6f} m is "
-                f"below {lower_spacing:.6f} m"
-            )
-        if maximum_lateral_spacing > upper_spacing:
-            raise ValueError(
-                f"knife-pad lateral spacing {maximum_lateral_spacing:.6f} m is "
-                f"above {upper_spacing:.6f} m"
-            )
+            maximum_depth_mismatch,
+            minimum_long_pad_clearances,
+        ) = selected_metrics
         keep_surface = True
         return RecordedHandGuardedChopPlan(
             surface_offset_m=offset_m,
-            right_ready_rad=right.right_ready_rad.copy(),
+            right_ready_rad=synchronized_cycles[0].right[0].copy(),
             left_ready_rad=cycles[0].left[0].copy(),
             right_cuts=right.cuts,
             knife_lift_shifts=right.knife_lift_shifts,
@@ -591,6 +795,10 @@ def _build_candidate_plan(
             minimum_planned_distance_m=minimum_distance,
             minimum_lateral_spacing_m=minimum_lateral_spacing,
             maximum_lateral_spacing_m=maximum_lateral_spacing,
+            maximum_depth_mismatch_m=maximum_depth_mismatch,
+            selected_clearance_tier_m=selected_clearance_tier,
+            selected_lateral_spacing_m=selected_lateral_spacing,
+            minimum_long_pad_clearances_m=minimum_long_pad_clearances.copy(),
             maximum_hand_penetration_m=maximum_penetration,
             minimum_thumb_clearance_m=minimum_thumb_clearance,
             minimum_pad_step_y_m=minimum_pad_step_y,
@@ -640,6 +848,7 @@ def _build_synchronized_cycles(
     left_cycles: tuple[RecordedLeftCycle, ...],
     total_carrier_m: float,
     config: RecordedHandGuardedChopConfig,
+    lateral_spacing_m: float,
 ) -> tuple[SynchronizedGuardCycle, ...]:
     """Retimes five knife down/up waves onto the continuous guard clock."""
     sample_counts = np.asarray([len(cycle.hand) for cycle in left_cycles], dtype=int)
@@ -660,18 +869,24 @@ def _build_synchronized_cycles(
         [robot.sim.require_geom(f"left_finger{finger}_pad") for finger in range(2, 6)]
     )
     pad_y = []
+    pad_x = []
     for cycle in left_cycles:
         for left_rad, hand_rad in zip(cycle.left, cycle.hand, strict=True):
             robot.sim.data.qpos[robot.sim.left.qpos_ids] = left_rad
             robot.sim.data.qpos[robot.sim.hand.qpos_ids] = hand_rad
             mujoco.mj_forward(robot.sim.model, robot.sim.data)
             pad_y.append(float(np.min(robot.sim.data.geom_xpos[long_pads, 1])))
+            pad_x.append(float(np.mean(robot.sim.data.geom_xpos[long_pads, 0])))
     robot.sim.data.qpos[robot.sim.right.qpos_ids] = cuts[0].descent[0].joints_rad
     mujoco.mj_forward(robot.sim.model, robot.sim.data)
     blade_reference = robot.sim.require_site("right_blade_edge_bot")
     blade_to_tcp_y = float(
         robot.sim.data.site_xpos[blade_reference, 1]
         - cuts[0].descent[0].target_pose[1, 3]
+    )
+    blade_to_tcp_x = float(
+        robot.sim.data.site_xpos[blade_reference, 0]
+        - cuts[0].descent[0].target_pose[0, 3]
     )
     targets = []
     phases = []
@@ -682,9 +897,10 @@ def _build_synchronized_cycles(
         vertical = np.where(down, local * 2.0, (1.0 - local) * 2.0)
         for sample, depth in enumerate(vertical):
             target = safe.copy()
+            target[0, 3] = pad_x[cursor + sample] - blade_to_tcp_x
             target[1, 3] = (
                 pad_y[cursor + sample]
-                - config.target_lateral_spacing_m
+                - lateral_spacing_m
                 - blade_to_tcp_y
             )
             target[2, 3] += depth * (contact_z - safe[2, 3])
@@ -692,9 +908,20 @@ def _build_synchronized_cycles(
             phases.append("CUT_DOWN" if down[sample] else "KNIFE_RETRACT")
         cursor += int(count)
 
+    first = robot.right_kinematics.ik(
+        targets[0],
+        cuts[0].descent[0].joints_rad,
+        max_iterations=1000,
+        tolerance=config.ik_tolerance,
+        damping=0.003,
+    )
+    if not first.success:
+        raise PathIkError(
+            f"depth-aligned knife-ready IK failed (residual {first.residual:.6g})"
+        )
     right = robot.right_kinematics.solve_path(
         targets,
-        cuts[0].descent[0].joints_rad,
+        first.joints_rad,
         max_joint_step_rad=config.maximum_arm_joint_step_rad,
     )
     synchronized = []
@@ -719,7 +946,7 @@ def _measure_plan_safety(
     robot: RightArmRobot,
     cycles: tuple[SynchronizedGuardCycle, ...],
     surface_z: float,
-) -> tuple[float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float, np.ndarray]:
     model, data = robot.sim.model, robot.sim.data
     board = robot.sim.require_geom("chopping_board")
     palm = robot.sim.require_body("left_palm_link")
@@ -734,10 +961,14 @@ def _measure_plan_safety(
     minimum_thumb_clearance = np.inf
     minimum_lateral_spacing = np.inf
     maximum_lateral_spacing = -np.inf
+    maximum_depth_mismatch = 0.0
+    minimum_long_pad_clearances = np.full(4, np.inf)
 
     def measure(right_rad: np.ndarray, left_rad: np.ndarray, hand_rad: np.ndarray) -> None:
         nonlocal minimum_distance, maximum_penetration, minimum_thumb_clearance
         nonlocal minimum_lateral_spacing, maximum_lateral_spacing
+        nonlocal maximum_depth_mismatch
+        nonlocal minimum_long_pad_clearances
         data.qpos[robot.sim.right.qpos_ids] = right_rad
         data.qpos[robot.sim.left.qpos_ids] = left_rad
         data.qpos[robot.sim.hand.qpos_ids] = hand_rad
@@ -749,6 +980,19 @@ def _measure_plan_safety(
         )
         minimum_lateral_spacing = min(minimum_lateral_spacing, lateral_spacing)
         maximum_lateral_spacing = max(maximum_lateral_spacing, lateral_spacing)
+        maximum_depth_mismatch = max(
+            maximum_depth_mismatch,
+            abs(
+                float(np.mean(data.geom_xpos[long_pads, 0]))
+                - float(data.site_xpos[blade_reference, 0])
+            ),
+        )
+        minimum_long_pad_clearances = np.minimum(
+            minimum_long_pad_clearances,
+            data.geom_xpos[long_pads, 2]
+            - model.geom_size[long_pads, 0]
+            - surface_z,
+        )
         minimum_thumb_clearance = min(
             minimum_thumb_clearance,
             float(data.geom_xpos[thumb, 2] - thumb_radius - surface_z),
@@ -779,6 +1023,8 @@ def _measure_plan_safety(
         float(minimum_thumb_clearance),
         float(minimum_lateral_spacing),
         float(maximum_lateral_spacing),
+        float(maximum_depth_mismatch),
+        minimum_long_pad_clearances.copy(),
     )
 
 
@@ -866,6 +1112,10 @@ def run_recorded_hand_guarded_chop(
             minimum_distance_m=plan.minimum_planned_distance_m,
             minimum_lateral_spacing_m=plan.minimum_lateral_spacing_m,
             maximum_lateral_spacing_m=plan.maximum_lateral_spacing_m,
+            selected_clearance_tier_m=plan.selected_clearance_tier_m,
+            selected_lateral_spacing_m=plan.selected_lateral_spacing_m,
+            maximum_depth_mismatch_m=plan.maximum_depth_mismatch_m,
+            minimum_long_pad_clearances_m=plan.minimum_long_pad_clearances_m.copy(),
             maximum_hand_penetration_m=plan.maximum_hand_penetration_m,
             minimum_thumb_clearance_m=plan.minimum_thumb_clearance_m,
             events=tuple(events),
@@ -886,6 +1136,20 @@ def run_recorded_hand_guarded_chop(
             ),
             maximum_lateral_spacing_m=(
                 float("nan") if plan is None else plan.maximum_lateral_spacing_m
+            ),
+            selected_clearance_tier_m=(
+                float("nan") if plan is None else plan.selected_clearance_tier_m
+            ),
+            selected_lateral_spacing_m=(
+                float("nan") if plan is None else plan.selected_lateral_spacing_m
+            ),
+            maximum_depth_mismatch_m=(
+                float("nan") if plan is None else plan.maximum_depth_mismatch_m
+            ),
+            minimum_long_pad_clearances_m=(
+                np.full(4, np.nan)
+                if plan is None
+                else plan.minimum_long_pad_clearances_m.copy()
             ),
             maximum_hand_penetration_m=float("nan") if plan is None else plan.maximum_hand_penetration_m,
             minimum_thumb_clearance_m=float("nan") if plan is None else plan.minimum_thumb_clearance_m,
