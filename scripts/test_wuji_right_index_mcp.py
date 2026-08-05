@@ -1,6 +1,13 @@
 """Safely plan, and optionally execute, a small right index-MCP motion."""
 
 import argparse
+from pathlib import Path
+import sys
+
+
+# A direct ``python scripts/...`` invocation starts with only ``scripts`` on
+# sys.path; make the repository's src-layout package available in that context.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tianji_robotics.hardware.wuji_hand.index_mcp_test import (
     build_index_mcp_test_plan,

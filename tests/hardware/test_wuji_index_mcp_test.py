@@ -1,5 +1,7 @@
 import importlib.util
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -113,6 +115,23 @@ def test_cli_reports_preflight_or_sdk_errors(monkeypatch, capsys):
     assert cli.main(["--serial-number", "365939643134"]) == 1
 
     assert capsys.readouterr().out.strip() == "preflight failed: offline"
+
+
+def test_cli_imports_when_executed_directly_from_repo_root():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/test_wuji_right_index_mcp.py",
+            "--help",
+        ],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--serial-number" in result.stdout
 
 
 def test_builds_one_small_index_mcp_return_motion():
