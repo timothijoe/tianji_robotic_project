@@ -1,7 +1,13 @@
+import subprocess
+import sys
+
 import numpy as np
 import pytest
 
-from tianji_robotics.data.left_arm_entry import generate_left_arm_entry
+from tianji_robotics.data.left_arm_entry import (
+    generate_left_arm_entry,
+    save_left_arm_entry_npz,
+)
 
 
 def test_generates_200hz_20_second_quintic_entry_with_exact_endpoints():
@@ -37,3 +43,68 @@ def test_has_near_zero_boundary_velocity_and_acceleration():
 
     assert np.all(np.abs(velocity[[0, -1]]) < 2e-4)
     assert np.all(np.abs(acceleration[[0, -1]]) < 0.05)
+
+
+def test_save_writes_left_arm_only_entry_metadata(tmp_path):
+    source = tmp_path / "source.npz"
+    np.savez(source, left_arm_target_rad=np.vstack((np.zeros(7), np.ones(7))))
+    output = tmp_path / "left_offline_entry_only.npz"
+    trajectory = generate_left_arm_entry(
+        np.zeros(7), np.ones(7), duration_s=1.0, sample_rate_hz=10.0
+    )
+
+    saved = save_left_arm_entry_npz(
+        trajectory,
+        source_npz=source,
+        destination=output,
+        start_deg=np.zeros(7),
+        duration_s=1.0,
+        sample_rate_hz=10.0,
+    )
+
+    with np.load(saved, allow_pickle=False) as data:
+        assert set(data.files) == {
+            "format_version",
+            "time_s",
+            "left_arm_target_rad",
+            "source_npz_path",
+            "entry_start_deg",
+            "entry_destination_rad",
+            "duration_s",
+            "sample_rate_hz",
+            "interpolation",
+            "peak_velocity_rad_s",
+            "peak_acceleration_rad_s2",
+        }
+        assert "right_arm_target_rad" not in data.files
+        assert "right_hand_target_rad" not in data.files
+        assert data["interpolation"].item() == "quintic_smoothstep"
+
+
+def test_cli_writes_offline_entry_file(tmp_path):
+    source = tmp_path / "source.npz"
+    output = tmp_path / "result_offline_entry_only.npz"
+    np.savez(source, left_arm_target_rad=np.vstack((np.ones(7), np.zeros(7))))
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/generate_left_arm_entry_trajectory.py",
+            "--source-npz",
+            str(source),
+            "--start-deg",
+            "0,0,0,0,0,0,0",
+            "--output",
+            str(output),
+            "--duration-s",
+            "1",
+            "--sample-rate-hz",
+            "10",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output.exists()

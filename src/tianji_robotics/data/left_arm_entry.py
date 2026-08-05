@@ -1,6 +1,7 @@
 """Offline quintic left-arm trajectory entry generation."""
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -56,3 +57,34 @@ def generate_left_arm_entry(
         np.max(np.abs(velocity), axis=0),
         np.max(np.abs(acceleration), axis=0),
     )
+
+
+def save_left_arm_entry_npz(
+    trajectory: EntryTrajectory,
+    *,
+    source_npz: Path,
+    destination: Path,
+    start_deg: np.ndarray,
+    duration_s: float,
+    sample_rate_hz: float,
+) -> Path:
+    """Write an offline-only left-arm entry trajectory NPZ."""
+    destination = Path(destination)
+    if "offline_entry_only" not in destination.stem:
+        raise ValueError("output filename must contain 'offline_entry_only'")
+
+    np.savez(
+        destination,
+        format_version=np.asarray(1, dtype=np.int64),
+        time_s=trajectory.time_s,
+        left_arm_target_rad=trajectory.left_arm_target_rad,
+        source_npz_path=np.asarray(str(Path(source_npz))),
+        entry_start_deg=np.asarray(start_deg, dtype=float),
+        entry_destination_rad=trajectory.left_arm_target_rad[-1],
+        duration_s=np.asarray(duration_s, dtype=float),
+        sample_rate_hz=np.asarray(sample_rate_hz, dtype=float),
+        interpolation=np.asarray("quintic_smoothstep"),
+        peak_velocity_rad_s=trajectory.peak_velocity_rad_s,
+        peak_acceleration_rad_s2=trajectory.peak_acceleration_rad_s2,
+    )
+    return destination
