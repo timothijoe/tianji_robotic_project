@@ -4,7 +4,90 @@
 原开发机目录。历史设计和排障过程见
 [guarded chopping development log](guarded_chopping_development_log.md)。
 
-## 1. 当前版本摘要
+## 0. 2026-08-05 当前首要交接：录制手势联动切菜
+
+本节覆盖下方保留的旧 `guarded-chop` 摘要。当前用户验收的是独立命令
+`recorded-hand-guarded-chop`；不要把它与旧猫爪任务混为一谈，也不要为了修改
+新案例而改变旧任务。
+
+### 动机与动作语义
+
+目标不是逐字重放手套数据，而是借用真实录制的时序构造可信的切菜护手动作：右臂
+从机器人自身右侧向左逐刀移动；Wuji 左手安装在天机左臂末端，始终位于刀的机器人
+左侧；刀和手只与同一砧板平面交互；左腕连续小幅后退，不能每刀后返回；长指 MCP
+尽量伸直、PIP 主屈曲、远节近似垂直向下，同时保留食指独立、中指/无名指相关、
+小指跟随和拇指离桌的明显动作。
+
+机器人自身左侧由双臂基座确认是世界 `+Y`，不是 Viewer 画面左侧。所有方向判断
+必须使用机器人坐标，不能根据相机方位推断。
+
+### 当前数据流与实现
+
+- 默认 MCAP 是
+  `recordings/wuji/august_02/session_20260802_174440_936_right_to_left_wuji_hand.mcap`；
+- 原始 499 帧、4.150116 秒录制重采样为 416 个 10 ms 联合样本；一次录制按时间
+  连续分成 5 段，每段后切一刀，不循环五遍，也没有左臂向右 RESET；
+- 左腕沿 `+Y` 单调移动 32 mm，分配量由四个指垫真实运动自动补偿；首刀掌心领先
+  刀 240 mm，沿 `-X` 靠近机器人 80 mm；末刀时仍领先约 188 mm；
+- 长指 MCP 不超过 0.30 rad，PIP 至少多屈曲 0.25 rad；RETREAT/HOLD 逐帧搜索
+  DIP，使 link4 局部 `+Z` 接近世界 `-Z`，PREPARE 最后 0.3 秒平滑进入压持；
+- 新任务只在自己的 MuJoCo 实例中隐藏并禁用 guarded cube、两个 pick pedestal、
+  pick cube 和目标 marker；公共 MJCF、旧切菜与 pick-place 均不受影响；
+- 右刀接触抬高后的砧板顶面，不再使用 cube 顶面。
+
+### 最新实测证据
+
+真实 MCAP 的 Headless 与 Viewer 均完成 `5/5` 刀和 `5/5` 连续分段：
+
+| 指标 | 当前值 | 约束 |
+|---|---:|---:|
+| 桌面抬高 | 40 mm | 最低可行候选 |
+| 左腕总后退 | 32 mm | 25–40 mm |
+| 最小刀手距离 | 40.4 mm | ≥20 mm |
+| 最大手部桌面穿透 | 0 mm | ≤0.5 mm |
+| 拇指最小离桌 | 31.7 mm | ≥10 mm |
+| 指垫最差单步向刀侧波动 | 0.481 mm | ≤0.5 mm |
+| 四指净后退 | 15.1–19.4 mm | 均向机器人左侧 |
+
+食指至小指最大远节偏角为 `7.63° / 1.02° / 2.86° / 5.64°`。PIP 峰峰值为
+`0.385 / 0.261 / 0.310 / 0.358 rad`，DIP 为
+`1.141 / 0.831 / 0.903 / 1.323 rad`。最新提交前聚焦回归为 `36 passed`；
+此前包含 pick-place 的纯桌面回归为 `44 passed`。最新实现提交是 `e7f3825`。
+
+### 运行与代码入口
+
+```bash
+# Viewer
+./scripts/run_recorded_hand_guarded_chop.sh
+
+# Headless
+.venv-wuji-teleop/bin/twin-sim recorded-hand-guarded-chop \
+  --headless --final-hold 0 \
+  --hand-mcap recordings/wuji/august_02/session_20260802_174440_936_right_to_left_wuji_hand.mcap
+```
+
+| 路径 | 职责 |
+|---|---|
+| `src/twin_sim/recorded_hand_guard.py` | MCAP 适配、相对掌轨迹、MCP→PIP 初级整形 |
+| `src/twin_sim/tasks/recorded_hand_guarded_chop.py` | 纯桌面场景、右刀规划、DIP 求解、腕部补偿、五段状态机与安全预检 |
+| `src/twin_sim/raised_work_surface.py` | 砧板及关联对象的可恢复高度偏移 |
+| `tests/simulation/test_recorded_hand_guard*.py` | 真实录制、解剖约束、指垫、碰撞和执行证据 |
+| `docs/simulation/recorded_hand_guarded_chop.md` | 操作者命令和安全说明 |
+| `docs/superpowers/specs/2026-08-04-recorded-hand-guarded-chop-design.md` | 完整设计约束 |
+
+### 已知问题与后续建议
+
+- DIP 峰峰值最高 1.323 rad，动作明显但可能显得弹动；若需收敛，应增加时间连续性
+  代价，同时保持 15° 远节约束，不能直接删除方向测试；
+- DIP 使用 61 点逐帧网格搜索，可靠但增加 Viewer 启动预检时间；可改解析一维旋转或
+  缓存，但必须保持数值证据一致；
+- 当前“压持”对象是砧板平面，没有可移动食材，也不是力控；0 穿透不能证明真实压力；
+- 结果主要报告计划几何指标。进入真机前必须补运行期力/位置偏差监控；
+- MCAP 被 Git 忽略，新机器缺少默认文件时无法做真实验收；
+- 从未连接 Tianji/Wuji 真机、官方物理 SDK 或 ROS 2 硬件节点，结论仅限仿真；
+- 下方“5 刀、4 次猫爪倒手”只描述旧 `guarded-chop`，不是当前录制联动任务。
+
+## 1. 当前版本摘要（旧 guarded-chop 基线）
 
 当前默认演示是 Marvin 双臂配合 Wuji Hand 的平面切菜动作：右臂持刀完成 5 刀，左臂
 和 20 自由度左手完成 4 次猫爪倒手。第 1、3 刀后左臂不动、手指回缩；第 2、4 刀后
