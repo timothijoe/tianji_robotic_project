@@ -72,6 +72,11 @@ def save_left_arm_entry_npz(
     destination = Path(destination)
     if "offline_entry_only" not in destination.stem:
         raise ValueError("output filename must contain 'offline_entry_only'")
+    entry_start_deg = validate_joint_vector(start_deg, name="start_deg")
+    if not np.allclose(
+        np.deg2rad(entry_start_deg), trajectory.left_arm_target_rad[0]
+    ):
+        raise ValueError("start_deg must match the trajectory's initial joint target")
 
     np.savez(
         destination,
@@ -79,7 +84,7 @@ def save_left_arm_entry_npz(
         time_s=trajectory.time_s,
         left_arm_target_rad=trajectory.left_arm_target_rad,
         source_npz_path=np.asarray(str(Path(source_npz))),
-        entry_start_deg=np.asarray(start_deg, dtype=float),
+        entry_start_deg=entry_start_deg,
         entry_destination_rad=trajectory.left_arm_target_rad[-1],
         duration_s=np.asarray(duration_s, dtype=float),
         sample_rate_hz=np.asarray(sample_rate_hz, dtype=float),

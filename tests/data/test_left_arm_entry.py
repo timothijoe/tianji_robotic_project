@@ -81,10 +81,47 @@ def test_save_writes_left_arm_only_entry_metadata(tmp_path):
         assert data["interpolation"].item() == "quintic_smoothstep"
 
 
+@pytest.mark.parametrize("bad_start_deg", [np.zeros(6), np.full(7, np.nan)])
+def test_save_rejects_invalid_entry_start_audit_metadata(tmp_path, bad_start_deg):
+    trajectory = generate_left_arm_entry(
+        np.zeros(7), np.ones(7), duration_s=1.0, sample_rate_hz=10.0
+    )
+
+    with pytest.raises(ValueError, match="start_deg must contain seven finite"):
+        save_left_arm_entry_npz(
+            trajectory,
+            source_npz=tmp_path / "source.npz",
+            destination=tmp_path / "left_offline_entry_only.npz",
+            start_deg=bad_start_deg,
+            duration_s=1.0,
+            sample_rate_hz=10.0,
+        )
+
+
+def test_save_rejects_entry_start_audit_metadata_inconsistent_with_trajectory(tmp_path):
+    trajectory = generate_left_arm_entry(
+        np.zeros(7), np.ones(7), duration_s=1.0, sample_rate_hz=10.0
+    )
+
+    with pytest.raises(ValueError, match="start_deg must match"):
+        save_left_arm_entry_npz(
+            trajectory,
+            source_npz=tmp_path / "source.npz",
+            destination=tmp_path / "left_offline_entry_only.npz",
+            start_deg=np.ones(7),
+            duration_s=1.0,
+            sample_rate_hz=10.0,
+        )
+
+
 def test_cli_writes_offline_entry_file(tmp_path):
     source = tmp_path / "source.npz"
     output = tmp_path / "result_offline_entry_only.npz"
-    np.savez(source, left_arm_target_rad=np.vstack((np.ones(7), np.zeros(7))))
+    source_first_row = np.arange(7, dtype=float)
+    np.savez(
+        source,
+        left_arm_target_rad=np.vstack((source_first_row, np.full(7, -3.0))),
+    )
 
     result = subprocess.run(
         [
@@ -108,3 +145,30 @@ def test_cli_writes_offline_entry_file(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert output.exists()
+    with np.load(output, allow_pickle=False) as data:
+        assert np.array_equal(data["left_arm_target_rad"][-1], source_first_row)
+
+
+def test_cli_rejects_source_without_left_arm_targets(tmp_path):
+    source = tmp_path / "missing_left_arm.npz"
+    output = tmp_path / "result_offline_entry_only.npz"
+    np.savez(source, right_arm_target_rad=np.zeros((1, 7)))
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/generate_left_arm_entry_trajectory.py",
+            "--source-npz",
+            str(source),
+            "--start-deg",
+            "0,0,0,0,0,0,0",
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "left_arm_target_rad" in result.stderr

@@ -33,7 +33,7 @@ def parse_start_deg(value: str) -> np.ndarray:
 
 
 def load_destination_rad(source_npz: Path) -> np.ndarray:
-    """Load and validate the final left-arm target from a source recording."""
+    """Load and validate the initial left-arm target from a source recording."""
     try:
         with np.load(source_npz, allow_pickle=False) as data:
             left_arm_target_rad = np.asarray(data["left_arm_target_rad"], dtype=float)
@@ -48,7 +48,7 @@ def load_destination_rad(source_npz: Path) -> np.ndarray:
         or not np.all(np.isfinite(left_arm_target_rad))
     ):
         raise ValueError("left_arm_target_rad must be a finite (N, 7) array with N >= 1")
-    return left_arm_target_rad[-1].copy()
+    return left_arm_target_rad[0].copy()
 
 
 def main() -> int:
