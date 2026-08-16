@@ -177,7 +177,7 @@ PYTHONPATH=. python3 real_robot_debug/keyboard_cartesian_jog.py \
 ```
 
 Replace all six bounds with the current tool/table/workcell's verified limits.
-The program rejects a step beyond the box, a step above 5 mm, stale feedback,
+The program rejects a step beyond the box, a step above 10 mm, stale feedback,
 a non-idle trajectory, or a failed MOVLA plan. Keep the physical E-stop
 reachable: Space is a software disable, not an E-stop.
 

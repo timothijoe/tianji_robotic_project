@@ -49,8 +49,8 @@ def validate_config(config: JogConfig) -> None:
     """Reject invalid motion limits before any SDK connection is opened."""
     if config.arm not in ("A", "B"):
         raise ValueError("arm must be 'A' or 'B'")
-    if not math.isfinite(float(config.step_mm)) or not 0.0 < float(config.step_mm) <= 5.0:
-        raise ValueError("step-mm must be in (0, 5]")
+    if not math.isfinite(float(config.step_mm)) or not 0.0 < float(config.step_mm) <= 10.0:
+        raise ValueError("step-mm must be in (0, 10]")
     if not (0 <= int(config.vel_ratio) <= 100):
         raise ValueError("vel-ratio must be in [0, 100]")
     if not (0 <= int(config.acc_ratio) <= 100):

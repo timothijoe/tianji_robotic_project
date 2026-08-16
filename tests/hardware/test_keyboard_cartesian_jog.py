@@ -95,9 +95,11 @@ def test_execute_requires_both_workspace_bounds():
         validate_config(JogConfig(execute=True))
 
 
-def test_step_above_five_mm_is_rejected():
-    with pytest.raises(ValueError, match="step-mm must be in .*5"):
-        validate_config(JogConfig(step_mm=5.1))
+def test_ten_mm_step_is_allowed_but_larger_step_is_rejected():
+    validate_config(JogConfig(step_mm=10.0))
+
+    with pytest.raises(ValueError, match="step-mm must be in .*10"):
+        validate_config(JogConfig(step_mm=10.1))
 
 
 def test_workspace_includes_edges_but_rejects_outside_point():
