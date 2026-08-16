@@ -3,9 +3,15 @@
 
 from __future__ import annotations
 
+import argparse
 import math
+import sys
+import termios
 import time
+import tty
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -19,6 +25,7 @@ KEY_DIRECTIONS: dict[str, tuple[float, float, float]] = {
     "r": (0.0, 0.0, 1.0),
     "f": (0.0, 0.0, -1.0),
 }
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -34,6 +41,8 @@ class JogConfig:
     acc_ratio: int = 10
     keep_enabled: bool = False
     robot_ip: str = "192.168.1.190"
+    sdk_root: Path = ROOT
+    kine_config: Path = ROOT / "test" / "ccs_m6_40.MvKDCfg"
 
 
 def validate_config(config: JogConfig) -> None:
@@ -57,6 +66,36 @@ def validate_config(config: JogConfig) -> None:
             raise ValueError("workspace bounds must contain 3 finite values")
         if not np.all(lower < upper):
             raise ValueError("workspace-min must be strictly below workspace-max")
+
+
+def parse_xyz(value: str, flag_name: str) -> tuple[float, float, float]:
+    """Parse exactly three finite comma-separated Cartesian coordinates."""
+    try:
+        values = tuple(float(item.strip()) for item in str(value).split(","))
+    except ValueError as exc:
+        raise ValueError(f"{flag_name} must be three comma-separated numbers") from exc
+    if len(values) != 3 or not all(math.isfinite(item) for item in values):
+        raise ValueError(f"{flag_name} must contain three finite values")
+    return values
+
+
+def parse_args(argv: list[str] | None = None) -> JogConfig:
+    """Parse CLI options and reject unsafe execution before opening the SDK."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--arm", choices=("A", "B"), default="A")
+    parser.add_argument("--robot-ip", default="192.168.1.190")
+    parser.add_argument("--sdk-root", type=Path, default=ROOT)
+    parser.add_argument("--kine-config", type=Path, default=ROOT / "test" / "ccs_m6_40.MvKDCfg")
+    parser.add_argument("--step-mm", type=float, default=2.0)
+    parser.add_argument("--vel-ratio", type=int, default=10)
+    parser.add_argument("--acc-ratio", type=int, default=10)
+    parser.add_argument("--workspace-min", type=lambda text: parse_xyz(text, "--workspace-min"))
+    parser.add_argument("--workspace-max", type=lambda text: parse_xyz(text, "--workspace-max"))
+    parser.add_argument("--execute", action="store_true", help="Send approved planned steps to the physical robot")
+    parser.add_argument("--keep-enabled", action="store_true", help="Do not disable the arm on normal exit")
+    config = JogConfig(**vars(parser.parse_args(argv)))
+    validate_config(config)
+    return config
 
 
 def inside_workspace(
@@ -119,6 +158,16 @@ def _verify_frame_updates(robot, dcss, arm_index: int) -> None:
 def _trajectory_is_idle(robot, dcss, arm_index: int) -> bool:
     output = _feedback(robot, dcss, arm_index)["outputs"][arm_index]
     return output.get("traj_state") in (None, 0, "idle", "IDLE")
+
+
+def _configure_planning_mode(robot, config: JogConfig) -> None:
+    """Set the SDK position-planning state once before executing jog steps."""
+    robot.clear_set()
+    robot.set_vel_acc(arm=config.arm, velRatio=int(config.vel_ratio), AccRatio=int(config.acc_ratio))
+    robot.send_cmd()
+    robot.clear_set()
+    robot.set_state(arm=config.arm, state=1)
+    robot.send_cmd()
 
 
 def _wait_until_traj_idle(robot, dcss, arm_index: int, timeout_s: float = 3.0) -> None:
@@ -195,6 +244,7 @@ def run_jog_session(
         robot.check_error_and_clear(dcss)
         if config.execute:
             _verify_frame_updates(robot, dcss, arm_index)
+            _configure_planning_mode(robot, config)
         joints, current_pose = _read_feedback_pose(robot, dcss, kine, arm_index)
         poses.append(current_pose)
         while True:
@@ -208,6 +258,11 @@ def run_jog_session(
             if delta is None:
                 continue
             target_pose = candidate_pose(current_pose, delta)
+            print(
+                "request_xyz_mm=",
+                [round(float(value), 3) for value in target_pose[:3]],
+                "mode=execute" if config.execute else "mode=dry-run",
+            )
             if config.execute:
                 if config.workspace_min is None or config.workspace_max is None:
                     raise RuntimeError("execute workspace validation was bypassed")
@@ -221,6 +276,63 @@ def run_jog_session(
             if config.execute:
                 joints, current_pose = _read_feedback_pose(robot, dcss, kine, arm_index)
             poses.append(current_pose)
+            print("current_xyz_mm=", [round(float(value), 3) for value in current_pose[:3]])
         return poses
     finally:
         _shutdown(robot, config, connected)
+
+
+def _real_sdk_factory(config: JogConfig) -> tuple[object, object, object]:
+    """Create configured vendor SDK objects only for the interactive CLI."""
+    sdk_root = Path(config.sdk_root).resolve()
+    if str(sdk_root) not in sys.path:
+        sys.path.insert(0, str(sdk_root))
+    from SDK_PYTHON.fx_kine import Marvin_Kine
+    from SDK_PYTHON.fx_robot import DCSS, Marvin_Robot
+
+    arm_index = _arm_index(config.arm)
+    kine = Marvin_Kine()
+    kine.log_switch(0)
+    kine_config = kine.load_config(arm_type=arm_index, config_path=str(config.kine_config))
+    if not kine.initial_kine(
+        robot_type=kine_config["TYPE"][arm_index],
+        dh=kine_config["DH"][arm_index],
+        pnva=kine_config["PNVA"][arm_index],
+        j67=kine_config["BD"][arm_index],
+    ):
+        raise RuntimeError("initial_kine failed")
+    return Marvin_Robot(), DCSS(), kine
+
+
+@contextmanager
+def raw_terminal_keys(stream=sys.stdin):
+    """Yield a one-character reader and always restore terminal attributes."""
+    previous = termios.tcgetattr(stream.fileno())
+    try:
+        tty.setraw(stream.fileno())
+        yield lambda: stream.read(1)
+    finally:
+        termios.tcsetattr(stream.fileno(), termios.TCSADRAIN, previous)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the interactive keyboard jog; this is the only production entrypoint."""
+    try:
+        config = parse_args(argv)
+        print("Keyboard Cartesian jog (base frame)")
+        print(f"arm={config.arm} step_mm={config.step_mm:g} execute={config.execute}")
+        print("W/S: +/-X, A/D: +/-Y, R/F: +/-Z, Space/Q: stop and disable")
+        print("Physical E-stop must be reachable; Space is only a software disable.")
+        with raw_terminal_keys() as read_key:
+            run_jog_session(config, read_key, lambda: _real_sdk_factory(config))
+        return 0
+    except (RuntimeError, ValueError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("keyboard interrupt: selected arm cleanup requested", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

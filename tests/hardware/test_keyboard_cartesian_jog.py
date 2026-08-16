@@ -8,6 +8,7 @@ from real_robot_debug.keyboard_cartesian_jog import (
     candidate_pose,
     inside_workspace,
     key_to_delta,
+    parse_args,
     run_jog_session,
     validate_config,
 )
@@ -39,6 +40,9 @@ class FakeRobot:
 
     def setPln_Cart(self, arm: str, pset: object) -> None:
         self.planned_commands.append((arm, pset))
+
+    def set_vel_acc(self, arm: str, velRatio: int, AccRatio: int) -> None:
+        pass
 
     def clear_set(self) -> None:
         pass
@@ -145,3 +149,35 @@ def test_execute_planning_failure_does_not_send_command():
 
     assert robot.planned_commands == []
     assert robot.disabled
+
+
+def test_execute_sends_one_planned_command_inside_workspace():
+    robot, dcss, kine = FakeRobot(), FakeDcss(), FakeKine()
+    config = JogConfig(
+        execute=True,
+        workspace_min=(-5.0, -5.0, -5.0),
+        workspace_max=(5.0, 5.0, 5.0),
+    )
+
+    run_jog_session(config, read_key=iter(["w", "q"]).__next__, sdk_factory=lambda: (robot, dcss, kine))
+
+    assert len(robot.planned_commands) == 1
+    assert robot.planned_commands[0][0] == "A"
+
+
+def test_parse_execute_requires_workspace_values():
+    with pytest.raises(ValueError, match="workspace-min.*workspace-max"):
+        parse_args(["--execute"])
+
+
+def test_space_stops_before_later_motion_key():
+    robot, dcss, kine = FakeRobot(), FakeDcss(), FakeKine()
+
+    run_jog_session(
+        JogConfig(),
+        read_key=iter([" ", "w"]).__next__,
+        sdk_factory=lambda: (robot, dcss, kine),
+    )
+
+    assert robot.disabled
+    assert robot.planned_commands == []

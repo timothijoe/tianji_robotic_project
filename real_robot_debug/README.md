@@ -146,6 +146,40 @@ PYTHONPATH=. python3 real_robot_debug/plan_sampled_ik_chop.py \
   --output-csv /tmp/planned_left_arm_joint_impedance_shape.csv
 ```
 
+## Keyboard Cartesian Jog
+
+`keyboard_cartesian_jog.py` is a discrete, base-frame debugging utility for
+one arm. Each movement key requests one Cartesian step while preserving the
+current tool orientation. It does not provide continuous press-and-hold
+control.
+
+The default is dry-run: it plans and prints requested 2 mm steps but never
+sends `setPln_Cart` to the robot.
+
+```bash
+PYTHONPATH=. python3 real_robot_debug/keyboard_cartesian_jog.py --arm A
+```
+
+Keys: `W`/`S` request `+X`/`-X`; `A`/`D` request `+Y`/`-Y`; `R`/`F` request
+`+Z`/`-Z`; `Q` and Space exit and disable the selected arm. The physical
+direction of each positive axis must be confirmed at the installed workcell;
+the project notes currently describe A-arm `+Y` as downward.
+
+Real execution requires `--execute` plus a site-specific, vetted workspace
+box in millimetres. Do not copy the following placeholders as values:
+
+```bash
+PYTHONPATH=. python3 real_robot_debug/keyboard_cartesian_jog.py \
+  --arm A --execute --step-mm 2 \
+  --workspace-min "XMIN,YMIN,ZMIN" \
+  --workspace-max "XMAX,YMAX,ZMAX"
+```
+
+Replace all six bounds with the current tool/table/workcell's verified limits.
+The program rejects a step beyond the box, a step above 5 mm, stale feedback,
+a non-idle trajectory, or a failed MOVLA plan. Keep the physical E-stop
+reachable: Space is a software disable, not an E-stop.
+
 ## Notes
 
 - SDK arm `A` is the left arm on this robot.
