@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
+from typing import Callable
 
 import numpy as np
 
@@ -31,6 +33,7 @@ class JogConfig:
     vel_ratio: int = 10
     acc_ratio: int = 10
     keep_enabled: bool = False
+    robot_ip: str = "192.168.1.190"
 
 
 def validate_config(config: JogConfig) -> None:
@@ -83,3 +86,141 @@ def candidate_pose(current_xyzabc: np.ndarray, delta_xyz: tuple[float, float, fl
         raise ValueError("current_xyzabc must contain exactly 6 values")
     target[:3] += np.asarray(delta_xyz, dtype=float)
     return target
+
+
+def _arm_index(arm: str) -> int:
+    return 0 if arm == "A" else 1
+
+
+def _feedback(robot, dcss, arm_index: int) -> dict:
+    return robot.subscribe(dcss)
+
+
+def _read_feedback_pose(robot, dcss, kine, arm_index: int) -> tuple[list[float], np.ndarray]:
+    """Read feedback joints and convert their FK result to XYZABC."""
+    feedback = _feedback(robot, dcss, arm_index)
+    joints = [float(value) for value in feedback["outputs"][arm_index]["fb_joint_pos"]]
+    pose = np.asarray(kine.mat4x4_to_xyzabc(kine.fk(joints)), dtype=float)
+    if pose.shape != (6,) or not np.all(np.isfinite(pose)):
+        raise RuntimeError("kinematics returned an invalid feedback pose")
+    return joints, pose
+
+
+def _verify_frame_updates(robot, dcss, arm_index: int) -> None:
+    """Refuse execute mode when feedback frame serials are not advancing."""
+    observed = {
+        _feedback(robot, dcss, arm_index)["outputs"][arm_index].get("frame_serial", 0)
+        for _ in range(3)
+    }
+    if not any(int(serial) != 0 for serial in observed) or len(observed) < 2:
+        raise RuntimeError("robot feedback frame did not update")
+
+
+def _trajectory_is_idle(robot, dcss, arm_index: int) -> bool:
+    output = _feedback(robot, dcss, arm_index)["outputs"][arm_index]
+    return output.get("traj_state") in (None, 0, "idle", "IDLE")
+
+
+def _wait_until_traj_idle(robot, dcss, arm_index: int, timeout_s: float = 3.0) -> None:
+    deadline = time.monotonic() + float(timeout_s)
+    while time.monotonic() < deadline:
+        if _trajectory_is_idle(robot, dcss, arm_index):
+            return
+        time.sleep(0.02)
+    raise RuntimeError("selected arm trajectory did not return idle")
+
+
+def plan_or_execute_step(
+    robot,
+    dcss,
+    kine,
+    arm_index: int,
+    joints: list[float],
+    current_pose: np.ndarray,
+    target_pose: np.ndarray,
+    config: JogConfig,
+) -> np.ndarray:
+    """Plan one Cartesian step and send it only when execute is enabled."""
+    _points, pset = kine.movLA(
+        start_xyzabc=current_pose.tolist(),
+        end_xyzabc=target_pose.tolist(),
+        ref_joints=list(joints),
+        vel=10.0,
+        acc=100.0,
+        freq_hz=100,
+    )
+    if pset is None:
+        raise RuntimeError("MOVLA planning failed")
+    if not config.execute:
+        return target_pose
+    robot.setPln_Cart(arm=config.arm, pset=pset)
+    _wait_until_traj_idle(robot, dcss, arm_index)
+    _joints, actual_pose = _read_feedback_pose(robot, dcss, kine, arm_index)
+    return actual_pose
+
+
+def _shutdown(robot, config: JogConfig, connected: bool) -> None:
+    if connected and not config.keep_enabled:
+        try:
+            robot.clear_set()
+            robot.set_state(arm=config.arm, state=0)
+            robot.send_cmd()
+        except Exception:
+            pass
+    try:
+        robot.release_robot()
+    except Exception:
+        pass
+
+
+def run_jog_session(
+    config: JogConfig,
+    read_key: Callable[[], str],
+    sdk_factory: Callable[[], tuple[object, object, object]],
+) -> list[np.ndarray]:
+    """Run a key-driven jog session using an injected SDK adapter.
+
+    The factory injection makes this control flow testable without importing or
+    connecting to the vendor SDK.  Production supplies the real factory.
+    """
+    validate_config(config)
+    robot, dcss, kine = sdk_factory()
+    arm_index = _arm_index(config.arm)
+    connected = False
+    poses: list[np.ndarray] = []
+    try:
+        connected = bool(robot.connect(config.robot_ip))
+        if not connected:
+            raise RuntimeError("failed to connect to the robot")
+        robot.check_error_and_clear(dcss)
+        if config.execute:
+            _verify_frame_updates(robot, dcss, arm_index)
+        joints, current_pose = _read_feedback_pose(robot, dcss, kine, arm_index)
+        poses.append(current_pose)
+        while True:
+            try:
+                key = read_key()
+            except StopIteration:
+                break
+            if not key or key.lower() == "q" or key == " ":
+                break
+            delta = key_to_delta(key, config.step_mm)
+            if delta is None:
+                continue
+            target_pose = candidate_pose(current_pose, delta)
+            if config.execute:
+                if config.workspace_min is None or config.workspace_max is None:
+                    raise RuntimeError("execute workspace validation was bypassed")
+                if not inside_workspace(target_pose[:3], config.workspace_min, config.workspace_max):
+                    raise ValueError(f"requested pose is outside workspace: {target_pose[:3].tolist()}")
+                if not _trajectory_is_idle(robot, dcss, arm_index):
+                    raise RuntimeError("selected arm trajectory is not idle")
+            current_pose = plan_or_execute_step(
+                robot, dcss, kine, arm_index, joints, current_pose, target_pose, config,
+            )
+            if config.execute:
+                joints, current_pose = _read_feedback_pose(robot, dcss, kine, arm_index)
+            poses.append(current_pose)
+        return poses
+    finally:
+        _shutdown(robot, config, connected)
