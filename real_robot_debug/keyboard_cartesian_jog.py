@@ -327,10 +327,10 @@ def _real_sdk_factory(config: JogConfig) -> tuple[object, object, object]:
 
 @contextmanager
 def raw_terminal_keys(stream=sys.stdin):
-    """Yield a one-character reader and always restore terminal attributes."""
+    """Yield a one-character reader while preserving OS Ctrl+C handling."""
     previous = termios.tcgetattr(stream.fileno())
     try:
-        tty.setraw(stream.fileno())
+        tty.setcbreak(stream.fileno())
         yield lambda: stream.read(1)
     finally:
         termios.tcsetattr(stream.fileno(), termios.TCSADRAIN, previous)

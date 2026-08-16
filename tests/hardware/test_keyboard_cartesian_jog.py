@@ -236,3 +236,23 @@ def test_planning_mode_setup_waits_for_state_transition(monkeypatch):
     jog._configure_planning_mode(robot, JogConfig(execute=True), FakeDcss(), arm_index=0)
 
     assert sleeps[:2] == [0.1, 0.2]
+
+
+def test_terminal_key_reader_uses_cbreak_to_preserve_ctrl_c(monkeypatch):
+    class Stream:
+        def fileno(self) -> int:
+            return 42
+
+        def read(self, count: int) -> str:
+            return "w"
+
+    events: list[tuple[str, int]] = []
+    monkeypatch.setattr(jog.termios, "tcgetattr", lambda fd: ["saved"])
+    monkeypatch.setattr(jog.termios, "tcsetattr", lambda fd, when, attrs: events.append(("restore", fd)))
+    monkeypatch.setattr(jog.tty, "setcbreak", lambda fd: events.append(("cbreak", fd)))
+    monkeypatch.setattr(jog.tty, "setraw", lambda fd: (_ for _ in ()).throw(AssertionError("raw mode disables Ctrl+C")))
+
+    with jog.raw_terminal_keys(Stream()) as read_key:
+        assert read_key() == "w"
+
+    assert events == [("cbreak", 42), ("restore", 42)]
