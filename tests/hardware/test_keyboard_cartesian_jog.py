@@ -204,3 +204,11 @@ def test_feedback_frame_check_waits_for_controller_refresh(monkeypatch):
     jog._verify_frame_updates(robot, FakeDcss(), arm_index=0)
 
     assert sleeps == [0.01] * 5
+
+
+def test_sdk_byte_zero_trajectory_state_is_idle():
+    class IdleRobot:
+        def subscribe(self, dcss: FakeDcss) -> dict:
+            return {"outputs": [{"traj_state": b"\x00"}]}
+
+    assert jog._trajectory_is_idle(IdleRobot(), FakeDcss(), arm_index=0)

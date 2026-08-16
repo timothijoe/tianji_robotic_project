@@ -159,7 +159,7 @@ def _verify_frame_updates(robot, dcss, arm_index: int) -> None:
 
 def _trajectory_is_idle(robot, dcss, arm_index: int) -> bool:
     output = _feedback(robot, dcss, arm_index)["outputs"][arm_index]
-    return output.get("traj_state") in (None, 0, "idle", "IDLE")
+    return output.get("traj_state") in (None, 0, b"\x00", "idle", "IDLE")
 
 
 def _configure_planning_mode(robot, config: JogConfig) -> None:
