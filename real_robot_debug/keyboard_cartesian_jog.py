@@ -147,10 +147,12 @@ def _read_feedback_pose(robot, dcss, kine, arm_index: int) -> tuple[list[float],
 
 def _verify_frame_updates(robot, dcss, arm_index: int) -> None:
     """Refuse execute mode when feedback frame serials are not advancing."""
-    observed = {
-        _feedback(robot, dcss, arm_index)["outputs"][arm_index].get("frame_serial", 0)
-        for _ in range(3)
-    }
+    observed = set()
+    for _ in range(5):
+        observed.add(_feedback(robot, dcss, arm_index)["outputs"][arm_index].get("frame_serial", 0))
+        # Controller feedback advances at a finite rate; allow a full 10 ms
+        # sample interval rather than falsely rejecting rapid SDK reads.
+        time.sleep(0.01)
     if not any(int(serial) != 0 for serial in observed) or len(observed) < 2:
         raise RuntimeError("robot feedback frame did not update")
 

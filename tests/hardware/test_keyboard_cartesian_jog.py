@@ -12,6 +12,7 @@ from real_robot_debug.keyboard_cartesian_jog import (
     run_jog_session,
     validate_config,
 )
+import real_robot_debug.keyboard_cartesian_jog as jog
 
 
 class FakeDcss:
@@ -181,3 +182,25 @@ def test_space_stops_before_later_motion_key():
 
     assert robot.disabled
     assert robot.planned_commands == []
+
+
+def test_feedback_frame_check_waits_for_controller_refresh(monkeypatch):
+    class DelayedFrameRobot:
+        def __init__(self) -> None:
+            self.frame_serial = 100
+
+        def subscribe(self, dcss: FakeDcss) -> dict:
+            return {"outputs": [{"frame_serial": self.frame_serial}]}
+
+    robot = DelayedFrameRobot()
+    sleeps: list[float] = []
+
+    def advance_controller_frame(delay_s: float) -> None:
+        sleeps.append(delay_s)
+        robot.frame_serial += 1
+
+    monkeypatch.setattr(jog.time, "sleep", advance_controller_frame)
+
+    jog._verify_frame_updates(robot, FakeDcss(), arm_index=0)
+
+    assert sleeps == [0.01] * 5
