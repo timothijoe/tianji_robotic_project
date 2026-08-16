@@ -96,6 +96,20 @@ def validate_dual_feedback(data: dict, left_target: np.ndarray, right_target: np
     return float(max(np.abs(actuals[0] - left_target).max(), np.abs(actuals[1] - right_target).max()))
 
 
+def dual_arms_ready_issue(data: dict) -> str | None:
+    """Return the first reason that prevents a safe dual-arm stream start."""
+    for index, arm in enumerate(("A", "B")):
+        state = data["states"][index]
+        if state.get("err_code", 0) != 0:
+            return f"{arm}-arm controller error: {state.get('err_code')}"
+        if state.get("cur_state") != 3:
+            return f"{arm}-arm left joint-impedance state: {state.get('cur_state')}"
+        actual = np.asarray(data["outputs"][index]["fb_joint_pos"], dtype=float)
+        if actual.shape != (7,) or not np.all(np.isfinite(actual)):
+            return f"{arm}-arm feedback is invalid"
+    return None
+
+
 def _stream_frames(robot: Any, dcss: Any, left: np.ndarray, right: np.ndarray, *, period_s: float, label: str) -> None:
     """Send aligned A/B targets against a monotonic clock and expose deadline misses."""
     started = time.monotonic()
@@ -175,6 +189,16 @@ def disable_both_arms(robot_ip: str, *, concise_factory: Any | None = None) -> N
     finally:
         robot.release_robot()
 
+
+def _parse_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise argparse.ArgumentTypeError("must be true or false")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-npz", type=Path, default=SOURCE)
@@ -182,6 +206,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--speed-scale", type=float, default=0.05)
     parser.add_argument("--entry-duration-s", type=float, default=15.0)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument(
+        "--require-both-arms-ready",
+        type=_parse_bool,
+        default=True,
+        metavar="true|false",
+        help="Require healthy A and B feedback before streaming (default: true)",
+    )
     parser.add_argument("--probe-current", action="store_true", help="Send one batched hold command at both current feedback poses")
     parser.add_argument("--probe-frames", type=int, default=200, help="Number of 200 Hz current-hold frames in probe mode")
     args = parser.parse_args(argv)
@@ -227,6 +258,18 @@ def main(argv: list[str] | None = None) -> int:
         _configure_dual_joint_impedance(robot)
         configured = True
         feedback = robot.subscribe(dcss)
+        readiness_issue = dual_arms_ready_issue(feedback)
+        if args.require_both_arms_ready:
+            if readiness_issue is not None:
+                print(f"READY_CHECK_BLOCKED: {readiness_issue}", file=sys.stderr, flush=True)
+                raise RuntimeError(readiness_issue)
+            print("READY_CHECK_PASSED: both arms ready", flush=True)
+        else:
+            print(
+                "READY_CHECK_SKIPPED: --require-both-arms-ready=false"
+                + (f" ({readiness_issue})" if readiness_issue is not None else ""),
+                flush=True,
+            )
         current_left = np.asarray(feedback["outputs"][0]["fb_joint_pos"], dtype=float)
         current_right = np.asarray(feedback["outputs"][1]["fb_joint_pos"], dtype=float)
         if args.probe_current:
