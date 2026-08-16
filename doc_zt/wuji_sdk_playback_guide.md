@@ -266,6 +266,9 @@ PYTHONPATH=. python3 real_robot_debug/a_arm_impedance_two_stage.py \
 | 文件 | 用途 |
 |---|---|
 | `scripts/play_wuji_trajectory.py` | SDK 直控 Wuji 手轨迹回放 |
-| `scripts/reset_wuji_hand.py` | SDK 直控 Wuji 手复位到张开 |
+| `scripts/reset_wuji_hand.py` | SDK 直控 Wuji 手复位到张开（1s 缓入） |
+| `scripts/reset_wuji_hand_fast.py` | **SDK 直控 Wuji 手快速恢复张开（0.8s，Ctrl+C 强制回零兜底）** |
+| `scripts/half_fist_wuji_hand.py` | **SDK 直控 Wuji 手半握拳（自动恢复张开版本）** |
+| `scripts/half_fist_wuji_hand_hold.py` | **SDK 直控 Wuji 手半握拳（保持使能，需手动 reset 恢复；详见 doc_zt/half_fist_wuji_hand.md）** |
 | `scripts/play_mirrored_hand.sh` | 播放镜像右手 200Hz NPZ（旧版 shell 包装）|
 | `real_robot_debug/a_arm_impedance_two_stage.py` | **真机双臂 joint impedance NPZ 回放** |
