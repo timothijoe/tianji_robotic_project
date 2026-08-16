@@ -153,8 +153,9 @@ one arm. Each movement key requests one Cartesian step while preserving the
 current tool orientation. It does not provide continuous press-and-hold
 control.
 
-The default is dry-run: it plans and prints requested 2 mm steps but never
-sends `setPln_Cart` to the robot.
+The default is dry-run: it still connects to the controller to read the current
+feedback pose, then plans and prints requested 2 mm steps, but never sends
+`setPln_Cart` or enables a motion command.
 
 ```bash
 PYTHONPATH=. python3 real_robot_debug/keyboard_cartesian_jog.py --arm A
@@ -179,6 +180,11 @@ Replace all six bounds with the current tool/table/workcell's verified limits.
 The program rejects a step beyond the box, a step above 5 mm, stale feedback,
 a non-idle trajectory, or a failed MOVLA plan. Keep the physical E-stop
 reachable: Space is a software disable, not an E-stop.
+
+Before the first real movement, keep `--step-mm 2`, verify each positive axis
+with a clear workspace, and use a physical E-stop that is reachable by the
+operator. The script is intentionally one-key/one-step; holding a key never
+creates continuous motion.
 
 ## Notes
 
