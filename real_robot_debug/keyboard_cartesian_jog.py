@@ -162,14 +162,33 @@ def _trajectory_is_idle(robot, dcss, arm_index: int) -> bool:
     return output.get("traj_state") in (None, 0, b"\x00", "idle", "IDLE")
 
 
-def _configure_planning_mode(robot, config: JogConfig) -> None:
+def _wait_until_planning_state(robot, dcss, arm_index: int, arm: str, timeout_s: float = 1.0) -> None:
+    """Confirm the controller entered planned Cartesian position mode."""
+    deadline = time.monotonic() + float(timeout_s)
+    last_state: dict = {}
+    while time.monotonic() < deadline:
+        data = _feedback(robot, dcss, arm_index)
+        last_state = data.get("states", [{}])[arm_index]
+        if last_state.get("cur_state") == 1:
+            return
+        time.sleep(0.02)
+    raise RuntimeError(
+        f"{arm} arm did not enter position planning mode; "
+        f"cur_state={last_state.get('cur_state')}; err_code={last_state.get('err_code')}"
+    )
+
+
+def _configure_planning_mode(robot, config: JogConfig, dcss, arm_index: int) -> None:
     """Set the SDK position-planning state once before executing jog steps."""
     robot.clear_set()
     robot.set_vel_acc(arm=config.arm, velRatio=int(config.vel_ratio), AccRatio=int(config.acc_ratio))
     robot.send_cmd()
+    time.sleep(0.1)
     robot.clear_set()
     robot.set_state(arm=config.arm, state=1)
     robot.send_cmd()
+    time.sleep(0.2)
+    _wait_until_planning_state(robot, dcss, arm_index, config.arm)
 
 
 def _wait_until_traj_idle(robot, dcss, arm_index: int, timeout_s: float = 3.0) -> None:
@@ -246,7 +265,7 @@ def run_jog_session(
         robot.check_error_and_clear(dcss)
         if config.execute:
             _verify_frame_updates(robot, dcss, arm_index)
-            _configure_planning_mode(robot, config)
+            _configure_planning_mode(robot, config, dcss, arm_index)
         joints, current_pose = _read_feedback_pose(robot, dcss, kine, arm_index)
         poses.append(current_pose)
         while True:
@@ -254,7 +273,7 @@ def run_jog_session(
                 key = read_key()
             except StopIteration:
                 break
-            if not key or key.lower() == "q" or key == " ":
+            if not key or key.lower() == "q" or key in (" ", "\x03"):
                 break
             delta = key_to_delta(key, config.step_mm)
             if delta is None:

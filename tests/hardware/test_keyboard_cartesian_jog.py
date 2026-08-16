@@ -212,3 +212,27 @@ def test_sdk_byte_zero_trajectory_state_is_idle():
             return {"outputs": [{"traj_state": b"\x00"}]}
 
     assert jog._trajectory_is_idle(IdleRobot(), FakeDcss(), arm_index=0)
+
+
+def test_ctrl_c_byte_stops_before_later_motion_key():
+    robot, dcss, kine = FakeRobot(), FakeDcss(), FakeKine()
+
+    poses = run_jog_session(
+        JogConfig(),
+        read_key=iter(["\x03", "w"]).__next__,
+        sdk_factory=lambda: (robot, dcss, kine),
+    )
+
+    assert len(poses) == 1
+    assert robot.planned_commands == []
+    assert robot.disabled
+
+
+def test_planning_mode_setup_waits_for_state_transition(monkeypatch):
+    robot = FakeRobot()
+    sleeps: list[float] = []
+    monkeypatch.setattr(jog.time, "sleep", sleeps.append)
+
+    jog._configure_planning_mode(robot, JogConfig(execute=True), FakeDcss(), arm_index=0)
+
+    assert sleeps[:2] == [0.1, 0.2]
