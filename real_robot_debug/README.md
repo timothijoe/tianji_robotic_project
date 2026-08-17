@@ -154,7 +154,7 @@ current tool orientation. It does not provide continuous press-and-hold
 control.
 
 The default is dry-run: it still connects to the controller to read the current
-feedback pose, then plans and prints requested 2 mm steps, but never sends
+feedback pose, then plans and prints requested 5 mm steps, but never sends
 `setPln_Cart` or enables a motion command.
 
 ```bash
@@ -166,22 +166,28 @@ Keys: `W`/`S` request `+X`/`-X`; `A`/`D` request `+Y`/`-Y`; `R`/`F` request
 direction of each positive axis must be confirmed at the installed workcell;
 the project notes currently describe A-arm `+Y` as downward.
 
-Real execution requires `--execute` plus a site-specific, vetted workspace
-box in millimetres. Do not copy the following placeholders as values:
+Real execution requires `--execute`, a step no greater than 10 mm, and a
+site-specific, vetted workspace box in millimetres. Do not copy the following
+placeholders as values:
 
 ```bash
 PYTHONPATH=. python3 real_robot_debug/keyboard_cartesian_jog.py \
-  --arm A --execute --step-mm 2 \
+  --arm A --execute --step-mm 5 \
   --workspace-min "XMIN,YMIN,ZMIN" \
   --workspace-max "XMAX,YMAX,ZMAX"
 ```
+
+For a supervised commissioning session, `--workspace-around-current-mm 100`
+reads the selected arm's startup feedback TCP once and fixes a `+/-100 mm`
+workspace around it for that session. It is still an endpoint boundary, not a
+replacement for collision clearance or a physical E-stop.
 
 Replace all six bounds with the current tool/table/workcell's verified limits.
 The program rejects a step beyond the box, a step above 10 mm, stale feedback,
 a non-idle trajectory, or a failed MOVLA plan. Keep the physical E-stop
 reachable: Space is a software disable, not an E-stop.
 
-Before the first real movement, keep `--step-mm 2`, verify each positive axis
+Before the first real movement, use `--step-mm 5`, verify each positive axis
 with a clear workspace, and use a physical E-stop that is reachable by the
 operator. The script is intentionally one-key/one-step; holding a key never
 creates continuous motion.

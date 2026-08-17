@@ -33,10 +33,11 @@ class JogConfig:
     """Safety-critical configuration for a keyboard jog session."""
 
     arm: str = "A"
-    step_mm: float = 2.0
+    step_mm: float = 5.0
     execute: bool = False
     workspace_min: tuple[float, float, float] | None = None
     workspace_max: tuple[float, float, float] | None = None
+    workspace_radius_mm: float | None = None
     vel_ratio: int = 10
     acc_ratio: int = 10
     keep_enabled: bool = False
@@ -55,8 +56,14 @@ def validate_config(config: JogConfig) -> None:
         raise ValueError("vel-ratio must be in [0, 100]")
     if not (0 <= int(config.acc_ratio) <= 100):
         raise ValueError("acc-ratio must be in [0, 100]")
-    if config.execute and (config.workspace_min is None or config.workspace_max is None):
-        raise ValueError("--execute requires both --workspace-min and --workspace-max")
+    has_explicit_workspace = config.workspace_min is not None and config.workspace_max is not None
+    if config.workspace_radius_mm is not None:
+        if not math.isfinite(float(config.workspace_radius_mm)) or not 0.0 < float(config.workspace_radius_mm) <= 150.0:
+            raise ValueError("workspace-around-current-mm must be in (0, 150]")
+        if has_explicit_workspace:
+            raise ValueError("workspace bounds and workspace-around-current-mm are mutually exclusive")
+    if config.execute and not has_explicit_workspace and config.workspace_radius_mm is None:
+        raise ValueError("--execute requires --workspace-min and --workspace-max, or --workspace-around-current-mm")
     if (config.workspace_min is None) != (config.workspace_max is None):
         raise ValueError("workspace-min and workspace-max must be supplied together")
     if config.workspace_min is not None and config.workspace_max is not None:
@@ -86,11 +93,18 @@ def parse_args(argv: list[str] | None = None) -> JogConfig:
     parser.add_argument("--robot-ip", default="192.168.1.190")
     parser.add_argument("--sdk-root", type=Path, default=ROOT)
     parser.add_argument("--kine-config", type=Path, default=ROOT / "test" / "ccs_m6_40.MvKDCfg")
-    parser.add_argument("--step-mm", type=float, default=2.0)
+    parser.add_argument("--step-mm", type=float, default=5.0)
     parser.add_argument("--vel-ratio", type=int, default=10)
     parser.add_argument("--acc-ratio", type=int, default=10)
     parser.add_argument("--workspace-min", type=lambda text: parse_xyz(text, "--workspace-min"))
     parser.add_argument("--workspace-max", type=lambda text: parse_xyz(text, "--workspace-max"))
+    parser.add_argument(
+        "--workspace-around-current-mm",
+        dest="workspace_radius_mm",
+        type=float,
+        default=None,
+        help="Create a fixed +/- millimetre workspace around the startup feedback TCP (maximum: 150)",
+    )
     parser.add_argument("--execute", action="store_true", help="Send approved planned steps to the physical robot")
     parser.add_argument("--keep-enabled", action="store_true", help="Do not disable the arm on normal exit")
     config = JogConfig(**vars(parser.parse_args(argv)))
@@ -108,6 +122,17 @@ def inside_workspace(
     lower = np.asarray(lower_xyz, dtype=float)
     upper = np.asarray(upper_xyz, dtype=float)
     return bool(point.shape == (3,) and np.all(point >= lower) and np.all(point <= upper))
+
+
+def workspace_bounds_from_center(center_xyz: np.ndarray, radius_mm: float) -> tuple[np.ndarray, np.ndarray]:
+    """Return an axis-aligned fixed workspace centred on one feedback TCP sample."""
+    center = np.asarray(center_xyz, dtype=float)
+    radius = float(radius_mm)
+    if center.shape != (3,) or not np.all(np.isfinite(center)):
+        raise ValueError("workspace center must contain three finite values")
+    if not math.isfinite(radius) or radius <= 0.0:
+        raise ValueError("workspace radius must be positive and finite")
+    return center - radius, center + radius
 
 
 def key_to_delta(key: str, step_mm: float) -> tuple[float, float, float] | None:
@@ -263,10 +288,26 @@ def run_jog_session(
         if not connected:
             raise RuntimeError("failed to connect to the robot")
         robot.check_error_and_clear(dcss)
+        joints, current_pose = _read_feedback_pose(robot, dcss, kine, arm_index)
+        workspace_min = config.workspace_min
+        workspace_max = config.workspace_max
         if config.execute:
             _verify_frame_updates(robot, dcss, arm_index)
+            if config.workspace_radius_mm is not None:
+                workspace_min_array, workspace_max_array = workspace_bounds_from_center(
+                    current_pose[:3], config.workspace_radius_mm
+                )
+                workspace_min = tuple(float(value) for value in workspace_min_array)
+                workspace_max = tuple(float(value) for value in workspace_max_array)
+                print(
+                    "workspace_from_startup_tcp_mm=",
+                    [round(float(value), 3) for value in current_pose[:3]],
+                    "workspace_min_mm=",
+                    [round(float(value), 3) for value in workspace_min],
+                    "workspace_max_mm=",
+                    [round(float(value), 3) for value in workspace_max],
+                )
             _configure_planning_mode(robot, config, dcss, arm_index)
-        joints, current_pose = _read_feedback_pose(robot, dcss, kine, arm_index)
         poses.append(current_pose)
         while True:
             try:
@@ -285,9 +326,9 @@ def run_jog_session(
                 "mode=execute" if config.execute else "mode=dry-run",
             )
             if config.execute:
-                if config.workspace_min is None or config.workspace_max is None:
+                if workspace_min is None or workspace_max is None:
                     raise RuntimeError("execute workspace validation was bypassed")
-                if not inside_workspace(target_pose[:3], config.workspace_min, config.workspace_max):
+                if not inside_workspace(target_pose[:3], workspace_min, workspace_max):
                     raise ValueError(f"requested pose is outside workspace: {target_pose[:3].tolist()}")
                 if not _trajectory_is_idle(robot, dcss, arm_index):
                     raise RuntimeError("selected arm trajectory is not idle")
