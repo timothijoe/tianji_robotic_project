@@ -74,23 +74,39 @@ def main():
 
     # 加载轨迹
     data = np.load(args.npz_path)
-    if "right_joint_positions_rad" not in data:
-        print(f"错误: NPZ 中缺少 'right_joint_positions_rad' 字段，可用 keys: {list(data.keys())}")
+    if "joint_positions_rad" in data:
+        hand_traj_flat = np.asarray(data["joint_positions_rad"], dtype=float)
+    elif "right_joint_positions_rad" in data:
+        hand_traj_flat = np.asarray(data["right_joint_positions_rad"], dtype=float)
+    elif "left_joint_positions_rad" in data:
+        hand_traj_flat = np.asarray(data["left_joint_positions_rad"], dtype=float)
+    else:
+        print(f"错误: NPZ 中缺少 'joint_positions_rad' 字段，可用 keys: {list(data.keys())}")
         return 1
 
-    hand_traj_flat = data["right_joint_positions_rad"]  # (N, 20)
+    if "side" in data:
+        side = str(np.asarray(data["side"]).item())
+    elif any(k.startswith("left_") for k in data.keys()):
+        side = "left"
+    else:
+        side = "right"
+    print(f"轨迹手别: {side}")
+
     hand_traj = hand_traj_flat.reshape(-1, 5, 4)        # (N, 5, 4)
     total_frames = len(hand_traj)
 
     # 时间戳
     if "timestamps_ns" in data:
-        ts = data["timestamps_ns"]
-        traj_durations = np.diff(ts.astype(np.float64)) / 1e9
-        original_dt = traj_durations.mean()
+        ts = data["timestamps_ns"].astype(np.int64)
+        if total_frames > 1:
+            traj_durations = np.diff(ts.astype(np.float64)) / 1e9
+            original_dt = traj_durations.mean()
+        else:
+            original_dt = 0.01
         total_duration = (ts[-1] - ts[0]) / 1e9
     else:
         original_dt = 0.01
-        traj_durations = np.full(total_frames - 1, original_dt)
+        traj_durations = np.full(max(total_frames - 1, 0), original_dt)
         total_duration = (total_frames - 1) * original_dt
 
     play_dt = original_dt / args.speed
