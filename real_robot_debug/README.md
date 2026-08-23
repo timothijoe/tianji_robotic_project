@@ -192,6 +192,65 @@ with a clear workspace, and use a physical E-stop that is reachable by the
 operator. The script is intentionally one-key/one-step; holding a key never
 creates continuous motion.
 
+## Xbox Gamepad Cartesian Jog (Physical Robot)
+
+`gamepad_cartesian_jog.py` is the supervised physical-robot counterpart to
+the MuJoCo gamepad demo. It controls exactly one arm: `right` is SDK `B`
+(the default) and `left` is SDK `A`. RB is a deadman switch: releasing it
+stops new motion requests; Start exits. Left stick controls X/Y and the
+right-stick vertical axis controls Z.
+
+It defaults to dry-run and does not call `setPln_Cart`. A dry-run still
+connects to read the startup TCP and prints the requested increments. For the
+first real test, keep the physical E-stop reachable and use this low-speed,
+small-workspace command:
+
+```bash
+PYTHONPATH=. python3 real_robot_debug/gamepad_cartesian_jog.py \
+  --arm right --execute \
+  --speed-mm-s 10 \
+  --workspace-around-current-mm 50
+```
+
+The implementation caps speed at 10 mm/s and the startup-centered workspace
+at +/-150 mm. It checks feedback refresh, controller state/error, workspace,
+idle trajectory, and Cartesian planning before every sent increment. These
+are software guards only; they do not establish collision clearance.
+
+## Xbox Gamepad Cartesian Jog (Sim-Style FK/IK, Physical Robot)
+
+`gamepad_cartesian_jog_simstyle.py` is the sim-style counterpart: it mirrors
+the MuJoCo `twin_sim/gamepad_teleop.py` control loop on the physical robot.
+Instead of planning one MOVLA segment at a time, it runs a continuous
+50 Hz FK/IK loop — each cycle integrates joystick velocity into a target TCP
+pose, solves joint angles with the SDK IK solver, and sends them directly
+with `set_joint_cmd_pose`. This makes multi-action sequences flexible
+(no waiting for one trajectory to finish before the next).
+
+Defaults match the simulation: 100 mm/s speed, +/-350 mm startup-centred
+workspace, 50 Hz control, 0.15 deadzone. It stays dry-run unless `--execute`
+is supplied, and RB is still the deadman switch (Start exits).
+
+```bash
+PYTHONPATH=. python3 real_robot_debug/gamepad_cartesian_jog_simstyle.py \
+  --arm right --execute \
+  --speed-mm-s 20 \
+  --workspace-around-current-mm 50
+```
+
+Safety notes:
+
+- Speed is rejected above `--max-speed-mm-s` (default 300 mm/s).
+- The workspace box is centred on the startup feedback TCP and is fixed for
+  the session; every request is clipped to it.
+- The SDK IK solver requires joint 4 non-zero in its reference; the script
+  nudges a zero reference to a small non-zero value, and IK failures simply
+  keep the previous pose (no motion commands are sent on failure).
+- The SDK's analytical IK can reject some poses within the workspace box
+  (e.g. near wrist/elbow singularities). The script logs a dry-run warning
+  when this happens; on the real robot it skips the cycle and holds pose.
+- These are software guards only; they do not establish collision clearance.
+
 ## Notes
 
 - SDK arm `A` is the left arm on this robot.

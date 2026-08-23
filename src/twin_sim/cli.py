@@ -19,11 +19,19 @@ from twin_sim.tasks.recorded_hand_guarded_chop import (
 )
 from twin_sim.tasks.pick_place import PickPlaceConfig, PickPlaceTask
 from twin_sim.trajectory import cartesian_trajectory, joint_trajectory
+from twin_sim.gamepad_teleop import TeleopConfig, run_gamepad_teleop
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "gamepad-teleop":
+        run_gamepad_teleop(TeleopConfig(
+            device=args.device, speed_mm_s=args.speed_mm_s,
+            workspace_radius_mm=args.workspace_radius_mm, deadzone=args.deadzone,
+            arm=args.arm,
+        ))
+        return 0
     if args.command == "hand-demo":
         run_hand_demo(
             HandDemoConfig(
@@ -224,6 +232,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="twin-sim")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("view")
+    gamepad = commands.add_parser("gamepad-teleop")
+    gamepad.add_argument("--device", type=Path, default=TeleopConfig().device)
+    gamepad.add_argument("--speed-mm-s", type=float, default=100.0)
+    gamepad.add_argument("--workspace-radius-mm", type=float, default=350.0)
+    gamepad.add_argument("--deadzone", type=float, default=0.15)
+    gamepad.add_argument("--arm", choices=("right", "left"), default="right")
     hand_demo = commands.add_parser("hand-demo")
     hand_demo.add_argument("--headless", action="store_true")
     hand_demo.add_argument("--slow", action="store_true")
