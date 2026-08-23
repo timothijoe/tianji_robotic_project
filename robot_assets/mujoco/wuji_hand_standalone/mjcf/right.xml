@@ -1,12 +1,12 @@
 <mujoco model="wujihand-right-v1.0.2">
   <compiler angle="radian" meshdir="../meshes/right/" balanceinertia="true"/>
 
-  <option jacobian="sparse" 
-          integrator="RK4" 
-          timestep="0.002" 
-          solver="Newton" 
-          iterations="50" 
-          tolerance="1e-10" 
+  <option jacobian="sparse"
+          integrator="RK4"
+          timestep="0.002"
+          solver="Newton"
+          iterations="50"
+          tolerance="1e-10"
           impratio="10"/>
 
   <visual>
@@ -256,18 +256,18 @@
     <exclude body1="palm_link" body2="finger3_link2"/>
     <exclude body1="palm_link" body2="finger4_link2"/>
     <exclude body1="palm_link" body2="finger5_link2"/>
-    
+
     <!-- exclude adjacent links of Finger -->
     <exclude body1="finger1_link1" body2="finger1_link2"/>
     <exclude body1="finger1_link2" body2="finger1_link3"/>
     <exclude body1="finger1_link3" body2="finger1_link4"/>
     <!-- <exclude body1="finger1_link4" body2="finger1_tip_link"/> -->
-  
+
     <exclude body1="finger2_link1" body2="finger2_link2"/>
     <exclude body1="finger2_link2" body2="finger2_link3"/>
     <exclude body1="finger2_link3" body2="finger2_link4"/>
     <!-- <exclude body1="finger2_link4" body2="finger2_tip_link"/> -->
-    
+
     <exclude body1="finger3_link1" body2="finger3_link2"/>
     <exclude body1="finger3_link2" body2="finger3_link3"/>
     <exclude body1="finger3_link3" body2="finger3_link4"/>
@@ -277,7 +277,7 @@
     <exclude body1="finger4_link2" body2="finger4_link3"/>
     <exclude body1="finger4_link3" body2="finger4_link4"/>
     <!-- <exclude body1="finger4_link4" body2="finger4_tip_link"/> -->
-    
+
     <exclude body1="finger5_link1" body2="finger5_link2"/>
     <exclude body1="finger5_link2" body2="finger5_link3"/>
     <exclude body1="finger5_link3" body2="finger5_link4"/>
