@@ -8,6 +8,11 @@ architecture (``twin_sim/gamepad_teleop.py``).  Each control cycle:
   2. SDK IK → target joint angles (deg)
   3. Sends joint command via ``set_joint_cmd_pose``
 
+Axis mapping (base frame, controller-relative):
+  left-stick up/down → base X   (up = +X)
+  left-stick left/right → base Z (right = +Z, vertical)
+  right-stick up/down → base Y  (up = +Y)
+
 This avoids the inflexibility of MOVLA single-segment planning: the caller
 can freely sequence or interleave motions without waiting for a trajectory
 to complete.  The control loop, velocity scale, and workspace defaults are
@@ -80,6 +85,8 @@ class SimStyleJogConfig:
         Path to the robot kinematics configuration file.
     max_speed_mm_s : float
         Absolute upper bound for speed-mm-s (default 300).
+    orientation_rate_dps : float
+        Wrist orientation speed in degrees/second (default 30).
     """
 
     arm: Literal["right", "left"] = "right"
@@ -96,6 +103,7 @@ class SimStyleJogConfig:
     sdk_root: Path = ROOT
     kine_config: Path = ROOT / "test" / "ccs_m6_40.MvKDCfg"
     max_speed_mm_s: float = 300.0
+    orientation_rate_dps: float = 30.0
 
 
 def validate_config(config: SimStyleJogConfig) -> None:
@@ -115,6 +123,8 @@ def validate_config(config: SimStyleJogConfig) -> None:
         raise ValueError("control-period-s must be in [0.01, 0.1]")
     if not 0 <= config.vel_ratio <= 100 or not 0 <= config.acc_ratio <= 100:
         raise ValueError("vel-ratio and acc-ratio must be in [0, 100]")
+    if not math.isfinite(config.orientation_rate_dps) or not 0.0 < config.orientation_rate_dps <= 90.0:
+        raise ValueError("orientation-rate-dps must be in (0, 90]")
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +409,8 @@ def run_simstyle_jog(
         current_xyzabc = list(fb_xyzabc)
 
         print(f"Sim-style gamepad jog: {config.arm} arm (SDK {sdk_arm}); execute={config.execute}")
-        print("Hold RB to move; left stick = X/Y, right-stick vertical = Z; Start exits.")
+        print("Hold RB to move; left-stick up/down = X, left-stick left/right = Z, right-stick up/down = Y; Start exits.")
+        print("Right-stick left/right = yaw, D-pad up/down = pitch, D-pad left/right = roll (deg/s).")
         print(
             f"startup_tcp_mm=({fb_xyzabc[0]:.1f}, {fb_xyzabc[1]:.1f}, {fb_xyzabc[2]:.1f})  "
             f"workspace_radius_mm={config.workspace_radius_mm}"
@@ -425,27 +436,47 @@ def run_simstyle_jog(
                 time.sleep(0.001)
                 continue
 
-            # Compute Cartesian velocity (mm/s) from joystick axes
-            vx = shaped_axis(joystick.axes.get(0, 0), config.deadzone) * config.speed_mm_s
-            vy = -shaped_axis(joystick.axes.get(1, 0), config.deadzone) * config.speed_mm_s
-            vz = -shaped_axis(joystick.axes.get(4, 0), config.deadzone) * config.speed_mm_s
+            # Compute Cartesian velocity (mm/s) from joystick axes.
+            # The user-specified mapping overrides the simulation default:
+            #   left stick  Y (axis 1, push-up +) → base X
+            #   left stick  X (axis 0, push-right +) → base Z (vertical)
+            #   right stick Y (axis 4, push-up +) → base Y
+            vx = -shaped_axis(joystick.axes.get(1, 0), config.deadzone) * config.speed_mm_s
+            vy = -shaped_axis(joystick.axes.get(4, 0), config.deadzone) * config.speed_mm_s
+            vz = shaped_axis(joystick.axes.get(0, 0), config.deadzone) * config.speed_mm_s
 
-            if abs(vx) < 0.1 and abs(vy) < 0.1 and abs(vz) < 0.1:
+            # Orientation rates (deg/s): right stick X → yaw (A),
+            # D-pad up/down → pitch (B), D-pad left/right → roll (C).
+            yaw_rate = shaped_axis(joystick.axes.get(3, 0), config.deadzone) * config.orientation_rate_dps
+            pitch_rate = -shaped_axis(joystick.axes.get(7, 0), config.deadzone) * config.orientation_rate_dps
+            roll_rate = -shaped_axis(joystick.axes.get(6, 0), config.deadzone) * config.orientation_rate_dps
+
+            # Skip if no significant motion in either translation or orientation
+            dt = config.control_period_s
+            if (abs(vx) < 0.1 and abs(vy) < 0.1 and abs(vz) < 0.1
+                    and abs(yaw_rate * dt) < 0.01 and abs(pitch_rate * dt) < 0.01
+                    and abs(roll_rate * dt) < 0.01):
                 time.sleep(0.001)
                 continue
 
-            # Integrate velocity → target position (mm), keep orientation
-            dt = config.control_period_s
+            # Integrate velocity → target position (mm), clip to workspace
             tx = float(np.clip(current_xyzabc[0] + vx * dt, lower[0], upper[0]))
             ty = float(np.clip(current_xyzabc[1] + vy * dt, lower[1], upper[1]))
             tz = float(np.clip(current_xyzabc[2] + vz * dt, lower[2], upper[2]))
-            target_xyzabc = [tx, ty, tz] + list(current_xyzabc[3:])
+            # Integrate orientation (small-angle approximation: direct addition to Euler angles)
+            ta = current_xyzabc[3] + yaw_rate * dt
+            tb = current_xyzabc[4] + pitch_rate * dt
+            tc = current_xyzabc[5] + roll_rate * dt
+            target_xyzabc = [tx, ty, tz, ta, tb, tc]
 
-            # Skip sub-millimetre requests
+            # Skip sub-millimetre / sub-degree requests
             dx = target_xyzabc[0] - current_xyzabc[0]
             dy = target_xyzabc[1] - current_xyzabc[1]
             dz = target_xyzabc[2] - current_xyzabc[2]
-            if abs(dx) < 0.01 and abs(dy) < 0.01 and abs(dz) < 0.01:
+            if (abs(dx) < 0.01 and abs(dy) < 0.01 and abs(dz) < 0.01
+                    and abs(ta - current_xyzabc[3]) < 0.01
+                    and abs(tb - current_xyzabc[4]) < 0.01
+                    and abs(tc - current_xyzabc[5]) < 0.01):
                 time.sleep(0.001)
                 continue
 
@@ -507,6 +538,7 @@ def parse_args(argv: list[str] | None = None) -> SimStyleJogConfig:
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--keep-enabled", action="store_true")
     parser.add_argument("--max-speed-mm-s", type=float, default=300.0)
+    parser.add_argument("--orientation-rate-dps", type=float, default=30.0)
     config = SimStyleJogConfig(**vars(parser.parse_args(argv)))
     validate_config(config)
     return config
