@@ -30,6 +30,20 @@ def test_simulation_parser_rejects_hardware_options(tmp_path):
         cli.main(["sim", "wuji-replay", str(tmp_path / "x.mcap"), "--arm"])
 
 
+def test_angle_bar_routes_with_default_left_hand(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "_run_wuji_angle_bar", lambda args: calls.append(args) or 0)
+    assert cli.main(["sim", "wuji-angle-bar"]) == 0
+    assert calls[0].hand == "left"
+
+
+def test_angle_bar_accepts_right_hand(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "_run_wuji_angle_bar", lambda args: calls.append(args) or 0)
+    assert cli.main(["sim", "wuji-angle-bar", "--hand", "right"]) == 0
+    assert calls[0].hand == "right"
+
+
 def test_table_retreat_routes_as_an_independent_simulation(monkeypatch, tmp_path):
     calls=[]
     monkeypatch.setattr(cli,"_run_wuji_table_retreat",lambda args: calls.append(args) or 0)

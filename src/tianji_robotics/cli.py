@@ -40,6 +40,13 @@ def _parser() -> argparse.ArgumentParser:
     retreat.add_argument("--report", type=Path)
     retreat.set_defaults(handler=_run_wuji_table_retreat)
 
+    angle_bar = sim_commands.add_parser(
+        "wuji-angle-bar",
+        help="locally control one simulated Wuji hand with angle bars",
+    )
+    angle_bar.add_argument("--hand", choices=("left", "right"), default="left")
+    angle_bar.set_defaults(handler=_run_wuji_angle_bar)
+
     hardware = domains.add_parser("hardware", help="guarded real-device tools")
     vendors = hardware.add_subparsers(dest="hardware_vendor", required=True)
     wuji = vendors.add_parser("wuji-sdk", help="Wuji SDK boundary")
@@ -136,6 +143,13 @@ def _run_wuji_table_retreat(args: argparse.Namespace) -> int:
             print("missing Wuji offline dependency; install with 'pip install -e .[wuji-offline]'",file=sys.stderr)
             return 2
         raise
+
+
+def _run_wuji_angle_bar(args: argparse.Namespace) -> int:
+    """Launch the local MuJoCo-only Wuji angle-bar panel lazily."""
+    from tianji_robotics.simulation.local_angle_bar import run_local_angle_bar
+
+    return run_local_angle_bar(args.hand)
 
 
 def main(argv: list[str] | None = None) -> int:
