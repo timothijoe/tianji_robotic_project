@@ -36,3 +36,14 @@ Wuji 灵巧手。它只改变仿真模型，不连接 ROS、USB 或真实手 SDK
 此命令是 MuJoCo-only 的离线仿真工具。它不会启动 ROS，不发布或订阅 ROS 话题，
 不会打开 USB，也不会导入或调用真实 Wuji Hand SDK。关闭窗口会关闭仿真后端；只有
 明确设计后续硬件适配时，才应另行实现真机输出端。
+
+## 生命周期与步进
+
+MuJoCo 后端的每次 `step()` 只推进一个模型 timestep，不自行等待；Tk 面板按该
+timestep 重新调度下一次步进，因此它是唯一的实时节拍拥有者。关闭 MuJoCo Viewer
+或关闭面板都会执行同一套幂等清理：关闭后端并退出、销毁 Tk 主循环。可运行下列
+无窗口回归测试验证左右手切换、窗口关闭和步进调度契约：
+
+```bash
+python3 -m pytest tests/simulation/test_local_angle_bar.py -q
+```

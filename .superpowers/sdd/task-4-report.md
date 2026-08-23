@@ -1,84 +1,153 @@
-# Task 4 Verification Report
+# Task 4 Report: Meaningful Guarded-Chop Trails
 
-## Result
+## Delivered
 
-`DONE_WITH_CONCERNS`
+- Replaced the per-sample blue/cyan/purple/yellow spheres with capsule
+  segments: a static blue planned blade trail and sampled cyan actual-blade
+  and purple actual-guard trails.
+- Added `GuardedChopTrace.set_plan()` and five compact blue vertical cut marks
+  (`1.2 mm` radius, `10 mm` total length).
+- Removed the yellow visual guard target and its deque. `run_guarded_chop()`
+  now sends the five planned blade contact points once after preflight, while
+  `_observe_sample()` appends only actual blade and guard positions.
+- Preserved `marker_stride` downsampling, bounded `user_scn.maxgeom` writes,
+  cumulative minimum-distance reporting, overlay throttling, and abort text.
+- Reused `viewer_trail._position()` and `_init_sphere_geom()` for validation
+  and base Viewer geometry initialization, then used MuJoCo's
+  `mjv_connector()` for capsule geometry.
 
-The relevant automated suite passes under the available system Python. The plan's
-`.venv` interpreter and console script are absent in this worktree, so the exact
-`.venv` command could not be run. Both local GUI entry points stayed alive for the
-8-second smoke window with `DISPLAY=:1`; interactive slider/reset/switch behavior
-was not manually observable or exercised in this non-interactive verification run.
+## TDD evidence
 
-## Step 1: Automated regression
-
-Requested command:
+RED was observed after changing the visualization test first:
 
 ```text
-.venv/bin/python -m pytest tests/simulation/test_local_angle_bar.py tests/simulation/test_wuji_hand_only_backend.py tests/cli/test_tianji_robot_cli.py tests/architecture/test_package_boundaries.py -v
+.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py -q
+F.F
+AttributeError: 'GuardedChopTrace' object has no attribute 'set_plan'
+TypeError: GuardedChopTrace.append() missing ... 'planned_knife' and 'guard_target'
+2 failed, 1 passed in 0.20s
 ```
 
-Result: could not run because `.venv/bin/python` does not exist (`No such file or directory`).
-`.venv/bin/tianji-robot` is also absent.
-
-Fallback command using the available interpreter:
+GREEN after the minimal capsule/trail implementation:
 
 ```text
-python3 -m pytest tests/simulation/test_local_angle_bar.py tests/simulation/test_wuji_hand_only_backend.py tests/cli/test_tianji_robot_cli.py tests/architecture/test_package_boundaries.py -v
+.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py -q
+3 passed in 0.16s
 ```
 
-Result: **27 passed in 0.45s** under `/usr/bin/python3` (Python 3.12.3), with no
-ROS, hardware SDK, or `wujihandpy` imports required.
-
-## Step 2/3: GUI smoke attempts
-
-Environment reported `DISPLAY=:1`, `XDG_SESSION_TYPE=x11`, and no
-`WAYLAND_DISPLAY`. Since the package is not installed into a virtualenv, the
-entry point was exercised from source:
+## Verification
 
 ```text
-PYTHONPATH=src timeout 8s python3 -c \\
-  'from tianji_robotics.simulation.local_angle_bar import run_local_angle_bar; raise SystemExit(run_local_angle_bar("left"))'
-```
+.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py \
+  tests/simulation/test_guarded_chop_integration.py -q -s
+7 passed in 58.13s
 
-Exit status: `124` (timeout), with no traceback/output. The process remained alive
-for the full 8 seconds, consistent with the Tk/MuJoCo windows launching.
+GuardedChopTrace-injected headless run_guarded_chop smoke check:
+trace integration: 5 3000 3000
 
-The equivalent right-hand smoke attempt also remained alive for the full timeout:
+Real mujoco.MjvGeom capsule smoke check:
+real MjvGeom capsule initialized: [0.0012..., 0.0012..., 0.004999...]
 
-```text
-PYTHONPATH=src timeout 8s python3 -c \\
-  'from tianji_robotics.simulation.local_angle_bar import run_local_angle_bar; raise SystemExit(run_local_angle_bar("right"))'
-```
-
-Exit status: `124`; no traceback/output. I could not perform the required visual
-slider manipulation, Reset, or left/right switching acceptance checks through the
-available non-interactive shell, so those behaviors remain unverified here.
-
-## Step 4: Diff/status inspection
-
-```text
-git diff --check HEAD~3..HEAD
-```
-
-Result: failed on trailing whitespace in the vendored feature asset
-`robot_assets/mujoco/wuji_hand_standalone/mjcf/right.xml` (lines 4-9, 259, 265,
-270, and 280). `git status --short` is clean. No files were changed by this
-verification task.
-
-## Step 5: Documentation correction
-
-No acceptance-only documentation correction was required or made; no commit was
-created.
-
-## Task 4 whitespace verification follow-up
-
-Removed only trailing whitespace from `robot_assets/mujoco/wuji_hand_standalone/mjcf/right.xml`; XML structure and semantics were unchanged.
-
-```text
-git diff --check HEAD~3..HEAD
+.venv/bin/python -m compileall -q <modified Python files>
 exit 0
 
-python3 -m pytest tests/simulation/test_local_angle_bar.py -q
-5 passed in 0.33s
+git diff --check
+exit 0
 ```
+
+## Commit
+
+- `6e4a61d feat: draw meaningful guarded chop trails`
+
+## Self-review and concerns
+
+- Confirmed there is no `guard_target_color`, yellow marker draw, large sphere
+  marker, or planned-target computation in the runtime sample path.
+- Confirmed the real MuJoCo connector produces a capsule with the requested
+  radius and half-length; the fake-Viewer fallback is covered by unit tests.
+- The passive Viewer's custom scene has a finite geometry budget. Rendering
+  deliberately stops when `user_scn.maxgeom` is reached, matching the bounded
+  behavior requested; very long viewer sessions can therefore show a
+  truncated tail rather than overwrite existing custom geometry.
+- No action-state-machine, CLI, or physical-robot code was changed.
+
+## Important review fixes
+
+The review reproduced two root causes in commit `6e4a61d`:
+
+```text
+Low-budget diagnostic (user_scn.maxgeom=4):
+ngeom: 4
+half lengths: [0.01, 0.01, 0.01, 0.01]
+
+append signature:
+(self, *, actual_knife, actual_guard, ..., planned_knife=None)
+```
+
+The first four greedy geometry writes were planned-trail segments, so no cut
+mark survived a four-slot budget. The public append signature also explicitly
+kept and silently accepted the removed planned-path argument.
+
+### Review-fix TDD evidence
+
+Budget-priority RED, before reordering plan geometry:
+
+```text
+.venv/bin/pytest \
+  tests/simulation/test_guarded_chop_visualization.py::\
+test_plan_uses_every_limited_scene_slot_for_cut_marks_first -q
+FAILED: geom.size[0] was 0.0015, expected cut_mark_radius_m 0.0012
+1 failed in 0.18s
+```
+
+Budget-priority GREEN after drawing the five cut marks before optional plan
+segments:
+
+```text
+1 passed in 0.16s
+```
+
+Removed-argument RED, before deleting the compatibility parameter:
+
+```text
+.venv/bin/pytest \
+  tests/simulation/test_guarded_chop_visualization.py::\
+test_append_rejects_removed_planned_knife_argument -q
+Failed: DID NOT RAISE <class 'TypeError'>
+1 failed in 0.18s
+```
+
+Removed-argument GREEN after deleting `planned_knife` from the public
+signature and implementation:
+
+```text
+1 passed in 0.15s
+```
+
+### Review-fix verification
+
+```text
+.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py -q
+5 passed in 0.17s
+
+.venv/bin/pytest tests/simulation/test_guarded_chop_visualization.py \
+  tests/simulation/test_guarded_chop_integration.py -q -s
+9 passed in 58.12s
+
+inspect.signature(GuardedChopTrace.append)
+(self, *, actual_knife: Sequence[float], actual_guard: Sequence[float],
+ phase: str, cut_index: int, minimum_distance_m: float,
+ cut_allowed: bool) -> None
+
+.venv/bin/python -m compileall -q \
+  src/twin_sim/guarded_chop_visualization.py \
+  tests/simulation/test_guarded_chop_visualization.py
+exit 0
+
+git diff --cached --check
+exit 0
+```
+
+Review-fix commit:
+
+- `345dfe6 fix: prioritize guarded chop cut marks`

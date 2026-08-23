@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 import tkinter as tk
 from collections.abc import Callable
 
@@ -14,6 +13,7 @@ from tianji_robotics.simulation.paths import official_wuji_hand_mjcf
 
 _SIDES = frozenset({"left", "right"})
 _FINGER_LABELS = ("Thumb", "Index", "Middle", "Ring", "Little")
+PANEL_SAFETY_TEXT = "MuJoCo-only simulation — does not command hardware."
 OPEN_TARGET_RAD = {
     # Explicit per-side poses, kept separate so a future handed model can
     # change one pose without silently changing the other.
@@ -76,6 +76,12 @@ class LocalWujiHand:
         """Whether this backend owns a passive Viewer that remains open."""
         return self._viewer is not None and self._viewer.is_running()
 
+    @property
+    def timestep_s(self) -> float:
+        """Return the duration advanced by one :meth:`step` call."""
+        self._require_open()
+        return float(self.model.opt.timestep)
+
     def command(self, target_rad: np.ndarray) -> None:
         self._require_open()
         target = np.asarray(target_rad, dtype=float)
@@ -95,12 +101,11 @@ class LocalWujiHand:
         mujoco.mj_step(self.model, self.data)
         if self._viewer is not None and self._viewer.is_running():
             self._viewer.sync()
-            time.sleep(float(self.model.opt.timestep))
 
     def close(self) -> None:
         if self._closed:
             return
-        if self._viewer is not None:
+        if self._viewer is not None and self._viewer.is_running():
             self._viewer.close()
         self._closed = True
 
@@ -121,6 +126,7 @@ class WujiAngleBarPanel:
         self._root = root
         self._backend_factory = backend_factory
         self._backend = backend_factory(initial_side, viewer=True)
+        self._closed = False
         self._side = tk.StringVar(value=initial_side)
         self._targets = [tk.DoubleVar(value=value) for value in self._backend.target_rad]
         self._slider_groups: tk.Frame | None = None
@@ -143,6 +149,11 @@ class WujiAngleBarPanel:
                 command=lambda selected=side: self.switch_side(selected),
             ).pack(side=tk.LEFT)
         tk.Button(controls, text="Reset open hand", command=self.reset_open).pack(side=tk.RIGHT)
+        tk.Label(
+            controls,
+            text=PANEL_SAFETY_TEXT,
+            anchor=tk.W,
+        ).pack(fill=tk.X, side=tk.BOTTOM, pady=(6, 0))
         self._slider_host = tk.Frame(self._root, padx=10, pady=10)
         self._slider_host.pack(fill=tk.BOTH, expand=True)
         self._rebuild_slider_groups()
@@ -195,25 +206,60 @@ class WujiAngleBarPanel:
 
     def switch_side(self, side: str) -> None:
         old_backend = self._backend
-        self._backend = self._backend_factory(side, viewer=True)
-        old_backend.close()
-        self._side.set(side)
-        self._targets = [tk.DoubleVar(value=value) for value in self._backend.target_rad]
-        self._rebuild_slider_groups()
+        self._backend = None
+        try:
+            if old_backend is not None:
+                old_backend.close()
+            self._backend = self._backend_factory(side, viewer=True)
+            self._side.set(side)
+            self._targets = [tk.DoubleVar(value=value) for value in self._backend.target_rad]
+            self._rebuild_slider_groups()
+        except Exception:
+            self.close()
+            raise
 
     def _tick(self) -> None:
         try:
-            if not self._root.winfo_exists():
+            if self._closed:
                 return
-            self._backend.step()
-            if self._backend.viewer_is_running:
-                self._root.after(10, self._tick)
+            if not self._root.winfo_exists():
+                self.close()
+                return
+            backend = self._backend
+            if backend is None:
+                self.close()
+                return
+            backend.step()
+            if not backend.viewer_is_running:
+                self.close()
+                return
+            self._root.after(self._tick_interval_ms(backend), self._tick)
         except tk.TclError:
-            return
+            self.close()
 
     def close(self) -> None:
-        self._backend.close()
-        self._root.destroy()
+        if self._closed:
+            return
+        self._closed = True
+        backend = self._backend
+        self._backend = None
+        try:
+            if backend is not None:
+                backend.close()
+        finally:
+            try:
+                self._root.quit()
+            except tk.TclError:
+                pass
+            try:
+                self._root.destroy()
+            except tk.TclError:
+                pass
+
+    @staticmethod
+    def _tick_interval_ms(backend: LocalWujiHand) -> int:
+        """Let Tk own real-time pacing for one-model-timestep backend steps."""
+        return max(1, int(round(backend.timestep_s * 1000)))
 
     @staticmethod
     def _format_radians(value: float) -> str:
