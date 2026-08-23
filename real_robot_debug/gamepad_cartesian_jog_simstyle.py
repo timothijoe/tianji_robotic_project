@@ -13,6 +13,11 @@ Axis mapping (base frame, controller-relative):
   left-stick left/right → base Z (right = +Z, vertical)
   right-stick up/down → base Y  (up = +Y)
 
+Wrist orientation (TCP / tool frame):
+  right-stick left/right → yaw (rotate about tool Z)
+  D-pad up/down → pitch (rotate about tool Y)
+  D-pad left/right → roll (rotate about tool X)
+
 This avoids the inflexibility of MOVLA single-segment planning: the caller
 can freely sequence or interleave motions without waiting for a trajectory
 to complete.  The control loop, velocity scale, and workspace defaults are
@@ -155,6 +160,41 @@ def shaped_axis(value: int, deadzone: float) -> float:
 def _arm_index(sdk_arm: str) -> int:
     """Map SDK arm label to index (0 = A, 1 = B)."""
     return 0 if sdk_arm == "A" else 1
+
+
+def _rot_x(angle_rad: float) -> np.ndarray:
+    """3x3 rotation matrix about the X axis (roll)."""
+    c, s = np.cos(angle_rad), np.sin(angle_rad)
+    return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])
+
+
+def _rot_y(angle_rad: float) -> np.ndarray:
+    """3x3 rotation matrix about the Y axis (pitch)."""
+    c, s = np.cos(angle_rad), np.sin(angle_rad)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
+
+
+def _rot_z(angle_rad: float) -> np.ndarray:
+    """3x3 rotation matrix about the Z axis (yaw)."""
+    c, s = np.cos(angle_rad), np.sin(angle_rad)
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+def _mat4x4_to_xyzabc_euler(mat: np.ndarray) -> list[float]:
+    """Convert a 4x4 homogeneous matrix to [x, y, z, a, b, c] (mm, deg).
+
+    Uses ZYX (intrinsic) Euler angle convention: a=yaw(Z), b=pitch(Y), c=roll(X).
+    This matches the SDK's own ``mat4x4_to_xyzabc`` convention.
+    """
+    x, y, z = mat[0, 3], mat[1, 3], mat[2, 3]
+    R = mat[:3, :3]
+    # ZYX intrinsic: a = atan2(R21, R11), b = -asin(R31), c = atan2(R32, R33)
+    a = float(np.rad2deg(np.arctan2(R[1, 0], R[0, 0])))
+    sin_b = -R[2, 0]
+    sin_b_clipped = float(np.clip(sin_b, -1.0, 1.0))
+    b = float(np.rad2deg(np.arcsin(sin_b_clipped)))
+    c = float(np.rad2deg(np.arctan2(R[2, 1], R[2, 2])))
+    return [x, y, z, a, b, c]
 
 
 class LinuxJoystick:
@@ -333,10 +373,15 @@ def _configure_position_mode(
 
 
 def _is_state_valid(robot, dcss, arm_index: int) -> bool:
-    """Check that the arm is in state=1 (position mode) with no errors."""
+    """Check that the arm is in a valid state (err_code==0).
+
+    The arm may start in either state=1 (position mode) or state=3
+    (torque/impedance mode).  ``_configure_position_mode`` handles the
+    transition to state=1.
+    """
     data = robot.subscribe(dcss)
     state = data["states"][arm_index]
-    return state.get("cur_state") == 1 and state.get("err_code") == 0
+    return state.get("err_code") == 0
 
 
 def _shutdown(robot, config: SimStyleJogConfig, connected: bool) -> None:
@@ -463,20 +508,33 @@ def run_simstyle_jog(
             tx = float(np.clip(current_xyzabc[0] + vx * dt, lower[0], upper[0]))
             ty = float(np.clip(current_xyzabc[1] + vy * dt, lower[1], upper[1]))
             tz = float(np.clip(current_xyzabc[2] + vz * dt, lower[2], upper[2]))
-            # Integrate orientation (small-angle approximation: direct addition to Euler angles)
-            ta = current_xyzabc[3] + yaw_rate * dt
-            tb = current_xyzabc[4] + pitch_rate * dt
-            tc = current_xyzabc[5] + roll_rate * dt
-            target_xyzabc = [tx, ty, tz, ta, tb, tc]
+
+            # Integrate orientation about the TCP (tool) frame: apply small-angle
+            # rotations in the current tool axes (right-multiply the rotation):
+            #   target_R = current_R @ Rz(yaw) @ Ry(pitch) @ Rx(roll)
+            # This is the TCP-frame convention (tool-relative yaw/pitch/roll).
+            current_mat = kine.xyzabc_to_mat4x4(current_xyzabc)
+            if not current_mat:
+                current_mat = np.eye(4)
+            current_mat = np.asarray(current_mat, dtype=float)
+            dR = (
+                _rot_z(np.deg2rad(yaw_rate * dt))
+                @ _rot_y(np.deg2rad(pitch_rate * dt))
+                @ _rot_x(np.deg2rad(roll_rate * dt))
+            )
+            target_R = np.asarray(current_mat[:3, :3], dtype=float) @ dR
+            target_mat = np.asarray(current_mat, dtype=float).copy()
+            target_mat[:3, :3] = target_R
+            target_mat[:3, 3] = [tx, ty, tz]
+            target_xyzabc = [float(v) for v in _mat4x4_to_xyzabc_euler(target_mat)]
 
             # Skip sub-millimetre / sub-degree requests
-            dx = target_xyzabc[0] - current_xyzabc[0]
-            dy = target_xyzabc[1] - current_xyzabc[1]
-            dz = target_xyzabc[2] - current_xyzabc[2]
-            if (abs(dx) < 0.01 and abs(dy) < 0.01 and abs(dz) < 0.01
-                    and abs(ta - current_xyzabc[3]) < 0.01
-                    and abs(tb - current_xyzabc[4]) < 0.01
-                    and abs(tc - current_xyzabc[5]) < 0.01):
+            if (abs(target_xyzabc[0] - current_xyzabc[0]) < 0.01
+                    and abs(target_xyzabc[1] - current_xyzabc[1]) < 0.01
+                    and abs(target_xyzabc[2] - current_xyzabc[2]) < 0.01
+                    and abs(target_xyzabc[3] - current_xyzabc[3]) < 0.01
+                    and abs(target_xyzabc[4] - current_xyzabc[4]) < 0.01
+                    and abs(target_xyzabc[5] - current_xyzabc[5]) < 0.01):
                 time.sleep(0.001)
                 continue
 

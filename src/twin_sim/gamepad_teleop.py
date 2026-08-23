@@ -5,10 +5,10 @@ Axis mapping (base frame, controller-relative):
   left-stick left/right → base Z (right = +Z, vertical)
   right-stick up/down → base Y  (up = +Y)
 
-Wrist orientation:
-  right-stick left/right → yaw (Z rotation)
-  D-pad up/down → pitch (Y rotation)
-  D-pad left/right → roll (X rotation)
+Wrist orientation (TCP / tool frame):
+  right-stick left/right → yaw (rotate about tool Z)
+  D-pad up/down → pitch (rotate about tool Y)
+  D-pad left/right → roll (rotate about tool X)
 """
 
 from __future__ import annotations
@@ -118,7 +118,7 @@ def run_gamepad_teleop(config: TeleopConfig = TeleopConfig()) -> None:
             f"Gamepad teleop ({config.arm} arm): hold RB to move; "
             "left-stick up/down=X, left-stick left/right=Z, right-stick up/down=Y; Start exits."
         )
-        print("Right-stick left/right=yaw, D-pad up/down=pitch, D-pad left/right=roll (deg/s).")
+        print("Right-stick left/right=yaw, D-pad up/down=pitch, D-pad left/right=roll (TCP frame, deg/s).")
         print("startup_tcp_m=", target[:3, 3].round(4).tolist(), "workspace_radius_mm=", config.workspace_radius_mm)
         while robot._viewer is not None and robot._viewer.is_running():
             joystick.poll()
@@ -142,7 +142,7 @@ def run_gamepad_teleop(config: TeleopConfig = TeleopConfig()) -> None:
                 candidate[:3, 3] = np.clip(
                     candidate[:3, 3] + velocity * config.control_dt_s, lower, upper
                 )
-                # Orientation: base-frame small-angle rotation (pre-multiply)
+                # Orientation: TCP-frame small-angle rotation (right-multiply)
                 if abs(yaw_rate) > 1e-6 or abs(pitch_rate) > 1e-6 or abs(roll_rate) > 1e-6:
                     R = candidate[:3, :3]
                     dR = (
@@ -150,7 +150,7 @@ def run_gamepad_teleop(config: TeleopConfig = TeleopConfig()) -> None:
                         @ _rot_y(pitch_rate * config.control_dt_s)
                         @ _rot_x(roll_rate * config.control_dt_s)
                     )
-                    candidate[:3, :3] = dR @ R
+                    candidate[:3, :3] = R @ dR  # right-multiply = TCP frame
 
                 solved = kinematics.ik(candidate, joints)
                 if solved.success:
