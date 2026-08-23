@@ -526,7 +526,14 @@ def run_simstyle_jog(
             target_mat = np.asarray(current_mat, dtype=float).copy()
             target_mat[:3, :3] = target_R
             target_mat[:3, 3] = [tx, ty, tz]
-            target_xyzabc = [float(v) for v in _mat4x4_to_xyzabc_euler(target_mat)]
+            # Use the SDK's own mat4x4_to_xyzabc to ensure the Euler angle
+            # convention matches what xyzabc_to_mat4x4 uses downstream.
+            xyzabc_result = kine.mat4x4_to_xyzabc(target_mat.tolist())
+            if not xyzabc_result:
+                print("mat4x4_to_xyzabc failed, keeping previous pose")
+                time.sleep(config.control_period_s)
+                continue
+            target_xyzabc = [float(v) for v in xyzabc_result]
 
             # Skip sub-millimetre / sub-degree requests
             if (abs(target_xyzabc[0] - current_xyzabc[0]) < 0.01
